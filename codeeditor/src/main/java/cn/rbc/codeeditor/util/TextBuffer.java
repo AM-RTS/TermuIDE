@@ -347,15 +347,14 @@ public class TextBuffer implements CharSequence
 
         @Override
         public String toString() {
-            if (end <= off) return "";
-            final boolean flag = buf.charAt(end-1) == Language.EOF;
-            String s;
-            synchronized (this) {
-                if (flag) end--;
-                s = new StringBuilder(this).toString();
-                if (flag) end++;
+            synchronized (buf) {
+                int count = end - off;
+                if (count <= 0) return "";
+                if (end == buf.length() && buf.charAt(end - 1) == Language.EOF) count--;
+                char[] text = new char[count];
+                for (int i = 0; i < count; i++) text[i] = buf.charAt(off + i);
+                return new String(text);
             }
-            return s;
         }
     }
 	/**
@@ -390,6 +389,29 @@ public class TextBuffer implements CharSequence
 	public boolean isInMarkGap(int l) {
 		return _marks.isInGap(l);
 	}
+
+    private int[] markOffsets() {
+        if (_marks.size() == 0) return null;
+        TextPositions positions = new TextPositions(toString());
+        int[] offsets = new int[_marks.size()];
+        for (int i = 0; i < offsets.length; i++) offsets[i] = positions.offset(_marks.get(i) - 1, 0);
+        return offsets;
+    }
+
+    private void moveMarks(int[] offsets, int start, int removed, int inserted) {
+        if (offsets == null) return;
+        TextPositions positions = new TextPositions(toString());
+        TreeSet<Integer> lines = new TreeSet<>();
+        for (int offset : offsets) {
+            if (offset > start && offset < start + removed) continue;
+            if (offset >= start + removed) offset += inserted - removed;
+            else if (offset >= start) offset = start;
+            lines.add(positions.position(offset)[0] + 1);
+        }
+        int[] marks = new int[lines.size()]; int index = 0;
+        for (int line : lines) marks[index++] = line;
+        _marks.setData(marks);
+    }
     public void insert(char[] c, int offset, long ts, boolean undoable) {
         insert(c, 0, c.length, offset, ts, undoable);
     }
@@ -400,6 +422,8 @@ public class TextBuffer implements CharSequence
 	 */
 	public synchronized void insert(char[] c, int start, int count, int charOffset, long timestamp,
 			boolean undoable){
+        int[] marks = markOffsets();
+        int insertedCount = count;
 		if (undoable) {
             if (mVer > _undoStack._top) mVer = -1;
 			_undoStack.captureInsert(charOffset, count, timestamp);
@@ -429,8 +453,7 @@ public class TextBuffer implements CharSequence
 			_contents[_gapStartIndex++] = c[i];
 		}
 		_lineCount += lines;
-		if (lines != 0)
-			_marks.shift(findLineNumber(charOffset)+1, lines);
+        moveMarks(marks, charOffset, 0, insertedCount);
 		_cache.invalidateCache(charOffset);
 	}
 
@@ -442,6 +465,7 @@ public class TextBuffer implements CharSequence
 	 */
 	public synchronized void delete(int charOffset, int totalChars, long timestamp,
 			boolean undoable){
+        int[] marks = markOffsets();
 		if (undoable) {
             if (mVer > _undoStack._top) mVer = -1;
 			_undoStack.captureDelete(charOffset, totalChars, timestamp);
@@ -467,9 +491,8 @@ public class TextBuffer implements CharSequence
 			if (_contents[--_gapStartIndex] == Language.NEWLINE)
 				lines--;
 		}
-		if (lines != 0)
-			_marks.shift(newGapStart==length()?_lineCount:findLineNumber(newGapStart)+1, lines);
 		_lineCount += lines;
+        moveMarks(marks, charOffset, totalChars, 0);
 		_cache.invalidateCache(charOffset);
 	}
 
@@ -481,16 +504,18 @@ public class TextBuffer implements CharSequence
 	 * of insertions/deletions. No error checking is done.
 	 */
 	synchronized void shiftGapStart(int displacement){
+        int[] marks = markOffsets();
+        int start = _gapStartIndex;
         int lines;
 		if(displacement >= 0)
 			lines = countNewlines(_gapStartIndex, displacement);
 		else
 			lines = -countNewlines(_gapStartIndex + displacement, -displacement);
 
-        if (lines != 0)
-            _marks.shift(findLineNumber(_gapStartIndex)+1, lines);
         _lineCount += lines;
 		_gapStartIndex += displacement;
+        moveMarks(marks, displacement < 0 ? start + displacement : start,
+            Math.max(0, -displacement), Math.max(0, displacement));
 		_cache.invalidateCache(realToLogicalIndex(_gapStartIndex - 1) + 1);
 	}
 
@@ -622,12 +647,40 @@ public class TextBuffer implements CharSequence
     }
 
     private int mVer;
+    private UndoStack.Command markedCommand;
+    public static final class SavePoint {
+        private final int version;
+        private final UndoStack.Command command;
+        private SavePoint(int version, UndoStack.Command command) { this.version = version; this.command = command; }
+    }
+
+    public SavePoint captureSavePoint() {
+        _undoStack._lastEditTime = -1L;
+        return new SavePoint(_undoStack._top, _undoStack.commandAt(_undoStack._top));
+    }
+
+    public SavePoint markedSavePoint() { return new SavePoint(getMarkedVersion(), markedCommand); }
+
+    public void markSaved(SavePoint point) {
+        // An undo branch may have replaced the command at the same numeric version.
+        mVer = _undoStack.commandAt(point.version) == point.command ? point.version : -1;
+        markedCommand = point.command;
+        _undoStack._lastEditTime = -1L;
+    }
+
     public void markVersion() {
         mVer = _undoStack._top;
+        markedCommand = _undoStack.commandAt(mVer);
+        // Later typing must not merge into the undo version that was saved.
+        _undoStack._lastEditTime = -1L;
+    }
+
+    public void markUnsaved() {
+        mVer = -1;
     }
 
     public int getMarkedVersion() {
-        return mVer;
+        return _undoStack.commandAt(mVer) == markedCommand ? mVer : -1;
     }
 
     public int getCurrentVersion() {

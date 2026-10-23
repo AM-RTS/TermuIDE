@@ -1,108 +1,56 @@
 package cn.rbc.termuc;
-import android.content.*;
-import android.view.*;
-import android.widget.*;
-import java.io.*;
-import java.util.*;
-import android.net.*;
-import android.provider.*;
-import android.database.*;
 
-public class FileAdapter extends BaseAdapter implements Comparator<FileItem>, FileFilter
-{
-	private Context mCont;
-	private static FileItem parent;
-	private List<FileItem> mData;
-	private boolean mNRoot;
-	private File mPath;
-	private LayoutInflater mInflater;
-	private FileFilter mFilter;
+import android.net.Uri;
+import android.provider.DocumentsContract;
+import java.io.File;
+import java.io.FileFilter;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.List;
 
-	public FileAdapter(Context context, File path) {
-		this(context, path, null);
-	}
+/** File listing model shared by the Compose browser and font picker. */
+public class FileAdapter implements Comparator<FileItem>, FileFilter {
+    private static FileItem parent;
+    private List<FileItem> data;
+    private boolean hasParent;
+    private final FileFilter filter;
 
-	public FileAdapter(Context context, File path, FileFilter filter) {
-		super();
-		mCont = context;
-		mInflater = LayoutInflater.from(context);
-		mFilter = filter;
-		setPath(path);
-	}
+    public FileAdapter(File path) { this(path, null); }
 
-	@Override
-	public long getItemId(int p1) {
-		return p1;
-	}
+    public FileAdapter(File path, FileFilter filter) {
+        this.filter = filter;
+        setPath(path);
+    }
 
-	@Override
-	public FileItem getItem(int p1) {
-		if (mNRoot) {
-			if (p1==0) return parent;
-			else p1--;
-		}
-		return mData.get(p1);
-	}
+    public FileItem getItem(int index) {
+        if (hasParent) return index == 0 ? parent : data.get(index - 1);
+        return data.get(index);
+    }
 
-	@Override
-	public int getCount() {
-		return mNRoot ? mData.size()+1 : mData.size();
-	}
+    public int getCount() { return hasParent ? data.size() + 1 : data.size(); }
 
-	@Override
-	public View getView(int pos, View convert, ViewGroup parent) {
-        ImageView img;
-        TextView txv;
-        ViewHolder vh;
-		if (convert == null) {
-			convert = mInflater.inflate(R.layout.file_item, parent, false);
-		    img = convert.findViewById(R.id.file_icon);
-            txv = convert.findViewById(R.id.file_name);
-            vh = new ViewHolder();
-            vh.img = img;
-            vh.txv = txv;
-            convert.setTag(vh);
+    public void setPath(File path) {
+        if (FileHelper.isTermuxFile(path)) {
+            Uri uri = Application.getInstance().treeUri;
+            String root = uri == null ? path.getAbsolutePath() : DocumentsContract.getTreeDocumentId(uri);
+            hasParent = !root.equals(path.getAbsolutePath());
         } else {
-            vh = (ViewHolder)convert.getTag();
-            img = vh.img;
-            txv = vh.txv;
+            hasParent = !Utils.ROOT.equals(path);
         }
-		FileItem fitm = getItem(pos);
-		img.setImageResource(fitm.icon);
-		txv.setText(fitm.name);
-		return convert;
-	}
+        if (parent == null && hasParent) parent = new FileItem(R.drawable.ic_folder_24, "..");
+        data = FileHelper.lists(path, this);
+        Collections.sort(data, this);
+    }
 
-	public void setPath(File path) {
-		if (FileHelper.isTermuxFile(path)) {
-			Uri uri = Application.getInstance().treeUri;
-			String root = DocumentsContract.getTreeDocumentId(uri);
-			mNRoot = !root.equals(path.getAbsolutePath());
-		} else {
-			mNRoot = !Utils.ROOT.equals(path);
-		}
-		if (parent==null && mNRoot)
-			parent = new FileItem(R.drawable.ic_folder_24, "..");
-		mPath = path;
-		mData = FileHelper.lists(path, this);
-		Collections.sort(mData, this);
-	}
+    @Override
+    public int compare(FileItem a, FileItem b) {
+        boolean aDirectory = a.icon == R.drawable.ic_folder_24;
+        boolean bDirectory = b.icon == R.drawable.ic_folder_24;
+        return aDirectory == bDirectory ? a.name.compareToIgnoreCase(b.name) : aDirectory ? -1 : 1;
+    }
 
-	public int compare(FileItem a, FileItem b) {
-		boolean ad=(a.icon==R.drawable.ic_folder_24), bd=(b.icon==R.drawable.ic_folder_24);
-		return ad==bd?
-			a.name.compareToIgnoreCase(b.name)
-			:ad?-1:1;
-	}
-
-	public boolean accept(File p1) {
-		FileFilter ff;
-		return (Application.show_hidden || !p1.isHidden()) && ((ff=mFilter)==null || ff.accept(p1));
-	}
-
-	
-    static class ViewHolder {
-        ImageView img;
-        TextView txv;
+    @Override
+    public boolean accept(File file) {
+        return (Application.show_hidden || !file.isHidden()) && (filter == null || filter.accept(file));
     }
 }

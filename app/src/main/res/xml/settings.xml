@@ -23,6 +23,11 @@
 	</PreferenceCategory>
 	<PreferenceCategory
 		android:title="@string/editor">
+        <CheckBoxPreference
+            android:key="autosave"
+            android:title="@string/auto_save"
+            android:summary="@string/auto_save_summary"
+            android:defaultValue="false" />
 		<ListPreference
 			android:key="font"
 			android:title="@string/font"

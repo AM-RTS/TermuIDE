@@ -65,29 +65,25 @@ public class CLanguage extends Language{
 		return true;
 	}
 
-    private CppLexer lx = null;
 
 	@Override
 	public Lexer newLexer(CharSeqReader reader) {
-        if (lx == null) {
-		    CppLexer cx = new CppLexer(reader);
-		    lx = cx;
-		    int l = keywords.length - 12;
-            Set<String> keys = new HashSet<>();
-            for (int i=0;i<l;i++) {
-                keys.add(keywords[i]);
-            }
-            for (int i=0;i<keynames.length;i++) {
-                keys.add(keynames[i]);
-            }
-            cx.keywords = keys;
-            Set<String> types = new HashSet<>();
-            for (int i=l,j=keywords.length;i<j;i++) {
-                types.add(keywords[i]);
-            }
-            cx.types = types;
-        } else lx.yyreset(reader);
-        return lx;
+        CppLexer cx = new CppLexer(reader);
+        int l = keywords.length - 12;
+        Set<String> keys = new HashSet<>();
+        for (int i=0;i<l;i++) {
+            keys.add(keywords[i]);
+        }
+        for (int i=0;i<keynames.length;i++) {
+            keys.add(keynames[i]);
+        }
+        cx.keywords = keys;
+        Set<String> types = new HashSet<>();
+        for (int i=l,j=keywords.length;i<j;i++) {
+            types.add(keywords[i]);
+        }
+        cx.types = types;
+        return cx;
 	}
 }
 

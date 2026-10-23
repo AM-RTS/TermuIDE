@@ -1,7 +1,6 @@
 package cn.rbc.termuc;
 
 import android.app.*;
-import android.app.AlertDialog.*;
 import android.content.*;
 import android.content.pm.*;
 import android.content.res.*;
@@ -17,49 +16,62 @@ import android.widget.*;
 import cn.rbc.codeeditor.lang.*;
 import cn.rbc.codeeditor.util.*;
 import java.io.*;
-import java.lang.reflect.*;
 import java.util.*;
-import org.xmlpull.v1.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 
 import static android.Manifest.permission.*;
 
-public class MainActivity extends Activity implements
-ActionBar.OnNavigationListener, OnGlobalLayoutListener,
-AdapterView.OnItemClickListener, AdapterView.OnItemLongClickListener,
-DialogInterface.OnClickListener, MenuItem.OnMenuItemClickListener,
-View.OnClickListener, Runnable,
-HeaderAdapter.OnChangedListener, View.OnLayoutChangeListener {
+public class MainActivity extends androidx.activity.ComponentActivity implements HeaderAdapter.OnChangedListener, Utils.ComposeDialogHost {
 
 	public final static int SETTING = 0, ACCESS_FILE = 1, SHOW_FLOATING = 2, REQ_FOLDER = 3;
-	public final static String PWD = "p", SHOWLIST = "l", FILES = "o", TESTAPP = "t", INITAPP = "i";
+	public final static String PWD = "p", FILES = "o", TESTAPP = "t", INITAPP = "i";
 	private HeaderAdapter hda;
 	private FileAdapter adp;
 	private EditFragment lastFrag = null;
-	private boolean byhand = true, keyboardShown = false, transZ;
-    private View showlist, transV;
-    private HorizontalScrollView keys, tabScroller;
+	private boolean runVisible, deleting;
     private File pwd, prj, root;
-    private TextView pwdpth, msgEmpty, transTxV;
-    private LinearLayout subc;
     private TextEditor codeEditor;
-    private LinearLayout tabs;
-	private Menu appMenu;
-	private SearchAction mSearchAction;
-	private String transStr;
-	private Dialog transDlg;
-    private AttributeSet editAttr;
+	private String pendingProjectPath;
     private DebugPanel panel;
-    private int reqCode;
+    private int reqCode, selectedIndex = -1;
+    private Runnable uiRefresh;
+    private Runnable searchUi;
+    private EditFragment pendingReload, pendingRename;
+    private String pendingRenameText;
+    private boolean installPrompt, installPromptNoRemind, initPrompt, initPromptNoRemind;
+    private List<String> pendingClosePaths = Collections.emptyList();
+    private static final int CLOSE_FILE = 1, CLOSE_PROJECT = 2, OPEN_PROJECT = 3;
+    private int pendingCloseKind;
+    private String pendingCloseTarget;
+    private Set<String> approvedDiscards = Collections.emptySet();
+    private boolean savingClose;
+    private boolean runtimeHostReady;
+    private ProjectClose projectClose;
+    private static final class ProjectClose {
+        final String root;
+        final List<String> tabs;
+        final List<DocumentSession> revisions;
+        final Set<String> discards;
+        final CompletableFuture<Boolean> result;
+        ProjectClose(String root, List<String> tabs, List<DocumentSession> revisions,
+                Set<String> discards, CompletableFuture<Boolean> result) {
+            this.root = root; this.tabs = tabs; this.revisions = revisions;
+            this.discards = discards; this.result = result;
+        }
+    }
+
 
 	private void envInit(SharedPreferences pref) {
 		pwd = new File(pref.getString(PWD, Utils.ROOT.getPath()));
 		Application app = Application.getInstance();
+        if (FileHelper.isTermuxFile(pwd) && app.treeUri == null) pwd = Utils.ROOT;
 		if (app.treeUri != null && FileHelper.isTermuxFile(pwd)) {
 			root = new File(DocumentsContract.getTreeDocumentId(app.treeUri));
 		} else {
 			root = Utils.ROOT;
 		}
-		for (File f = pwd; !f.equals(root); f = f.getParentFile()) {
+		for (File f = pwd; f != null && !f.equals(root); f = f.getParentFile()) {
 			if (FileHelper.isFile(new File(f, Project.PROJ))) {
 				prj = f;
 				break;
@@ -82,12 +94,6 @@ HeaderAdapter.OnChangedListener, View.OnLayoutChangeListener {
 		lastFrag = (EditFragment)frag;
 	}
 
-	public boolean onNavigationItemSelected(int p1, long p2) {
-		if (byhand)
-			showFrag(getFragmentManager().findFragmentByTag(hda.getItem(p1)));
-		return true;
-	}
-
 	String getTag(int idx) {
 		return hda.getItem(idx);
 	}
@@ -104,39 +110,13 @@ HeaderAdapter.OnChangedListener, View.OnLayoutChangeListener {
                 | View.SYSTEM_UI_FLAG_FULLSCREEN);
         }
         super.onCreate(savedInstanceState);
-        ContextThemeWrapper themedContext = new ContextThemeWrapper(getBaseContext(), android.R.style.Theme_Holo);
-        hda = new HeaderAdapter(themedContext, R.layout.header_item);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
-            hda.setDropDownViewTheme(themedContext.getTheme());
-        hda.setOnCloseListener(this);
-		getActionBar().setListNavigationCallbacks(hda, this);
+		hda = new HeaderAdapter();
 		hda.setOnChangedListener(this);
-		setContentView(R.layout.activity_main);
-		showlist = findViewById(R.id.show_list);
-		keys = findViewById(R.id.keys);
-		((KeyPanel)keys.getChildAt(0)).resetKeys(Application.syms);
-		subc = findViewById(R.id.subcontainer);
-		ListView l = findViewById(R.id.file_list);
-		View hd = getLayoutInflater().inflate(R.layout.list_header, null);
-		pwdpth = hd.findViewById(R.id.pwd);
-		msgEmpty = findViewById(R.id.msg_empty);
-		l.addHeaderView(hd);
-		adp = new FileAdapter(this, pwd);
-		l.setAdapter(adp);
-		l.setOnItemClickListener(this);
-		l.setOnItemLongClickListener(this);
-        if (conf.orientation == Configuration.ORIENTATION_LANDSCAPE) {
-            tabScroller = (HorizontalScrollView) LayoutInflater.from(themedContext).inflate(R.layout.tabs, null);
-        } else {
-            tabScroller = findViewById(R.id.tabScroller);
-        }
-        tabs = tabScroller.findViewById(android.R.id.tabs);
-        tabs.setTag(0);
+		adp = new FileAdapter(pwd);
         panel = new DebugPanel(this);
-		getWindow().getDecorView().getViewTreeObserver().addOnGlobalLayoutListener(this);
-		mSearchAction = new SearchAction(this);
+		setContentView(TermuCCompose.mainView(this));
 		final int sdk = android.os.Build.VERSION.SDK_INT;
-		String[] s = null;
+		String[] s;
 		if (sdk >= android.os.Build.VERSION_CODES.R) {
 			if (!Environment.isExternalStorageManager()) {
 				Intent it = new Intent();
@@ -145,18 +125,58 @@ HeaderAdapter.OnChangedListener, View.OnLayoutChangeListener {
 				startActivityForResult(it, ACCESS_FILE);
 			}
 			s = new String[]{Utils.PERM_EXEC};
-		} else if (sdk >= android.os.Build.VERSION_CODES.M)
+		} else
 			s = new String[]{
 					Utils.PERM_EXEC,
 					READ_EXTERNAL_STORAGE,
 					WRITE_EXTERNAL_STORAGE,
 				};
-		if (s != null)
-			requestPermissions(s, PackageManager.PERMISSION_GRANTED);
+		requestPermissions(s, PackageManager.PERMISSION_GRANTED);
 		if (pref.getBoolean(INITAPP, true))
 			Utils.initBack(this, false);
         if (pref.getBoolean(TESTAPP, true))
 			Utils.testApp(this, false);
+    }
+
+    @Override
+    protected void onPostCreate(Bundle savedInstanceState) {
+        super.onPostCreate(savedInstanceState);
+        String selected = getSelectedFilePath();
+        DocumentSessions sessions = Application.getInstance().getDocuments();
+        for (DocumentSession session : sessions.getState().getValue()) {
+            String path = session.getPath();
+            if (!hda.contains(path) && (session.getDirty() || FileHelper.isFile(new File(path)))) {
+                openFile(new File(path));
+            }
+        }
+        getFragmentManager().executePendingTransactions();
+        if (selected != null && hda.contains(selected)) selectItem(hda.indexOf(selected));
+        else if (!hda.isEmpty()) selectItem(hda.getCount() - 1);
+        if (savedInstanceState != null) {
+            pendingProjectPath = savedInstanceState.getString("pendingProject");
+            pendingRename = (EditFragment)getFragmentManager().findFragmentByTag(savedInstanceState.getString("pendingRename", ""));
+            pendingRenameText = savedInstanceState.getString("pendingRenameText");
+            pendingReload = (EditFragment)getFragmentManager().findFragmentByTag(savedInstanceState.getString("pendingReload", ""));
+            ArrayList<String> closing = savedInstanceState.getStringArrayList("pendingClosePaths");
+            if (closing != null) pendingClosePaths = closing;
+            pendingCloseKind = savedInstanceState.getInt("pendingCloseKind");
+            pendingCloseTarget = savedInstanceState.getString("pendingCloseTarget");
+            installPrompt = savedInstanceState.getBoolean("installPrompt");
+            installPromptNoRemind = savedInstanceState.getBoolean("installPromptNoRemind");
+            initPrompt = savedInstanceState.getBoolean("initPrompt");
+            initPromptNoRemind = savedInstanceState.getBoolean("initPromptNoRemind");
+            notifyUiChanged();
+        }
+        runtimeHostReady = true;
+        Object retained = getLastCustomNonConfigurationInstance();
+        if (retained instanceof ProjectClose) {
+            projectClose = (ProjectClose)retained; savingClose = true;
+            projectClose.result.whenComplete((saved, error) -> finishPendingProjectClose());
+        }
+        getLifecycle().addObserver((androidx.lifecycle.LifecycleEventObserver)(source, event) -> {
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) finishPendingProjectClose();
+        });
+        Application.getInstance().getRuns().onHostReady();
     }
 
 	@Override
@@ -174,45 +194,95 @@ HeaderAdapter.OnChangedListener, View.OnLayoutChangeListener {
 	}
 
     private void refresh() {
-		pwdpth.setText(pwd.getPath());
 		adp.setPath(pwd);
-        adp.notifyDataSetChanged();
+		notifyUiChanged();
     }
 
-	@Override
-	public void onGlobalLayout() {
-		try {
-			InputMethodManager inputMethodManager = (InputMethodManager)getSystemService(INPUT_METHOD_SERVICE);
-			Method declaredMethod = inputMethodManager.getClass().getDeclaredMethod("getInputMethodWindowVisibleHeight");
-			declaredMethod.setAccessible(true);
-			boolean b = ((Integer)declaredMethod.invoke(inputMethodManager, new Object[0])).intValue() > 0;
-			if (keyboardShown != b && (transTxV == null || !transTxV.isAttachedToWindow())) {
-				keyboardShown = b;
-				int showas, slvis;
-				if (b) {
-					slvis = View.GONE;
-					subc.setVisibility(slvis);
-					showas = MenuItem.SHOW_AS_ACTION_IF_ROOM;
-				} else {
-					slvis = View.VISIBLE;
-					showas = MenuItem.SHOW_AS_ACTION_ALWAYS;
-				}
-				showlist.setVisibility(slvis);
-				keys.setVisibility(View.VISIBLE ^ View.GONE ^ slvis);
-				Menu menu = appMenu;
-				menu.findItem(R.id.redo).setShowAsAction(
-					MenuItem.SHOW_AS_ACTION_ALWAYS
-					^ MenuItem.SHOW_AS_ACTION_IF_ROOM
-					^ showas);
-				menu.findItem(R.id.run).setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM);
-			}
-		} catch (Exception e) {
-			e.printStackTrace();
-		}
+	void notifyUiChanged() {
+		Runnable listener = uiRefresh;
+		if (listener != null) listener.run();
 	}
 
-	public void onItemClick(AdapterView<?> av, View v, int i, long n) {
-		String _it = adp.getItem(i - 1).name;
+	void setUiRefresh(Runnable listener) {
+		uiRefresh = listener;
+	}
+
+	public void setSearchUi(Runnable listener) {
+		searchUi = listener;
+	}
+
+	public EditFragment getPendingReload() { return pendingReload; }
+	public EditFragment getPendingRename() { return pendingRename; }
+	public String getPendingRenameText() { return pendingRenameText; }
+
+	public void requestReload(EditFragment fragment) {
+		pendingReload = fragment;
+		notifyUiChanged();
+	}
+
+	public void dismissReload() {
+		pendingReload = null;
+		notifyUiChanged();
+	}
+
+	public void confirmReload() {
+		EditFragment fragment = pendingReload;
+        if (fragment != null && Application.getInstance().saver.isSaving(fragment.getFile().getAbsolutePath())) {
+            toast(getString(R.string.saving)); return;
+        }
+		pendingReload = null;
+		if (fragment != null) fragment.reloadFromDisk();
+		notifyUiChanged();
+	}
+
+	public void requestRename(EditFragment fragment, String selection) {
+		pendingRename = fragment;
+		pendingRenameText = selection;
+		notifyUiChanged();
+	}
+
+	public void dismissRename() {
+		pendingRename = null;
+		pendingRenameText = null;
+		notifyUiChanged();
+	}
+
+	public void confirmRename(String name) {
+		EditFragment fragment = pendingRename;
+		pendingRename = null;
+		pendingRenameText = null;
+		if (fragment != null) fragment.renameSelection(name);
+		notifyUiChanged();
+	}
+
+	@Override public void showTermuxInstallPrompt(boolean showNeverRemind) {
+		installPrompt = true;
+		installPromptNoRemind = showNeverRemind;
+		notifyUiChanged();
+	}
+	@Override public void showTermuxInitPrompt(boolean showAlreadyInitialized) {
+		initPrompt = true;
+		initPromptNoRemind = showAlreadyInitialized;
+		notifyUiChanged();
+	}
+	public boolean isInstallPromptOpen() { return installPrompt; }
+	public boolean isInstallPromptNoRemind() { return installPromptNoRemind; }
+	public boolean isInitPromptOpen() { return initPrompt; }
+	public boolean isInitPromptNoRemind() { return initPromptNoRemind; }
+	public void resolveInstallPrompt(boolean launchInstaller, boolean neverRemind) {
+		installPrompt = false;
+		if (launchInstaller) Utils.startTermuxInstall(this);
+		else if (neverRemind) Utils.skipTermuxInstallReminder(this);
+		notifyUiChanged();
+	}
+	public void resolveInitPrompt(boolean initialize, boolean alreadyInitialized) {
+		initPrompt = false;
+		if (initialize) Utils.copyJump(this);
+		else if (alreadyInitialized) Utils.skipTermuxInitReminder(this);
+		notifyUiChanged();
+	}
+
+	public void onFileSelected(String _it) {
 		if ("..".equals(_it)) {
 			if (FileHelper.isFile(new File(pwd, Project.PROJ)))
 				prj = null;
@@ -220,9 +290,10 @@ HeaderAdapter.OnChangedListener, View.OnLayoutChangeListener {
 		} else {
 			File f = new File(pwd, _it);
 			if (FileHelper.isFile(f)) {
-				transStr = openFile(f) ? f.getAbsolutePath() : null;
+				openFile(f);
 				if (Project.rootPath == null && prj!=null)
-					openProject();
+					pendingProjectPath = prj.getAbsolutePath();
+				if (pendingProjectPath != null) notifyUiChanged();
 				return;
 			}
 			File trj = new File(f, Project.PROJ);
@@ -233,103 +304,93 @@ HeaderAdapter.OnChangedListener, View.OnLayoutChangeListener {
 		refresh();
 	}
 
-	public boolean onItemLongClick(AdapterView<?> av, View v, final int i, long l) {
-		if (i == 0 || "..".equals(adp.getItem(i - 1).name))
-			return false;
-		PopupMenu pm = new PopupMenu(MainActivity.this, v);
-		Menu _m = pm.getMenu();
-		transStr = adp.getItem(i - 1).name;
-		_m.add(Menu.NONE, R.id.delete, Menu.NONE, cn.rbc.codeeditor.R.string.delete).setOnMenuItemClickListener(this);
-        _m.add(Menu.NONE, R.id.rename, Menu.NONE, R.string.rename).setOnMenuItemClickListener(this);
-		pm.show();
-		return true;
-	}
-
-	@Override
-	public boolean onMenuItemClick(MenuItem p1) {
-		int id = p1.getItemId();
-		if (id == R.id.run || id == R.id.debug) {
-			try {
-				if (lastFrag!=null) {
-					lastFrag.save();
-				}
-				Project.reload();
-				StringBuilder sb;
-				String pth;
-				File f = lastFrag==null?null:lastFrag.getFile();
-				if (Project.rootPath == null) {
-					sb = new StringBuilder("x=$TMPDIR/m;");
-					sb.append(lastFrag.getC());
-					sb.append(" \"");
-					sb.append(Utils.escape(f.getAbsolutePath()));
-					sb.append("\" ");
-					sb.append(Application.cflags);
-					if (!Application.cflags.contains("-g"))
-						sb.append(" -g");
-					sb.append(" -o $x && ");
-					pth = pwd.getAbsolutePath();
-				} else {
-					sb = Project.buildEnvironment(f);
-					sb.append("x=$TMPDIR/termuc;find $o -maxdepth 1 -type f \\( -iname '*.so' -o ! -name '*.*' \\) -exec install -D -t $x {} \\;;x=(");
-					sb.append(Project.runCmd);
-					sb.append(") && ");
-					pth = Project.rootPath;
-				}
-				if (id == R.id.run)
-					sb.append("${x[@]}");
-				else {
-					sb.append("/system/bin/toybox nc -l -s 127.0.0.1 -p 48456 nice -n -20 gdb -q -i=mi -ret -tty `tty` --args ${x[@]} 2>/dev/null");
-					String fn = f.getName();
-					Document dc = codeEditor.getText();
-					int l = dc.getMarksCount();
-					for (int i=0;i < l;i++) {
-                        int lineno = dc.getMark(i);
-                        panel.addBkpt(fn, lineno);
+    public void performAction(int id) {
+        RunCommands.Action action = id == R.id.run ? RunCommands.Action.RUN : id == R.id.debug ? RunCommands.Action.DEBUG
+            : id == R.id.build ? RunCommands.Action.BUILD : id == R.id.compile ? RunCommands.Action.COMPILE : null;
+        if (action != null) {
+            if (action == RunCommands.Action.DEBUG && !canDebug()) return;
+            RunConfiguration configuration = new RunConfiguration();
+            if (action == RunCommands.Action.RUN || action == RunCommands.Action.DEBUG) {
+                try {
+                    configuration = getRunConfiguration();
+                    String entry = configuration.entryPath(getRunConfigurationScope(), getSelectedFilePath());
+                    if (entry != null && !entry.equals(getSelectedFilePath())) {
+                        if (getFragmentManager().findFragmentByTag(entry) == null &&
+                            !FileHelper.isFile(new File(entry)) && !Application.getInstance().getDocuments().isDirty(entry)) {
+                            toast(getString(R.string.run_entry_failed));
+                            return;
+                        }
+                        if (!openFile(new File(entry))) { toast(getString(R.string.run_entry_failed)); return; }
+                        getFragmentManager().executePendingTransactions();
+                        selectItem(selectedIndex);
                     }
-				}
-                sb.append(" && read -n1 -rsp \"\nPress any key to exit...\"");
-				Utils.run(this, Utils.PREF.concat("/usr/bin/bash"), new String[]{"-c",
-							  sb.toString()},
-						  pth, false);
-                if (id == R.id.debug) {
-					panel.connect();
+                } catch (IllegalArgumentException error) {
+                    toast(getString(R.string.run_config_invalid));
+                    return;
                 }
-			} catch (android.util.MalformedJsonException je) {
-				toast(getString(R.string.parse_failed));
-			} catch (IOException ioe) {
-				Log.e("LSP", ioe.toString());
-			}
-			return true;
-		} else if (id==R.id.build || id==R.id.compile) {
-			try {
-				File f;
-				if (lastFrag!=null) {
-					lastFrag.save();
-					f = lastFrag.getFile();
-				} else f = null;
-				Project.reload();
-				File out = new File(Project.rootPath, Project.outputDir);
-				if (!out.exists()) {
-					out.mkdir();
-					refresh();
-				}
-				StringBuilder sb = Project.buildEnvironment(f);
-				String cmd = id==R.id.build?Project.buildCmd:Project.compileCmd;
-				sb.append(cmd);
-				Utils.run(this, Utils.PREF.concat("/usr/bin/bash"), new String[]{
-					"-c", sb.toString()
-				}, Project.rootPath, false);
-			} catch (android.util.MalformedJsonException je) {
-				toast(getString(R.string.parse_failed));
-			} catch(IOException ioe) {
-				Log.e("LSP", ioe.getMessage());
-			}
-			return true;
-		} else if (id == R.id.exstorage) {
+            }
+            List<Integer> marks = new ArrayList<>();
+            if (codeEditor != null) for (int i = 0; i < codeEditor.getText().getMarksCount(); i++) marks.add(codeEditor.getText().getMark(i));
+            Application.getInstance().getRuns().start(new RunCommands.Request(action,
+                getSelectedFilePath(), lastFrag == null ? EditFragment.TYPE_TXT : lastFrag.type,
+                pwd.getAbsolutePath(), Project.snapshot(), Application.cflags, Collections.unmodifiableList(marks), configuration));
+            return;
+        }
+        if (id == R.id.save && lastFrag != null) {
+            EditFragment fragment = lastFrag;
+            fragment.save().whenComplete((clean, error) -> {
+                if (isDestroyed() || isFinishing()) return;
+                if (error != null) { Log.e("Save", "Unable to save source", error); toast(getString(R.string.save_failed)); }
+                else if (!clean) toast(getString(R.string.save_newer_changes));
+                else toast(getText(R.string.saved));
+            });
+            return;
+        }
+        performSavedAction(id);
+    }
+
+    int matchRunContext(RunCommands.Request request) {
+        if (!runtimeHostReady) return 0;
+        return Objects.equals(request.getPath(), getSelectedFilePath())
+            && Objects.equals(request.getProject().rootPath, Project.rootPath)
+            && Objects.equals(request.getDirectory(), pwd.getAbsolutePath()) && matchesRunConfiguration(request) ? 1 : -1;
+    }
+
+    public String getRunConfigurationScope() {
+        return Project.rootPath != null ? Project.rootPath : pwd.getAbsolutePath();
+    }
+
+    public RunConfiguration getRunConfiguration() {
+        return RunConfiguration.load(this, getRunConfigurationScope());
+    }
+
+    public boolean saveRunConfiguration(String scope, RunConfiguration configuration) {
+        if (!scope.equals(getRunConfigurationScope())) throw new IllegalStateException(getString(R.string.run_config_changed));
+        if (!RunConfiguration.save(this, scope, configuration)) return false;
+        Application.getInstance().getRuns().onConfigurationChanged();
+        notifyUiChanged();
+        return true;
+    }
+
+    private boolean matchesRunConfiguration(RunCommands.Request request) {
+        if (request.getAction() != RunCommands.Action.RUN && request.getAction() != RunCommands.Action.DEBUG) return true;
+        try { return request.getConfiguration().equals(getRunConfiguration()); }
+        catch (IllegalArgumentException error) { return false; }
+    }
+
+    void startDebugger(RunCommands.Request request) {
+        if (panel == null || request.getPath() == null) return;
+        String name = new File(request.getPath()).getName();
+        for (int line : request.getBreakpoints()) panel.addBkpt(name, line);
+        panel.connect();
+    }
+
+    private void performSavedAction(int id) {
+        if (id == R.id.exstorage) {
 			pwd = root = Utils.ROOT;
 			prj = null;
 			refresh();
-			return true;
+			return;
 		} else if (id == R.id.tmxstorage) {
 			Uri u = Application.getInstance().treeUri;
 			if (u == null) {
@@ -340,120 +401,133 @@ HeaderAdapter.OnChangedListener, View.OnLayoutChangeListener {
 				prj = null;
 				refresh();
 			}
-			return true;
+			return;
+		} else if (id == R.id.undo && codeEditor != null) {
+			codeEditor.undo();
+		} else if (id == R.id.redo && codeEditor != null) {
+			codeEditor.redo();
+		} else if (id == R.id.search) {
+			if (searchUi != null && codeEditor != null) searchUi.run();
+		} else if (id == R.id.close && selectedIndex >= 0) {
+			closeFile(selectedIndex);
+		} else if (id == R.id.prj_attr && Project.rootPath != null) {
+			openFile(new File(Project.rootPath, Project.PROJ));
+		} else if (id == R.id.prj_close && Project.rootPath != null) {
+            closeProject();
+		} else if (id == R.id.settings) {
+			startActivityForResult(new Intent(this, SettingsActivity.class), SETTING);
 		}
-		Builder bd = new Builder(this);
-		if (id == R.id.delete) {
-			bd.setTitle(cn.rbc.codeeditor.R.string.delete);
-			bd.setMessage(getString(R.string.confirm_delete, transStr));
-			bd.setPositiveButton(android.R.string.ok, this);
-			transZ = false;
-		} else if (id == R.id.rename) {
-            bd.setTitle(R.string.rename);
-            EditText ed = new EditText(this);
-            ed.setSingleLine();
-            ed.setMaxLines(1);
-            bd.setView(ed);
-            transTxV = ed;
-            ed.setLayoutParams(
-            new ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ));
-            ed.setId(id);
-            ed.setText(transStr);
-            ed.selectAll();
-            bd.setPositiveButton(android.R.string.ok, this);
-            transZ = false;
-        } else {
-			bd.setTitle(R.string.new_);
-            if (id == R.id.newfile) {
-			    EditText ed = new EditText(this);
-                ed.setSingleLine();
-                ed.setMaxLines(1);
-                bd.setView(ed);
-			    transTxV = ed;
-			    ed.setLayoutParams(
-				new ViewGroup.LayoutParams(
-					ViewGroup.LayoutParams.MATCH_PARENT,
-					ViewGroup.LayoutParams.MATCH_PARENT
-				));
-				ed.setId(R.id.newfile);
-				ed.setHint(R.string.hint_filename);
-				bd.setPositiveButton(R.string.file, onc);
-				bd.setNeutralButton(R.string.folder, onc);
-			} else {
-                View v = View.inflate(this, R.layout.new_project, null);
-                bd.setView(v);
-                transV = v;
-                transTxV = v.findViewById(R.id.newprj);
-				bd.setPositiveButton(android.R.string.ok, onc);
-			}
-		}
-		bd.setNegativeButton(android.R.string.cancel, null);
-		bd.create().show();
-		return true;
 	}
 
+    private void closeProject() {
+        if (requestCloseIfDirty(new ArrayList<>(hda), CLOSE_PROJECT, null)) return;
+        // A restored close prompt can outlive the process-local project configuration.
+        if (Project.rootPath == null) { finishProjectClose(); return; }
+        List<String> tabs = new ArrayList<>(hda);
+        String configuration = new File(Project.rootPath, Project.PROJ).getAbsolutePath();
+        if (Application.getInstance().saver.isSaving(configuration)) { toast(getString(R.string.saving)); return; }
+        projectClose = new ProjectClose(Project.rootPath, tabs, documentState(tabs),
+            new HashSet<>(approvedDiscards), Project.save(tabs));
+        savingClose = true;
+        notifyUiChanged();
+        projectClose.result.whenComplete((saved, error) -> finishPendingProjectClose());
+    }
+
+    @Override public Object onRetainCustomNonConfigurationInstance() { return projectClose; }
+
+    private void finishPendingProjectClose() {
+        ProjectClose close = projectClose;
+        if (close == null || !close.result.isDone() || isDestroyed() || isFinishing()
+                || !getLifecycle().getCurrentState().isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)
+                || getFragmentManager().isStateSaved()) return;
+        projectClose = null; savingClose = false;
+        try {
+            if (!Boolean.TRUE.equals(close.result.join())) throw new CompletionException(new IOException("Project save failed"));
+        } catch (CompletionException error) {
+            Log.e("Project", "Unable to save project configuration", error);
+            toast(getString(R.string.save_failed)); notifyUiChanged(); return;
+        }
+        if (!Objects.equals(close.root, Project.rootPath) || !close.tabs.equals(hda)
+                || close.tabs.stream().anyMatch(path -> Application.getInstance().saver.isSaving(path))
+                || !close.revisions.equals(documentState(close.tabs))) {
+            toast(getString(R.string.save_newer_changes)); notifyUiChanged(); return;
+        }
+        approvedDiscards = close.discards;
+        try { finishProjectClose(); } finally { approvedDiscards = Collections.emptySet(); }
+    }
+
+    private List<DocumentSession> documentState(List<String> paths) {
+        List<DocumentSession> state = new ArrayList<>();
+        for (DocumentSession session : Application.getInstance().getDocuments().getState().getValue())
+            if (paths.contains(session.getPath())) state.add(session);
+        return state;
+    }
+
+    private void finishProjectClose() {
+        Project.close();
+        FragmentManager fm = getFragmentManager();
+        FragmentTransaction transaction = fm.beginTransaction();
+        Lsp lsp = Application.getInstance().lsp;
+        for (int i = 0; i < hda.getCount(); i++) {
+            String path = hda.getItem(i);
+            closeDocumentSession(path);
+            transaction.remove(fm.findFragmentByTag(path));
+            lsp.didClose(new File(path));
+        }
+        hda.clear();
+        transaction.commit();
+        lastFrag = null;
+        codeEditor = null;
+        selectedIndex = -1;
+        runVisible = false;
+        lsp.end();
+        notifyUiChanged();
+    }
+
 	void setFileRunnable(boolean exec) {
-		if (Project.rootPath == null||exec)
-			appMenu.findItem(R.id.run).setVisible(exec);
+		runVisible = Project.rootPath == null ? exec : true;
+		notifyUiChanged();
 	}
 
     void selectItem(int pos) {
-        if (Application.navtab) {
-            View vsel = tabs.getChildAt(pos);
-            vsel.setSelected(true);
-            onLayoutChange(vsel, vsel.getLeft(), -1, vsel.getRight(), 0,0,0,0,0);
-            int lastSelected = (Integer)tabs.getTag();
-            if (lastSelected == pos) return;
-            vsel = tabs.getChildAt(lastSelected);
-            if (vsel != null) vsel.setSelected(false);
-            tabs.setTag(pos);
-            onNavigationItemSelected(pos, pos);
-        } else {
-            getActionBar().setSelectedNavigationItem(pos);
+        if (pos < 0 || pos >= hda.getCount()) return;
+        selectedIndex = pos;
+        Fragment fragment = getFragmentManager().findFragmentByTag(hda.getItem(pos));
+        if (fragment != null) {
+            showFrag(fragment);
+            lastFrag = (EditFragment)fragment;
+            codeEditor = lastFrag.getView();
+            setFileRunnable(EditFragment.isExecutable(lastFrag.type));
         }
+        notifyUiChanged();
     }
 
     int getSelectedItem() {
-        if (Application.navtab) {
-            return (Integer)tabs.getTag();
-        } else {
-            return getActionBar().getSelectedNavigationIndex();
-        }
+        return selectedIndex;
     }
 
     int getItemCount() {
         return hda.getCount();
     }
 
-    void setItemEdited(int idx, boolean edited) {
-        if (hda.getEdit(idx) != edited) {
-            hda.setEdit(idx, edited);
-            if (Application.navtab) {
-                TextView tv = tabs.getChildAt(idx).findViewById(android.R.id.text1);
-                String s = new File(hda.getItem(idx)).getName();
-                tv.setText(edited ? "*".concat(s) : s);
-            } else {
-                hda.notifyDataSetChanged();
-            }
-        }
-    }
 
 	boolean openFile(File f) {
 		String _it = f.getAbsolutePath();
 		int _i;
 		if (getFragmentManager().findFragmentByTag(_it) != null) {
 			for (_i = hda.getCount() - 1; _i >= 0 && !_it.equals(hda.getItem(_i)); _i--);
-		} else if ((_i = EditFragment.fileType(f)) >= 0) {
+		} else if ((_i = EditFragment.fileType(f, Application.getInstance().getDocuments().isDirty(_it))) >= 0) {
             Application app = Application.getInstance();
             Lsp lsp;
             EditFragment ef = new EditFragment(f, _i);
 			if ("s" == Application.completion && ef.hasLsp() && (lsp=app.lsp).isEnded()) {
 				lsp.end();
-				lsp.start(this, app.hand);
-				lsp.initialize(Project.rootPath);
+                try {
+                    lsp.start(this, app.hand);
+                    lsp.initialize(Project.rootPath);
+                } catch (SecurityException | IllegalStateException | IllegalArgumentException error) {
+                    Log.w("LSP", "Language server unavailable; the document remains editable", error);
+                }
 			}
 			FragmentTransaction mts = getFragmentManager().beginTransaction();
 			mts.add(R.id.editFrag, ef, _it);
@@ -462,30 +536,42 @@ HeaderAdapter.OnChangedListener, View.OnLayoutChangeListener {
 			mts.show(ef).commit();
 			lastFrag = ef;
 			hda.add(_it);
-			byhand = false;
 			setFileRunnable(EditFragment.isExecutable(_i));
 			_i = hda.getCount() - 1;
 		}
 		boolean b = _i>=0;
 		if (b) {
             selectItem(_i);
-			byhand = b;
 		}
+		notifyUiChanged();
 		return b;
 	}
 
-	private void openProject() {
-		Builder bd = new Builder(this);
-		bd.setTitle(R.string.open_prj);
-		bd.setMessage(getString(R.string.confirm_open, prj));
-		bd.setPositiveButton(android.R.string.ok, this);
-		bd.setNegativeButton(android.R.string.cancel, null);
-		transZ = true;
-		bd.create().show();
+	public void confirmOpenProject() {
+		String projectPath = pendingProjectPath;
+		pendingProjectPath = null;
+		if (projectPath == null) return;
+        List<String> closing = new ArrayList<>(hda);
+        closing.remove(getSelectedFilePath());
+        if (requestCloseIfDirty(closing, OPEN_PROJECT, projectPath)) return;
+		File config = new File(projectPath, Project.PROJ);
+		if (!FileHelper.isFile(config)) {
+			toast(getString(R.string.open_failed));
+			return;
+		}
+		try {
+			List<String> opens = new ArrayList<>();
+			Project.load(config, opens);
+			openProjFiles(opens, selectedIndex >= 0 ? hda.getItem(selectedIndex) : null);
+			setFileRunnable(true);
+		} catch (IOException e) {
+			e.printStackTrace();
+			toast(getString(R.string.open_failed));
+		}
+		notifyUiChanged();
 	}
 
-	private void openProjFiles(List<String> opens) {
-		String pth = transStr;
+	private void openProjFiles(List<String> opens, String pth) {
 		FragmentManager fm = getFragmentManager();
 		FragmentTransaction fts = fm.beginTransaction();
         Lsp lsp = Application.getInstance().lsp;
@@ -494,11 +580,13 @@ HeaderAdapter.OnChangedListener, View.OnLayoutChangeListener {
 			if (str.equals(pth)) {
 				i++;
 			} else {
+                closeDocumentSession(str);
 				hda.remove(str);
 				fts.remove(fm.findFragmentByTag(str));
 				lsp.didClose(new File(str));
 			}
 		}
+		selectedIndex = hda.indexOf(pth);
 		boolean s = "s" == Application.completion;
 		if (s && lsp.isEnded()) {
 			lsp.start(this, Application.getInstance().hand);
@@ -523,259 +611,305 @@ HeaderAdapter.OnChangedListener, View.OnLayoutChangeListener {
 			}
 		}
 		if (ef!=null) {
-			byhand = false;
 			selectItem(hda.getCount()-1);
 			if (ef!=lastFrag && lastFrag!=null) {
 				fts.hide(lastFrag);
 				lastFrag = ef;
 			}
 			fts.show(ef);
-			byhand = true;
 		}
 		fts.commit();
+		notifyUiChanged();
 	}
 
     @Override
     public boolean onOptionsItemSelected(MenuItem menuItem) {
-        switch (menuItem.getItemId()) {
-            case R.id.run:
-				boolean nbreaks = lastFrag==null || codeEditor.getText().getMarksCount()==0;
-				boolean nproj = Project.rootPath == null;
-				if (nproj && nbreaks)
-					onMenuItemClick(menuItem);
-				else {
-					View de = getWindow().getDecorView();
-					View r = de.findViewById(R.id.run);
-					if (r == null)
-						r = de.findViewById(R.id.redo);
-					PopupMenu pm = new PopupMenu(this, r);
-					Menu m = pm.getMenu();
-					if (!nproj) {
-						m.add(0, R.id.build, 0, R.string.build).setOnMenuItemClickListener(this);
-						if (lastFrag!=null && !lastFrag.isText())
-							m.add(0, R.id.compile, 0, R.string.compile).setOnMenuItemClickListener(this);
-					}
-					m.add(0, R.id.run, 0, R.string.run).setOnMenuItemClickListener(this);
-					if (!nbreaks)
-						m.add(0, R.id.debug, 0, R.string.debug).setOnMenuItemClickListener(this);
-					pm.show();
-				}
-				break;
-			case R.id.undo:
-                codeEditor.undo();
-                break;
-            case R.id.redo:
-                codeEditor.redo();
-                break;
-            case R.id.save:
-				try {
-					lastFrag.save();
-					toast(getText(R.string.saved));
-				} catch (IOException e) {
-					e.printStackTrace();
-				}
-				break;
-			case R.id.search:
-				mSearchAction.show();
-				break;
-			case R.id.close:
-				closePage(getSelectedItem());
-				break;
-			case R.id.prj_attr:
-				openFile(new File(Project.rootPath, Project.PROJ));
-				break;
-			case R.id.prj_close:
-				Project.save(hda);
-				Project.close();
-				FragmentManager fm = getFragmentManager();
-				FragmentTransaction trans = fm.beginTransaction();
-                Lsp lsp = Application.getInstance().lsp;
-				for (int i=0,l=hda.getCount();i<l;i++) {
-					String s = hda.getItem(i);
-					trans.remove(fm.findFragmentByTag(s));
-					lsp.didClose(new File(s));
-				}
-                hda.clear();
-				trans.commit();
-				lastFrag = null;
-				appMenu.findItem(R.id.prj).setEnabled(false);
-				setFileRunnable(false);
-				lsp.end();
-				break;
-			case R.id.settings:
-				Intent it = new Intent(this, SettingsActivity.class);
-				startActivityForResult(it, SETTING);
-				break;
-        }
+        performAction(menuItem.getItemId());
         return true;
     }
 
-    @Override
-    public void onClick(View v) {
-        if (v.getId() == android.R.id.button1) // closeBtn
-            closePage((Integer)v.getTag());
-        else { // tab
-            int pos = tabs.indexOfChild(v);
-            selectItem(pos);
-        }
-    }
-
-	public void popStorage(View v) {
-		PopupMenu pm = new PopupMenu(this, ((View)v.getParent()));
-		Menu m = pm.getMenu();
-		m.add(Menu.NONE, R.id.exstorage, Menu.NONE, R.string.external_storage).setOnMenuItemClickListener(this);
-		m.add(Menu.NONE, R.id.tmxstorage, Menu.NONE, R.string.termux_storage).setOnMenuItemClickListener(this);
-		pm.show();
-	}
-
-    private void closePage(int pos) {
+    public void closeFile(int pos) {
+        if (pos < 0 || pos >= hda.getCount()) return;
         String file = hda.getItem(pos);
-        hda.remove(file);
-        ActionBar bar;
-        int sel;
-        if (!Application.navtab && pos <= (sel=(bar=getActionBar()).getSelectedNavigationIndex()) && sel>0) {
-            boolean byh = byhand;
-            byhand = false;
-            bar.setSelectedNavigationItem(sel-1);
-            byhand = byh;
-        }
+        if (requestCloseIfDirty(Collections.singletonList(file), CLOSE_FILE, file)) return;
+        closeDocumentSession(file);
         FragmentManager fm = getFragmentManager();
         FragmentTransaction tran = fm.beginTransaction();
         EditFragment frg = (EditFragment) fm.findFragmentByTag(file);
-        if (!frg.isHidden() && hda.getCount() > 0) {
-            if (pos > 0) {
-                pos--;
-            }
-            tran.show(lastFrag = (EditFragment)fm.findFragmentByTag(hda.getItem(pos)));
+        boolean wasSelected = pos == selectedIndex;
+        hda.remove(file);
+        if (frg != null) tran.remove(frg);
+        if (wasSelected && hda.getCount() > 0) {
+            selectedIndex = Math.max(0, pos - 1);
+            lastFrag = (EditFragment)fm.findFragmentByTag(hda.getItem(selectedIndex));
+            if (lastFrag != null) tran.show(lastFrag);
+        } else if (pos < selectedIndex) {
+            selectedIndex--;
         }
-        tran.remove(frg);
         tran.commit();
         Application app = Application.getInstance();
-        app.lsp.didClose(frg.getFile());
+        if (frg != null) app.lsp.didClose(frg.getFile());
         app.hand.cacheData.remove(file);
         app.load(file);
-    }
-
-    public void inputKey(View view) {
-        String charSequence = ((TextView) view).getText().toString();
-        if ("⇥".equals(charSequence)) {
-			codeEditor.sendPrintableChar(Language.TAB);
-            return;
-		}
-        codeEditor.paste(charSequence);
-    }
-
-    @Override
-    public boolean onKeyUp(int i, KeyEvent keyEvent) {
-        if (i != keyEvent.KEYCODE_BACK || subc.getVisibility() != View.VISIBLE) {
-            return super.onKeyUp(i, keyEvent);
+        if (hda.getCount() == 0) {
+            selectedIndex = -1;
+            lastFrag = null;
+            codeEditor = null;
+            runVisible = false;
+        } else if (wasSelected && lastFrag != null) {
+            codeEditor = lastFrag.getView();
+            setFileRunnable(EditFragment.isExecutable(lastFrag.type));
         }
-        subc.setVisibility(View.GONE);
-        return false;
+        notifyUiChanged();
+    }
+
+    private boolean requestCloseIfDirty(List<String> paths, int kind, String target) {
+        if (savingClose) { toast(getString(R.string.saving)); return true; }
+        for (String path : paths) if (Application.getInstance().saver.isSaving(path)) {
+            toast(getString(R.string.saving)); return true;
+        }
+        List<String> dirty = new ArrayList<>();
+        DocumentSessions sessions = Application.getInstance().getDocuments();
+        for (String path : paths) if (sessions.isDirty(path) && !approvedDiscards.contains(path)) dirty.add(path);
+        if (dirty.isEmpty()) return false;
+        pendingClosePaths = dirty;
+        pendingCloseKind = kind;
+        pendingCloseTarget = target;
+        notifyUiChanged();
+        return true;
+    }
+
+    public List<String> getPendingClosePaths() { return pendingClosePaths; }
+
+    private void closeDocumentSession(String path) {
+        DocumentSessions sessions = Application.getInstance().getDocuments();
+        if (approvedDiscards.contains(path)) sessions.discard(path);
+        else sessions.closeDocument(path);
+    }
+
+    public void cancelCloseDocuments() {
+        if (savingClose) return;
+        pendingClosePaths = Collections.emptyList();
+        pendingCloseKind = 0;
+        pendingCloseTarget = null;
+        notifyUiChanged();
+    }
+
+    public void resolveCloseDocuments(boolean save) {
+        if (savingClose || pendingClosePaths.isEmpty()) return;
+        for (String path : pendingClosePaths) if (Application.getInstance().saver.isSaving(path)) {
+            toast(getString(R.string.saving)); return;
+        }
+        if (save) {
+            List<CompletableFuture<Boolean>> writes = new ArrayList<>();
+            for (String path : pendingClosePaths) {
+                EditFragment fragment = (EditFragment)getFragmentManager().findFragmentByTag(path);
+                if (fragment == null || fragment.getView() == null) { toast(getString(R.string.save_failed)); return; }
+            }
+            savingClose = true;
+            for (String path : pendingClosePaths)
+                writes.add(((EditFragment)getFragmentManager().findFragmentByTag(path)).save());
+            notifyUiChanged();
+            CompletableFuture.allOf(writes.toArray(new CompletableFuture[0])).whenComplete((ignored, error) -> {
+                savingClose = false;
+                if (isDestroyed() || isFinishing()) return;
+                if (error != null) { toast(getString(R.string.save_failed)); notifyUiChanged(); return; }
+                for (String path : pendingClosePaths) if (Application.getInstance().getDocuments().isDirty(path)) {
+                    toast(getString(R.string.save_newer_changes)); notifyUiChanged(); return;
+                }
+                finishCloseDocuments(true);
+            });
+        } else finishCloseDocuments(false);
+    }
+
+    public boolean isSavingClose() { return savingClose; }
+
+    private void finishCloseDocuments(boolean save) {
+        int kind = pendingCloseKind;
+        String target = pendingCloseTarget;
+        if (!save) approvedDiscards = new HashSet<>(pendingClosePaths);
+        cancelCloseDocuments();
+        try {
+            if (kind == CLOSE_FILE) closeFile(hda.indexOf(target));
+            else if (kind == CLOSE_PROJECT) closeProject();
+            else if (kind == OPEN_PROJECT) { pendingProjectPath = target; confirmOpenProject(); }
+        } finally { approvedDiscards = Collections.emptySet(); }
+    }
+
+    public void inputKey(String key) {
+        if (codeEditor == null) return;
+        if ("⇥".equals(key)) codeEditor.sendPrintableChar(Language.TAB);
+        else codeEditor.paste(key);
+    }
+
+    public String getPendingProjectPath() {
+        return pendingProjectPath;
+    }
+
+    public void dismissProjectPrompt() {
+        pendingProjectPath = null;
+        notifyUiChanged();
+    }
+
+    public List<String> getDirectoryItems() {
+        ArrayList<String> items = new ArrayList<>(adp.getCount());
+        for (int i = 0; i < adp.getCount(); i++) items.add(adp.getItem(i).name);
+        return items;
+    }
+
+	public boolean isOpenableFile(String name) {
+		File file = new File(pwd, name);
+		return FileHelper.isFile(file) && EditFragment.fileType(file) >= 0;
+	}
+
+    public int getDirectoryIcon(int index) {
+        return adp.getItem(index).icon;
+    }
+
+    public String getDirectoryPath() {
+        return pwd.getAbsolutePath();
+    }
+
+    public List<String> getOpenFilePaths() {
+        ArrayList<String> files = new ArrayList<>(hda.getCount());
+        for (String path : hda) files.add(path);
+        return files;
+    }
+
+    public String getSelectedFilePath() {
+        return selectedIndex >= 0 && selectedIndex < hda.getCount() ? hda.getItem(selectedIndex) : null;
+    }
+
+    public boolean hasProject() {
+        return Project.rootPath != null;
+    }
+
+    public boolean canDebug() {
+        try {
+            String entry = getRunConfiguration().entryPath(getRunConfigurationScope(), getSelectedFilePath());
+            EditFragment target = entry == null ? null : (EditFragment)getFragmentManager().findFragmentByTag(entry);
+            return target != null && target.hasLsp() && (hasProject() || EditFragment.isExecutable(target.type))
+                && target.getView() != null && target.getView().getText().getMarksCount() > 0;
+        } catch (IllegalArgumentException error) { return false; }
+    }
+
+    public boolean canCompile() {
+        return lastFrag != null && !lastFrag.isText();
+    }
+
+    public boolean isRunVisible() {
+        if (runVisible) return true;
+        try { return !getRunConfiguration().getEntryFile().isEmpty(); }
+        catch (IllegalArgumentException error) { return false; }
+    }
+
+    public boolean isDeleting() {
+        return deleting;
+    }
+
+    public void renameFile(String from, String to) {
+        if (Application.getInstance().saver.isSaving()) { toast(getString(R.string.saving)); return; }
+        File source = new File(from);
+        if (!source.isAbsolute()) source = new File(pwd, from);
+        if (!to.isEmpty() && FileHelper.rename(source, to)) refresh();
+        else toast(getString(R.string.rename_failed));
+    }
+
+    public void deleteBrowserEntry(String name) {
+        if (Application.getInstance().saver.isSaving()) { toast(getString(R.string.saving)); return; }
+        final File target = new File(name).isAbsolute() ? new File(name) : new File(pwd, name);
+        deleting = true;
+        notifyUiChanged();
+        new Thread(new Runnable() {
+            @Override public void run() {
+                final boolean removed = FileHelper.removeFiles(target);
+                runOnUiThread(new Runnable() {
+                    @Override public void run() {
+                        deleting = false;
+                        if (removed) {
+                            toast(getText(R.string.deleted));
+                            refresh();
+                        } else notifyUiChanged();
+                    }
+                });
+            }
+        }).start();
+    }
+
+    public void createFile(String name, boolean directory) {
+        if (name.isEmpty()) {
+            toast(getText(R.string.empty_name));
+            return;
+        }
+        try {
+            FileHelper.createFile(new File(pwd, name), directory);
+            refresh();
+        } catch (IOException e) {
+            e.printStackTrace();
+            toast(e.getMessage());
+        }
+    }
+
+    public void createProject(String name, String template, boolean withClangd, boolean withFormat) {
+        if (name.isEmpty()) {
+            toast(getText(R.string.empty_name));
+            return;
+        }
+        File directory = new File(pwd, name);
+        if (!Utils.extractTemplate(this, template, directory)) return;
+        try {
+            if (withClangd) Utils.dumpFile(getAssets().open("cld"), new File(directory, ".clangd"));
+            if (withFormat) Utils.dumpFile(getAssets().open("fmt"), new File(directory, ".clang-format"));
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        pwd = prj = directory;
+        setFileRunnable(true);
+        refresh();
     }
 
     @Override
     protected void onRestoreInstanceState(Bundle bundle) {
         super.onRestoreInstanceState(bundle);
         pwd = new File(bundle.getString(PWD));
-		int i = 0, j = 0, _tp = 0;
+        adp.setPath(pwd);
 		List<String> files = bundle.getStringArrayList(FILES);
 		if (files != null) {
 			FragmentManager fm = getFragmentManager();
-            hda.load(bundle);
-			for (String s:bundle.getStringArrayList(FILES)) {
-				hda.add(s);
-				EditFragment f = (EditFragment)fm.findFragmentByTag(s);
-				if (!f.isHidden()) {
-					j = i;
-					_tp = f.type;
-					lastFrag = f;
-					codeEditor = (TextEditor)f.getView();
-				}
-				i++;
-			}
-			if (!hda.isEmpty()) {
-                hda.load(bundle);
-				byhand = false;
-				selectItem(j);
-				byhand = true;
-				setFileRunnable(EditFragment.isExecutable(_tp));
-			}
+			for (String path : files) hda.add(path);
+			selectedIndex = bundle.getInt("selected", 0);
+			if (selectedIndex < 0 || selectedIndex >= hda.getCount()) selectedIndex = 0;
+			if (!hda.isEmpty()) selectItem(selectedIndex);
 		}
-		if (subc != null)
-			subc.setVisibility(bundle.getInt(SHOWLIST));
-		appMenu.findItem(R.id.prj).setEnabled(Project.rootPath!=null);
+		notifyUiChanged();
     }
 
     @Override
     public void onSaveInstanceState(Bundle bundle) {
         bundle.putString(PWD, pwd.getPath());
-		bundle.putInt(SHOWLIST, subc.getVisibility());
+		bundle.putInt("selected", selectedIndex);
 		ArrayList<String> al = new ArrayList<>(hda.getCount());
 		for (String s:hda)
 			al.add(s);
 		bundle.putStringArrayList(FILES, al);
-        hda.store(bundle);
+        bundle.putString("pendingProject", pendingProjectPath);
+        bundle.putString("pendingRename", pendingRename == null ? null : pendingRename.getFile().getAbsolutePath());
+        bundle.putString("pendingRenameText", pendingRenameText);
+        bundle.putString("pendingReload", pendingReload == null ? null : pendingReload.getFile().getAbsolutePath());
+        bundle.putStringArrayList("pendingClosePaths", new ArrayList<>(pendingClosePaths));
+        bundle.putInt("pendingCloseKind", pendingCloseKind);
+        bundle.putString("pendingCloseTarget", pendingCloseTarget);
+        bundle.putBoolean("installPrompt", installPrompt);
+        bundle.putBoolean("installPromptNoRemind", installPromptNoRemind);
+        bundle.putBoolean("initPrompt", initPrompt);
+        bundle.putBoolean("initPromptNoRemind", initPromptNoRemind);
         super.onSaveInstanceState(bundle);
     }
-
-	@Override
-	public void onClick(DialogInterface di, int id) {
-		if (transZ) {
-			File c = new File(prj, Project.PROJ);
-			if (FileHelper.isFile(c)) {
-				try {
-					List<String> opens = new ArrayList<>();
-					Project.load(c, opens);
-					appMenu.findItem(R.id.prj).setEnabled(true);
-					openProjFiles(opens);
-                    setFileRunnable(true);
-					return;
-				} catch (IOException e) {
-                    e.printStackTrace();
-				}
-			}
-			toast(getString(R.string.open_failed));
-			return;
-		}
-        TextView tv = transTxV;
-        if (tv != null) {
-            transTxV = null;
-            CharSequence name = tv.getText();
-            if (name.length() > 0
-                && FileHelper.rename(new File(pwd, transStr), name.toString())) {
-                refresh();
-            } else {
-				toast(getString(R.string.rename_failed));
-			}
-            return;
-        }
-		ProgressDialog pd = new ProgressDialog(MainActivity.this);
-		pd.setMessage(getString(R.string.deleting, transStr));
-		pd.setIndeterminate(true);
-		pd.show();
-		transDlg = pd;
-		new Thread(this).start();
-	}
-
-	public void run() {
-		if (Looper.myLooper() != Looper.getMainLooper()) {
-			transZ = FileHelper.removeFiles(new File(pwd, transStr));
-			runOnUiThread(this);
-		} else {
-			if (transZ) {
-				toast(getText(R.string.deleted));
-				refresh();
-			}
-			transDlg.dismiss();
-		}
-	}
 
 	@Override
 	protected void onResume() {
 		super.onResume();
 		refresh();
-		onGlobalLayout();
         if (reqCode != SHOW_FLOATING) {
             panel.clean();
             reqCode = 0;
@@ -795,8 +929,13 @@ HeaderAdapter.OnChangedListener, View.OnLayoutChangeListener {
 					if (chg) {
 						lsp.end();
 						if (s) {
-							lsp.start(this, app.hand);
-							lsp.initialize(Project.rootPath);
+                            try {
+                                lsp.start(this, app.hand);
+                                lsp.initialize(Project.rootPath);
+                            } catch (RuntimeException error) {
+                                android.util.Log.e("LSP", "Unable to start language server", error);
+                                toast(error.toString());
+                            }
 						}
 						chg = s;
 					}
@@ -817,8 +956,7 @@ HeaderAdapter.OnChangedListener, View.OnLayoutChangeListener {
                         ed.setAutoCaps(Application.auto_caps);
                         if (chg) f.onOpen(ed.getText());
 					}
-                    notifyNavModeChanged();
-                    ((KeyPanel)keys.getChildAt(0)).resetKeys(Application.syms);
+					notifyUiChanged();
 				} else if (resultCode == RESULT_FIRST_USER) {
 					recreate();
 				}
@@ -852,92 +990,28 @@ HeaderAdapter.OnChangedListener, View.OnLayoutChangeListener {
 		}
 	}
 
-	private final DialogInterface.OnClickListener onc = new DialogInterface.OnClickListener(){
-		public void onClick(DialogInterface p1, int p2) {
-			TextView tv = transTxV;
-            transTxV = null;
-            String name = tv.getText().toString();
-            if (name.isEmpty()) {
-                toast(getText(R.string.empty_name));
-                return;
-            }
-			File f = new File(pwd, name);
-			if (tv.getId() == R.id.newfile) {
-				try {
-					FileHelper.createFile(f, p2 == DialogInterface.BUTTON_NEUTRAL);
-					refresh();
-				} catch (IOException e) {
-					e.printStackTrace();
-					toast(e.getMessage());
-				}
-                return;
-			}
-            View v = transV;
-            transV = null;
-            String s = ((Spinner)v.findViewById(R.id.prj_temp)).getSelectedItem().toString();
-            if (Utils.extractTemplate(MainActivity.this, s, f)) {
-                AssetManager am = getAssets();
-                try {
-                    if (((CompoundButton)v.findViewById(R.id.prj_cld)).isChecked()) {
-                        Utils.dumpFile(am.open("cld"), new File(f, ".clangd"));
-                    }
-                    if (((CompoundButton)v.findViewById(R.id.prj_fmt)).isChecked()) {
-                        Utils.dumpFile(am.open("fmt"), new File(f, ".clang-format"));
-                    }
-                } catch (IOException ioe) {
-                   ioe.printStackTrace();
-                }
-				appMenu.findItem(R.id.prj).setEnabled(true);
-                setFileRunnable(true);
-				pwd = f;
-				prj = f;
-				refresh();
-			}
-		}
-	};
-
-    public void createFile(View view) {
-		PopupMenu pm = new PopupMenu(this, view);
-		Menu m = pm.getMenu();
-		m.add(Menu.NONE, R.id.newfile, Menu.NONE, R.string.new_f).setOnMenuItemClickListener(this);
-		m.add(Menu.NONE, R.id.newprj, Menu.NONE, R.string.new_prj).setOnMenuItemClickListener(this);
-		pm.show();
-    }
-
-	@Override
-	public boolean onCreateOptionsMenu(Menu menu) {
-		getMenuInflater().inflate(R.menu.main, menu);
-		appMenu = menu;
-		showFullMenu(false);
-		return true;
-	}
-
-	private void showFullMenu(boolean show) {
-		Menu menu = appMenu;
-		int i = menu.size() - 3;
-		boolean prj = Project.rootPath == null;
-		for (; i >= 0; i--) {
-			MenuItem mi = menu.getItem(i);
-			if (prj || mi.getItemId() != R.id.run)
-				menu.getItem(i).setVisible(show);
-		}
-	}
-
     @Override
     protected void onStop() {
+        try {
+            Application.getInstance().getDocuments().flush();
+        } catch (IOException error) {
+            Log.e("Recovery", "Unable to flush unsaved documents", error);
+        }
         getPreferences(MODE_PRIVATE).edit().putString(PWD, pwd.getPath()).commit();
         super.onStop();
     }
 
     @Override
     protected void onDestroy() {
+        runtimeHostReady = false;
+        if (isFinishing()) Application.getInstance().getRuns().cancelPreparation();
         hda = null;
         panel.clean();
         panel = null;
         adp = null;
-        mSearchAction = null;
         codeEditor = null;
-        msgEmpty = null;
+        uiRefresh = null;
+        searchUi = null;
         Application.getInstance().hand.updateActivity(null);
         super.onDestroy();
     }
@@ -946,14 +1020,9 @@ HeaderAdapter.OnChangedListener, View.OnLayoutChangeListener {
         HelperUtils.show(Toast.makeText(this, charSequence, Toast.LENGTH_SHORT));
     }
 
-    public void showList(View view) {
-		View v = subc;
-        v.setVisibility(View.VISIBLE ^ View.GONE ^ v.getVisibility());
-    }
-
 	public void setEditor(TextEditor edit) {
 		codeEditor = edit;
-        ((KeyPanel)keys.getChildAt(0)).setEditor(edit);
+		notifyUiChanged();
 	}
 
 	public TextEditor getEditor() {
@@ -961,121 +1030,50 @@ HeaderAdapter.OnChangedListener, View.OnLayoutChangeListener {
 	}
 
     public TextEditor newEditor() {
-        if (editAttr == null) {
-            XmlPullParser xml;
-            try {
-                xml = getResources().getLayout(R.layout.edit);
-                int i;
-                do {
-                    i = xml.next();
-                } while(i != XmlPullParser.START_TAG);
-                editAttr = android.util.Xml.asAttributeSet(xml);
-            } catch (Exception ioe) {
-                ioe.printStackTrace();
-            }
-        }
-        return new TextEditor(this, editAttr);
+        return new TextEditor(this);
     }
 
     @Override
     public void onAdd(String item) {
-        if (hda.getCount() == 1) {
-            if (Application.navtab) {
-                if (getResources().getConfiguration().orientation == Configuration.ORIENTATION_PORTRAIT) {
-                    tabScroller.setVisibility(View.VISIBLE);
-                } else {
-                    ActionBar bar = getActionBar();
-                    bar.setCustomView(tabScroller);
-                    bar.setDisplayShowCustomEnabled(true);
-                }
-            } else {
-                ActionBar ab = getActionBar();
-                ab.setNavigationMode(ActionBar.NAVIGATION_MODE_LIST);
-                ab.setDisplayShowTitleEnabled(false);
-            }
-            msgEmpty.setVisibility(View.GONE);
-            showFullMenu(true);
-        }
-        if (!Application.navtab) return;
-        addTab(hda.getCount()-1, item);
-    }
-
-    private void addTab(int idx, String item) {
-        View tab = LayoutInflater.from(tabScroller.getContext()).inflate(R.layout.tab_item, tabs, false);
-        tab.setTag(item);
-        tab.setOnClickListener(this);
-        String fname = new File(item).getName();
-        if (hda.getEdit(idx)) fname = "*" + fname;
-        ((TextView)tab.findViewById(android.R.id.text1)).setText(fname);
-        View closeBtn = tab.findViewById(android.R.id.button1);
-        closeBtn.setTag(idx);
-        closeBtn.setOnClickListener(this);
-        tabs.addView(tab, tab.getLayoutParams());
-        tab.addOnLayoutChangeListener(this);
+		notifyUiChanged();
     }
 
     @Override
     public void onRemove(String item) {
-        if (hda.getCount() == 0) {
-            onClear();
-        }
-        if (!Application.navtab) return;
-        ViewGroup tabs = this.tabs;
-        int pos = 0, len = tabs.getChildCount();
-        while (pos<len) {
-            View v = tabs.getChildAt(pos);
-            if (item.equals(v.getTag())) {
-                tabs.removeViewAt(pos);
-                int selPos = (Integer)tabs.getTag();
-                if (pos == selPos) {
-                    if (pos > 0) pos--;
-                    if (pos < tabs.getChildCount()) { // exclude clearing condition
-                        tabs.getChildAt(pos).setSelected(true);
-                        tabs.setTag(pos);
-                    }
-                } else if (pos < selPos) {
-                    tabs.setTag(--selPos);
-                }
-                break;
-            }
-            pos++;
-        }
-        for (len--;pos<len;pos++) {
-            tabs.getChildAt(pos).findViewById(android.R.id.button1).setTag(pos);
-        }
+		notifyUiChanged();
     }
 
     @Override
     public void onClear() {
-        if (Application.navtab) {
-            tabs.removeAllViewsInLayout();
-            if (getResources().getConfiguration().orientation == Configuration.ORIENTATION_PORTRAIT) {
-                tabScroller.setVisibility(View.GONE);
-            } else {
-                ActionBar bar = getActionBar();
-                bar.setDisplayShowCustomEnabled(false);
-                bar.setCustomView(null);
-            }
-        } else {
-            ActionBar ab = getActionBar();
-            ab.setNavigationMode(ActionBar.NAVIGATION_MODE_STANDARD);
-            ab.setDisplayShowTitleEnabled(true);
-        }
-        msgEmpty.setVisibility(View.VISIBLE);
-        showFullMenu(false);
+		selectedIndex = -1;
+		lastFrag = null;
+		codeEditor = null;
+		notifyUiChanged();
     }
 
     @Override
-    public void onLayoutChange(View vsel, int left, int top, int right, int bottom, int oldLeft, int oldTop, int oldRight, int oldBottom) {
-        HorizontalScrollView tabScroller = this.tabScroller;
-        int scrollX = tabScroller.getScrollX();
-        if (left < scrollX)
-            tabScroller.smoothScrollTo(left, 0);
-        else if ((right -= tabScroller.getWidth()) > scrollX) {
-            tabScroller.smoothScrollTo(right, 0);
+    public boolean onKeyShortcut(int keyCode, KeyEvent event) {
+        boolean ctrl = event.hasModifiers(KeyEvent.META_CTRL_ON);
+        boolean ctrlShift = event.hasModifiers(KeyEvent.META_CTRL_ON | KeyEvent.META_SHIFT_ON);
+        int action = 0;
+        if ((ctrl || ctrlShift) && keyCode == KeyEvent.KEYCODE_Z && codeEditor != null) {
+            action = ctrlShift ? R.id.redo : R.id.undo;
+        } else if (ctrl) {
+            switch (keyCode) {
+                case KeyEvent.KEYCODE_S:
+                    if (lastFrag != null) action = R.id.save;
+                    break;
+                case KeyEvent.KEYCODE_F:
+                    if (codeEditor != null && searchUi != null) action = R.id.search;
+                    break;
+                case KeyEvent.KEYCODE_R:
+                    if (runVisible && (lastFrag != null || Project.rootPath != null)) action = R.id.run;
+                    break;
+            }
         }
-        if (top == 0)
-            vsel.removeOnLayoutChangeListener(this);
+        if (action == 0) return super.onKeyShortcut(keyCode, event);
+        performAction(action);
+        return true;
     }
 
     @Override
@@ -1093,61 +1091,20 @@ HeaderAdapter.OnChangedListener, View.OnLayoutChangeListener {
             }
 
             if (childIndex != -2) {
-                ViewGroup group = tabs;
-                int childCount = group.getChildCount();
+                int childCount = hda.getCount();
 
                 // Special case: -1 to last child
                 if (childIndex == -1) {
                     childIndex = childCount - 1;
                 }
 
-                // Validate and perform click
                 if (childIndex >= 0 && childIndex < childCount) {
-                    View child = group.getChildAt(childIndex);
-                    if (child != null && child.isEnabled() && child.performClick()) {
-                        return true;
-                    }
+                    selectItem(childIndex);
+                    return true;
                 }
             }
         }
         return super.onKeyDown(keyCode, event);
     }
 
-    private void notifyNavModeChanged() {
-        if (hda.isEmpty()) return;
-        ActionBar bar = getActionBar();
-        int actionNavMode = bar.getNavigationMode();
-        int orientation = getResources().getConfiguration().orientation;
-        if (Application.navtab && actionNavMode == ActionBar.NAVIGATION_MODE_LIST) {
-            int selIdx = bar.getSelectedNavigationIndex();
-            bar.setNavigationMode(ActionBar.NAVIGATION_MODE_STANDARD);
-            bar.setDisplayShowTitleEnabled(true);
-            if (orientation == Configuration.ORIENTATION_LANDSCAPE) {
-                bar.setDisplayShowCustomEnabled(true);
-                bar.setCustomView(tabScroller);
-            } else {
-                tabScroller.setVisibility(View.VISIBLE);
-            }
-            for (int i=0, l=hda.getCount(); i<l; i++) {
-                addTab(i, hda.getItem(i));
-            }
-            tabs.setTag(selIdx);
-            tabs.getChildAt(selIdx).setSelected(true);
-        } else if (!Application.navtab && actionNavMode == ActionBar.NAVIGATION_MODE_STANDARD) {
-            int selIdx = (Integer)tabs.getTag();
-            if (orientation == Configuration.ORIENTATION_LANDSCAPE) {
-                bar.setDisplayShowCustomEnabled(false);
-                bar.setCustomView(null);
-            } else {
-                tabScroller.setVisibility(View.GONE);
-            }
-            tabs.removeAllViews();
-            hda.notifyDataSetChanged();
-            bar.setNavigationMode(ActionBar.NAVIGATION_MODE_LIST);
-            bar.setDisplayShowTitleEnabled(false);
-            byhand = false;
-            bar.setSelectedNavigationItem(selIdx);
-            byhand = true;
-        }
-    }
 }

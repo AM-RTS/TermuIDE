@@ -9,21 +9,6 @@ import java.util.*;
 import static android.provider.DocumentsContract.Document.*;
 
 public class FileHelper {
-	private final static Set<String> CODE_EXTENS;
-
-	static {
-		Set<String> exts = new HashSet<>();
-		exts.add("c");
-		exts.add("h");
-		exts.add("hpp");
-		exts.add("cpp");
-		exts.add("cc");
-		exts.add("cxx");
-		exts.add("java");
-		exts.add("js");
-        exts.add("json");
-		CODE_EXTENS = exts;
-	}
 
 	public static boolean isTermuxFile(File f) {
 		return f.getAbsolutePath().startsWith("/data/data/com.termux");
@@ -45,23 +30,23 @@ public class FileHelper {
 			return Arrays.asList(fis);
 		}
 		Application app = Application.getInstance();
-		ContentResolver sov = app.getContentResolver();
-		Uri u = DocumentsContract.buildChildDocumentsUriUsingTree(app.treeUri, f.getAbsolutePath());
-		Cursor cur = sov.query(u, new String[]{
-			COLUMN_DOCUMENT_ID,
-			COLUMN_MIME_TYPE
-		},
-		null, null, null);
-		if (cur == null) return Arrays.asList(new FileItem[0]);
-		ArrayList<FileItem> fis = new ArrayList<>(cur.getCount());
-		if (cur.moveToFirst())
-		do {
-			File fi = new File(cur.getString(0));
-			if (filter == null || filter.accept(fi))
-				fis.add(toFileItem(MIME_TYPE_DIR.equals(cur.getString(1)), fi.getName()));
-		} while (cur.moveToNext());
-		cur.close();
-		return fis;
+		if (app.treeUri == null) return Collections.emptyList();
+        try {
+            Uri uri = DocumentsContract.buildChildDocumentsUriUsingTree(app.treeUri, f.getAbsolutePath());
+            try (Cursor cursor = app.getContentResolver().query(uri,
+                    new String[]{COLUMN_DOCUMENT_ID, COLUMN_MIME_TYPE}, null, null, null)) {
+                if (cursor == null) return Collections.emptyList();
+                ArrayList<FileItem> files = new ArrayList<>(cursor.getCount());
+                while (cursor.moveToNext()) {
+                    File file = new File(cursor.getString(0));
+                    if (filter == null || filter.accept(file))
+                        files.add(toFileItem(MIME_TYPE_DIR.equals(cursor.getString(1)), file.getName()));
+                }
+                return files;
+            }
+        } catch (SecurityException | IllegalArgumentException error) {
+            return Collections.emptyList();
+        }
 	}
 
 	private static FileItem toFileItem(boolean dir, String n) {
@@ -69,51 +54,64 @@ public class FileHelper {
 		if (dir)
 			icon = R.drawable.ic_folder_24;
 		else {
-            int i = n.lastIndexOf(".");
-			String suffix = i >= 0 ? n.substring(i+1) : null;
-			icon = CODE_EXTENS.contains(suffix) ? R.drawable.ic_code_24 : R.drawable.ic_file_24;
+            icon = Languages.isCodeFile(n) ? R.drawable.ic_code_24 : R.drawable.ic_file_24;
 		}
 		return new FileItem(icon, n);
 	}
 
 	public final static InputStream openInputStream(File f) throws IOException {
+		SourceWriter.recover(f);
 		if (!isTermuxFile(f))
 			return new FileInputStream(f);
 		Application app = Application.getInstance();
-		Uri uri = DocumentsContract.buildDocumentUriUsingTree(app.treeUri, f.getAbsolutePath());
-		ContentResolver crv = app.getContentResolver();
-		if (null == crv.query(uri, null, null, null, null)) {
-			uri = DocumentsContract.buildDocumentUriUsingTree(app.treeUri, f.getParent());
-			uri = DocumentsContract.createDocument(crv, uri, "text/plain", f.getName());
-		}
-		return crv.openInputStream(uri);
+        if (app.treeUri == null) throw new FileNotFoundException("Termux storage access is required");
+        try {
+            Uri uri = DocumentsContract.buildDocumentUriUsingTree(app.treeUri, f.getAbsolutePath());
+            InputStream input = app.getContentResolver().openInputStream(uri);
+            if (input == null) throw new IOException("Document provider did not open the file");
+            return input;
+        } catch (SecurityException | IllegalArgumentException error) {
+            throw new IOException("Cannot read the source document", error);
+        }
 	}
 
 	public final static OutputStream openOutputStream(File f) throws IOException {
 		if (!isTermuxFile(f))
 			return new FileOutputStream(f);
 		Application app = Application.getInstance();
-		Uri uri = DocumentsContract.buildDocumentUriUsingTree(app.treeUri, f.getAbsolutePath());
-		ContentResolver crv = app.getContentResolver();
-		if (null == crv.query(uri, null, null, null, null)) {
-			uri = DocumentsContract.buildDocumentUriUsingTree(app.treeUri, f.getParent());
-			uri = DocumentsContract.createDocument(crv, uri, "text/plain", f.getName());
-		}
-		return crv.openOutputStream(uri, "wt");
+        if (app.treeUri == null) throw new FileNotFoundException("Termux storage access is required");
+        try {
+            Uri uri = DocumentsContract.buildDocumentUriUsingTree(app.treeUri, f.getAbsolutePath());
+            ContentResolver resolver = app.getContentResolver();
+            boolean exists;
+            try (Cursor cursor = resolver.query(uri, new String[]{COLUMN_DOCUMENT_ID}, null, null, null)) {
+                exists = cursor != null && cursor.moveToFirst();
+            }
+            if (!exists) {
+                Uri parent = DocumentsContract.buildDocumentUriUsingTree(app.treeUri, f.getParent());
+                uri = DocumentsContract.createDocument(resolver, parent, "text/plain", f.getName());
+            }
+            if (uri == null) throw new IOException("Document provider did not create the file");
+            OutputStream output = resolver.openOutputStream(uri, "wt");
+            if (output == null) throw new IOException("Document provider did not open the file for writing");
+            return output;
+        } catch (SecurityException | IllegalArgumentException error) {
+            throw new IOException("Cannot write the source document", error);
+        }
 	}
 
 	public final static long lastModified(File f) {
 		if (!isTermuxFile(f))
 			return f.lastModified();
 		Application app = Application.getInstance();
-		Uri uri = DocumentsContract.buildDocumentUriUsingTree(app.treeUri, f.getAbsolutePath());
-		Cursor cur = app.getContentResolver().query(uri, new String[]{
-			COLUMN_LAST_MODIFIED
-		}, null, null, null);
-		if (cur == null || !cur.moveToFirst()) return 0;
-		long l = cur.getLong(0);
-		cur.close();
-		return l;
+		if (app.treeUri == null) return 0;
+        try {
+            Uri uri = DocumentsContract.buildDocumentUriUsingTree(app.treeUri, f.getAbsolutePath());
+            try (Cursor cursor = app.getContentResolver().query(uri,
+                    new String[]{COLUMN_LAST_MODIFIED}, null, null, null)) {
+                return cursor != null && cursor.moveToFirst() ? cursor.getLong(0) : 0;
+            }
+        } catch (SecurityException | IllegalArgumentException error) { return 0; }
 	}
 
 	public final static long length(File f) {
@@ -156,17 +154,14 @@ public class FileHelper {
 		if (!isTermuxFile(f))
 			return f.isFile();
 		Application app = Application.getInstance();
-		Uri u = DocumentsContract.buildDocumentUriUsingTree(app.treeUri, f.getAbsolutePath());
-		Cursor cur = app.getContentResolver().query(u, new String[]{
-			COLUMN_MIME_TYPE
-		}, null, null, null);
-		boolean isd = false;
-		if (cur != null) {
-			if (cur.moveToFirst())
-				isd = !MIME_TYPE_DIR.equals(cur.getString(0));
-			cur.close();
-		}
-		return isd;
+		if (app.treeUri == null) return false;
+        try {
+            Uri uri = DocumentsContract.buildDocumentUriUsingTree(app.treeUri, f.getAbsolutePath());
+            try (Cursor cursor = app.getContentResolver().query(uri,
+                    new String[]{COLUMN_MIME_TYPE}, null, null, null)) {
+                return cursor != null && cursor.moveToFirst() && !MIME_TYPE_DIR.equals(cursor.getString(0));
+            }
+        } catch (SecurityException | IllegalArgumentException error) { return false; }
 	}
 
 	public final static Object[] queryFile(File f, String[] projs) {

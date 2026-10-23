@@ -1,6 +1,5 @@
 package cn.rbc.termuc;
 import android.app.*;
-import android.app.AlertDialog.*;
 import android.content.*;
 import android.content.pm.*;
 import android.content.res.*;
@@ -13,6 +12,11 @@ import cn.rbc.codeeditor.util.*;
 import java.io.*;
 
 public class Utils {
+	public interface ComposeDialogHost {
+		void showTermuxInstallPrompt(boolean showNeverRemind);
+		void showTermuxInitPrompt(boolean showAlreadyInitialized);
+	}
+
 	public final static File ROOT = Environment.getExternalStorageDirectory();
     public final static String TERMUX = "com.termux";
 	public final static String PREF = "/data/data/" + TERMUX + "/files";
@@ -20,6 +24,10 @@ public class Utils {
     private final static String PREFC = TERMUX + ".RUN_COMMAND_";
 
 	public static void run(Context cont, String cmd, String[] args, String pwd, boolean background) {
+        run(cont, cmd, args, pwd, background, null);
+    }
+
+    public static void run(Context cont, String cmd, String[] args, String pwd, boolean background, PendingIntent result) {
         Intent it = new Intent();
         it.setClassName(TERMUX, TERMUX + ".app.RunCommandService");
         it.setAction(TERMUX + ".RUN_COMMAND");
@@ -28,10 +36,8 @@ public class Utils {
         it.putExtra(PREFC + "WORKDIR", pwd);
         it.putExtra(PREFC + "BACKGROUND", background);
         it.putExtra(PREFC + "SESSION_ACTION", "0");
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-            cont.startForegroundService(it);
-        else
-            cont.startService(it);
+        if (result != null) it.putExtra(PREFC + "PENDING_INTENT", result);
+        cont.startForegroundService(it);
 	}
 
 	public static String escape(String str) {
@@ -93,55 +99,37 @@ public class Utils {
 			pm.getPackageInfo(TERMUX, PackageManager.GET_GIDS);
 			if (manually) HelperUtils.show(Toast.makeText(ctx, R.string.installed, Toast.LENGTH_SHORT));
 		} catch (PackageManager.NameNotFoundException e) {
-			Builder bd = new Builder(ctx);
-			bd.setTitle(R.string.install_app);
-			bd.setMessage(R.string.confirm_install);
-			bd.setNegativeButton(android.R.string.cancel, null);
-			Install oc = new Install(ctx);
-			bd.setPositiveButton(android.R.string.ok, oc);
-            if (!manually)
-			    bd.setNeutralButton(R.string.no_remind, oc);
-			bd.create().show();
+			if (ctx instanceof ComposeDialogHost)
+				((ComposeDialogHost)ctx).showTermuxInstallPrompt(!manually);
 		}
 	}
 
-	private static class Install
-	implements DialogInterface.OnClickListener {
-		Activity mApp;
-		Install(Activity app) {
-			mApp = app;
-		}
-		public void onClick(DialogInterface d, int p) {
-			Activity app = mApp;
-			if (p == DialogInterface.BUTTON_NEUTRAL) {
-				app.getPreferences(Activity.MODE_PRIVATE).edit().putBoolean(MainActivity.TESTAPP, false).commit();
-				return;
-			}
-			Uri uri = Uri.parse("market://details?id=" + TERMUX);
-			Intent it = new Intent(Intent.ACTION_VIEW, uri);
-            it = Intent.createChooser(it, app.getString(R.string.install_via));
-            String pkgName = app.getPackageName();
-            Intent[] extraIntents = {
-                newLabeled(pkgName, "Github Release", "https://github.com/termux/termux-app/releases"),
-                newLabeled(pkgName, "F-Droid", "https://f-droid.org/packages/com.termux")
-            };
-            it.putExtra(Intent.EXTRA_INITIAL_INTENTS, extraIntents);
-            app.startActivity(it);
-		}
+	public static void startTermuxInstall(Activity app) {
+		Uri uri = Uri.parse("market://details?id=" + TERMUX);
+		Intent intent = new Intent(Intent.ACTION_VIEW, uri);
+		intent = Intent.createChooser(intent, app.getString(R.string.install_via));
+		String pkgName = app.getPackageName();
+		Intent[] extraIntents = {
+			newLabeled(pkgName, "Github Release", "https://github.com/termux/termux-app/releases"),
+			newLabeled(pkgName, "F-Droid", "https://f-droid.org/packages/com.termux")
+		};
+		intent.putExtra(Intent.EXTRA_INITIAL_INTENTS, extraIntents);
+		app.startActivity(intent);
+	}
+
+	public static void skipTermuxInstallReminder(Activity app) {
+		app.getPreferences(Activity.MODE_PRIVATE).edit().putBoolean(MainActivity.TESTAPP, false).commit();
+	}
+
+	public static void skipTermuxInitReminder(Activity app) {
+		app.getPreferences(Activity.MODE_PRIVATE).edit().putBoolean(MainActivity.INITAPP, false).commit();
 	}
 
 	public static void initBack(Activity ctx, boolean manually) {
 		try {
 			ctx.getPackageManager().getPackageInfo(TERMUX, PackageManager.GET_GIDS);
-			Builder bd = new Builder(ctx);
-			bd.setTitle(R.string.init_termux);
-			bd.setMessage(R.string.init_inform);
-			Init it = new Init(ctx);
-			bd.setPositiveButton(R.string.copy_jump, it);
-			bd.setNegativeButton(android.R.string.cancel, null);
-			if (!manually)
-				bd.setNeutralButton(R.string.initialized, it);
-			bd.create().show();
+			if (ctx instanceof ComposeDialogHost)
+				((ComposeDialogHost)ctx).showTermuxInitPrompt(!manually);
 		} catch (PackageManager.NameNotFoundException nne) {
 			if (manually)
                 HelperUtils.show(Toast.makeText(ctx, R.string.no_install, Toast.LENGTH_SHORT));
@@ -166,20 +154,6 @@ public class Utils {
             }
 		} catch (IOException ioe) {
 			ioe.printStackTrace();
-		}
-	}
-
-	private static class Init implements DialogInterface.OnClickListener {
-		Activity mCtx;
-		public Init(Activity ctx) {
-			mCtx = ctx;
-		}
-		public void onClick(DialogInterface p1, int p2) {
-			if (p2 == DialogInterface.BUTTON_POSITIVE) {
-				copyJump(mCtx);
-			} else {
-				mCtx.getPreferences(Activity.MODE_PRIVATE).edit().putBoolean(MainActivity.INITAPP, false).commit();
-			}
 		}
 	}
 

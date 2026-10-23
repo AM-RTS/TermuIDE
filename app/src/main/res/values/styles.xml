@@ -1,42 +1,20 @@
 <resources>
 
     <!-- Base application theme. -->
-    <style name="AppTheme" parent="@android:style/Theme.Holo.Light.DarkActionBar">
-        <!-- Customize your theme here. -->
-        <!--item name="colorPrimary">@color/colorPrimary</item>
-        <item name="colorPrimaryDark">@color/colorPrimaryDark</item>
-        <item name="colorAccent">@color/colorAccent</item-->
-        <item name="android:actionButtonStyle">@style/actionButton</item>
+    <style name="AppTheme" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:colorAccent">@color/colorPrimary</item>
+        <item name="android:statusBarColor">#FFFBFE</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:navigationBarColor">?android:attr/colorBackground</item>
+        <item name="android:windowLightNavigationBar">true</item>
     </style>
-    <style name="AppThemeDark" parent="@android:style/Theme.Holo">
-        <item name="android:actionButtonStyle">@style/actionButton</item>
-    </style>
-
-    <style name="AppThemeDayNight" parent="AppTheme"/>
-
-	<style name="keyBar">
-		<item name="android:textViewStyle">@style/keyText</item>
-	</style>
-
-	<style name="keyText">
-		<item name="android:clickable">true</item>
-		<item name="android:paddingLeft">6dp</item>
-		<item name="android:paddingRight">6dp</item>
-		<item name="android:paddingTop">@dimen/key_padding_vert</item>
-		<item name="android:paddingBottom">@dimen/key_padding_vert</item>
-		<item name="android:typeface">monospace</item>
-		<item name="android:textSize">@dimen/key_size</item>
-		<item name="android:onClick">inputKey</item>
-		<item name="android:background">?android:attr/selectableItemBackground</item>
-	</style>
-
-    <style name="actionButton" parent="@android:style/Widget.Holo.ActionButton">
-        <item name="android:minWidth">48dp</item>
+    <style name="AppThemeDark" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:colorAccent">#D0BCFF</item>
+        <item name="android:statusBarColor">#1C1B1F</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:navigationBarColor">#1C1B1F</item>
+        <item name="android:windowLightNavigationBar">false</item>
     </style>
 
-    <style name="ctrlButton" parent="actionButton">
-        <item name="android:paddingStart">0dp</item>
-        <item name="android:paddingEnd">0dp</item>
-        <item name="android:textSize">24dp</item>
-    </style>
+    <style name="AppThemeDayNight" parent="AppTheme" />
 </resources>

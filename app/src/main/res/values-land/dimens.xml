@@ -1,5 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <dimen name="key_size">20sp</dimen>
-    <dimen name="key_padding_vert">3dp</dimen>
-</resources>

@@ -1,5 +1,28 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="runtime_checking">正在检查运行环境…</string>
+    <string name="runtime_saving">正在保存以执行…</string>
+    <string name="runtime_dispatched">已发送至 Termux，等待完成</string>
+    <string name="runtime_finished">Termux 会话已结束（退出码 %1$d）</string>
+    <string name="runtime_changed">文档或执行环境已更改，请准备好后再次运行。</string>
+    <string name="runtime_cancelled">已取消执行准备</string>
+    <string name="runtime_timeout">Termux 未返回运行环境检查结果，请使用支持命令结果的版本（0.109 及以上），并检查权限和外部应用访问设置。</string>
+    <string name="runtime_result_unknown">无法获取命令状态，重试前请检查 Termux 终端。</string>
+    <string name="runtime_setup_required">无法通过 Termux 执行，请检查其安装、权限和外部应用访问设置。</string>
+    <string name="runtime_dismiss">关闭执行状态</string>
+    <string name="saving">正在保存…</string>
+    <string name="save_newer_changes">已保存较早的版本，较新的编辑仍未保存。</string>
+    <string name="auto_save">自动保存</string>
+    <string name="auto_save_summary">停止输入一秒后保存源文件</string>
+    <string name="auto_save_failed">自动保存失败，更改尚未保存。</string>
+    <string name="insert_tab">插入制表符或缩进</string>
+    <string name="file_options">%1$s 的选项</string>
+    <string name="send_command">发送</string>
+    <string name="expand_variable">展开变量</string>
+    <string name="move_up">向上移动</string>
+    <string name="move_down">向下移动</string>
+    <string name="move_left">向左移动</string>
+    <string name="move_right">向右移动</string>
     <string name="settings">设置</string>
     <string name="global">通用</string>
     <string name="theme">主题</string>
@@ -114,4 +137,21 @@
 	<string name="bkpt_at">断点于 %s</string>
     <string name="no_var">无变量信息</string>
     <string name="no_frame">无帧信息</string>
+    <string name="run_configuration">运行配置</string>
+    <string name="run_config_scope">保存位置：%1$s</string>
+    <string name="run_config_paths">相对路径以此文件夹为起点。留空则使用当前文件和默认工作目录。</string>
+    <string name="run_config_project">项目运行和调试仍使用现有项目命令。构建和编译使用当前文件。</string>
+    <string name="run_entry_file">入口文件（可选）</string>
+    <string name="run_working_directory">工作目录（可选）</string>
+    <string name="run_arguments">程序参数</string>
+    <string name="run_arguments_help">每行是一个原样传递的参数，无需加引号。空行表示空参数。</string>
+    <string name="run_argument">参数 %1$d</string>
+    <string name="run_remove_argument">删除参数 %1$d</string>
+    <string name="run_add_argument">添加参数</string>
+    <string name="run_use_defaults">使用默认值</string>
+    <string name="run_config_invalid">运行配置无效。请编辑或使用默认值。</string>
+    <string name="run_config_save_failed">无法保存运行配置，修改仍保留在此对话框中。</string>
+    <string name="run_config_changed">项目或文件夹已更改，请重新打开运行配置。</string>
+    <string name="run_entry_failed">无法打开配置的入口文件。</string>
+    <string name="invalid_port">请输入 1 到 65535 之间的端口。</string>
 </resources>

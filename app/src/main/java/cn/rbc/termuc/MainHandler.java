@@ -1,634 +1,422 @@
 package cn.rbc.termuc;
-import android.app.*;
-import android.net.*;
-import android.os.*;
-import android.util.*;
-import cn.rbc.codeeditor.util.*;
-import cn.rbc.codeeditor.view.*;
-import cn.rbc.codeeditor.view.autocomplete.*;
+
+import android.app.Fragment;
+import android.net.Uri;
+import android.os.Handler;
+import android.os.Message;
+import android.util.Log;
+import cn.rbc.codeeditor.util.Document;
+import cn.rbc.codeeditor.util.TextPositions;
+import cn.rbc.codeeditor.util.ErrSpan;
+import cn.rbc.codeeditor.util.Tokenizer;
+import cn.rbc.codeeditor.view.autocomplete.Edit;
+import cn.rbc.codeeditor.view.autocomplete.ListItem;
 import java.io.*;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.function.Supplier;
 import org.json.*;
 
-import static android.util.JsonToken.*;
-
-import cn.rbc.codeeditor.util.Range;
-import cn.rbc.codeeditor.util.Pair;
-
+/** Routes JSON-RPC results to the document and revision that requested them. */
 public class MainHandler extends Handler {
-	private static final String
-    ACTSIG = "activeSignature",
-	ADDEDIT = "additionalTextEdits",
-    ARGS = "arguments",
-	CAPA = "capabilities",
-    CHANGES = "changes",
-    CODE = "code",
-    CMD = "command",
-	COMPLE = "completionProvider",
-    DAT = "data",
-	DG = "diagnostics",
-    EDIT = "edit",
-	END = "end",
-    ERR = "error",
-    ID = "id",
-	IT = "items",
-	KIND = "kind",
-	LABEL = "label",
-    LEGEND = "legend",
-	L = "line",
-	MSG = "message",
-	NEWTX = "newText",
-	PARA = "params",
-	RNG = "range",
-	RESU = "result",
-	SEVE = "severity",
-    SEMTOK = "semanticTokensProvider",
-    SGNHELP = "signatureHelpProvider",
-    SIGS = "signatures",
-	TEDIT = "textEdit",
-    TITLE = "title",
-    TOKTYPE = "tokenTypes",
-	TG = "triggerCharacters",
-	URI = "uri";
     private MainActivity ma;
-    final WeakHashMap<String, Set<String>> cacheData;
-    private int oldHash;
+    final Map<String, Set<String>> cacheData = new HashMap<>();
+    MainHandler(MainActivity activity) { ma = activity; }
+    void updateActivity(MainActivity activity) { ma = activity; }
+    CompletableFuture<Boolean> saveForRun(String path) {
+        EditFragment target = fragment(path);
+        if (target != null) return target.save();
+        CompletableFuture<Boolean> failed = new CompletableFuture<>();
+        failed.completeExceptionally(new IOException("Document unavailable"));
+        return failed;
+    }
+    int matchRunContext(RunCommands.Request request) { return ma == null ? 0 : ma.matchRunContext(request); }
+    void startDebugger(RunCommands.Request request) { if (ma != null) ma.startDebugger(request); }
+    void sourceSaved(String path, Document document, long timestamp) {
+        EditFragment target = fragment(path);
+        if (target != null) target.sourceSaved(document, timestamp);
+    }
+    int[] selection(String path) {
+        if (ma == null || ma.getEditor() == null || ma.getSelectedItem() < 0 || !path.equals(ma.getTag(ma.getSelectedItem()))) return new int[]{-1, -1};
+        return new int[]{ma.getEditor().getSelectionStart(), ma.getEditor().getSelectionEnd()};
+    }
 
-	MainHandler(MainActivity ma) {
-		super();
-		this.ma = ma;
-        cacheData = new WeakHashMap<>();
-	}
-
-	void updateActivity(MainActivity ma) {
-		this.ma = ma;
-	}
-
-	@Override
-	public void handleMessage(Message msg) {
+    @Override public void handleMessage(Message message) {
         Lsp lsp = Application.getInstance().lsp;
-		switch (msg.what) {
-			case Lsp.INITIALIZE:
-				lsp.initialized();
-				break;
-			case Lsp.ERROR:
-                synchronized(this) {
-                    cacheData.clear();
-                    Tokenizer.getLanguage().setTypes(EditFragment.DEFTYPES);
-                    if (ma == null) return;
-					FragmentManager fm = ma.getFragmentManager();
-					for (int i=ma.getItemCount()-1;i>=0;i--) {
-						Fragment f = fm.findFragmentByTag(ma.getTag(i));
-						if (f==null) continue;
-						TextEditor te = (TextEditor)f.getView();
-						Document doc = te.getText();
-						doc.setDiag(null);
-						doc.setHighlights(null);
-                        if (f.isVisible())
-						    te.postInvalidateOnAnimation();
-					}
-				}
-				return;
-			case Lsp.CLOSE:
-				return;
-		}
-		try {
-			JsonReader jr = (JsonReader)msg.obj;
-			jr.beginObject();
-			Deque<String> stack = new ArrayDeque<>();
-			int id = -1, sl = 0, sc = 0, el = 0, ec = 0;
-			Object tmp1 = null, tmp2 = null, tmp3 = null;
-			while (true) {
-				switch (jr.peek()) {
-					case NAME:
-						String n = jr.nextName();
-						switch (n) {
-                            // Assuming we parse the id first than the body
-                            case ID:
-                                id = jr.nextInt();
-                                if (id == Lsp.RENAM && tmp1 instanceof String) {
-                                    HelperUtils.show(Utils.newToast(ma, (String)tmp1, ColorScheme.DIAG[0]&0xf0ffffff));
-                                    return;
-                                }
-                                break;
-							case NEWTX:
-								n = jr.nextString();
-								if (tmp3 instanceof Edit)
-									((Edit)tmp3).text = n;
-								//else tmp3 = n;
-								break;
-							case LABEL:
-                                n = jr.nextString();
-								if (tmp2 instanceof ListItem)
-									((ListItem)tmp2).label = n;
-                                else if (SIGS.equals(stack.peek()))
-                                    ((List)tmp1).add(n);
-								break;
-							case KIND: {
-                                int i = jr.nextInt();
-								if (tmp2 instanceof ListItem)
-									((ListItem)tmp2).kind = i;
-								break;
-                            }
-							case MSG:
-                                n = jr.nextString();
-								if (tmp2 instanceof ErrSpan)
-									((ErrSpan)tmp2).msg = n;
-                                else if (ERR.equals(stack.peek())) {
-                                    if (id == Lsp.RENAM) {
-                                        HelperUtils.show(Utils.newToast(ma, n, ColorScheme.DIAG[0]&0xf0ffffff));
-                                        return;
-                                    }
-                                    tmp1 = n;
-                                }
-								break;
-							case SEVE: {
-                                int i = jr.nextInt();
-								if (tmp2 instanceof ErrSpan) {
-									((ErrSpan)tmp2).severity = i - 1;
-                                }
-								break;
-                            }
-                            case CODE:
-                                if (tmp2 instanceof Diagnostic) {
-                                    if (jr.peek() == JsonToken.STRING)
-                                        ((Diagnostic)tmp2).code = jr.nextString();
-                                    else
-                                        ((Diagnostic)tmp2).code = jr.nextLong();
-                                } else jr.skipValue();
-                                break;
-							case IT:
-							case DG:
-                            case SIGS:
-								tmp1 = new ArrayList();
-							case ADDEDIT:
-								jr.beginArray();
-								stack.push(n);
-								break;
-							case TG:
-								jr.beginArray();
-								StringBuilder sb = new StringBuilder();
-								while (jr.hasNext())
-									sb.append(jr.nextString());
-                                jr.endArray();
-                                char[] trigs = sb.toString().toCharArray();
-                                if (COMPLE.equals(stack.peek())) {
-								    lsp.setCompTrigs(trigs);
-                                    break;
-                                } else {
-                                    jr.close();
-                                    lsp.setSigTrigs(trigs);
-                                    return;
-                                }
-                            case TOKTYPE:
-                                jr.beginArray();
-                                List<Lsp.SemToken> toks = new ArrayList<>();
-                                while (jr.hasNext()) {
-                                    toks.add(Lsp.semValueOf(jr.nextString().toUpperCase()));
-                                }
-                                jr.endArray();
-                                lsp.setSemToks(toks.toArray(new Lsp.SemToken[toks.size()]));
-                                break;
-							case RNG:
-                                if (SEMTOK.equals(stack.peek())) {
-                                    jr.skipValue();
-                                    break;
-                                }
-								jr.beginObject();
-								while (jr.hasNext()) {
-									String tp = jr.nextName();
-									jr.beginObject();
-									if (END.equals(tp))
-										while (jr.hasNext())
-											if (L.equals(jr.nextName()))
-												el = jr.nextInt();
-											else
-												ec = jr.nextInt();
-									else
-										while (jr.hasNext())
-											if (L.equals(jr.nextName()))
-												sl = jr.nextInt();
-											else
-												sc = jr.nextInt();
-									jr.endObject();
-								}
-								jr.endObject();
-								break;
-							case RESU:
-								if (jr.peek()==BEGIN_ARRAY) {
-									jr.beginArray();
-									tmp2 = new ArrayList();
-								} else if (jr.peek()==NULL)
-									jr.nextNull();
-								else
-									jr.beginObject();
-								stack.push(n);
-								break;
-							case URI:
-                                tmp3 = jr.nextString();
-								if (DG.equals(stack.peek())) {
-									updateDiag((String)tmp3, (List<ErrSpan>)tmp1);
-                                    jr.close();
-                                    return;
-								}
-                                if (id == Lsp.DEFIN) {
-                                    jr.close();
-                                    performGoto((String)tmp3, sl, sc);
-                                    return;
-                                }
-								break;
-							case TEDIT:
-								tmp3 = new Edit();
-							case COMPLE:
-                            case SGNHELP:
-                            case SEMTOK:
-                            case LEGEND:
-							case CAPA:
-							case PARA:
-                            case EDIT:
-                            case ERR:
-								jr.beginObject();
-								stack.push(n);
-								break;
-                            case ACTSIG:
-                                sl = jr.nextInt();
-                                break;
-                            case TITLE:
-                                n = jr.nextString();
-                                if (tmp3 instanceof Command)
-                                    ((Command)tmp3).title = n;
-                                break;
-                            case CMD:
-                                n = jr.nextString();
-                                if (tmp3 instanceof Command)
-                                    ((Command)tmp3).command = n;
-                                break;
-                            case ARGS:
-                                if (tmp3 instanceof Command) {
-                                    ((Command)tmp3).args = nextValue(jr);
-                                } else jr.skipValue();
-                                break;
-                            case CHANGES:
-                                jr.beginObject();
-                                stack.push(CHANGES);
-                                tmp2 = null;
-                                break;
-                            case DAT:
-                                if (id == Lsp.SEMTOK) {
-                                    Set<String> typs = parseSemTokens(lsp, jr);
-                                    jr.close();
-                                    cacheData.put(ma.getTag(ma.getSelectedItem()), typs);
-                                    sc = typs.hashCode();
-                                    if (oldHash != sc) {
-                                        Tokenizer.getLanguage().setTypes(typs);
-                                        ma.getEditor().postInvalidateOnAnimation();
-                                        oldHash = sc;
-                                    }
-                                    return;
-                                }
-                                jr.skipValue();
-                                break;
-							default:
-                                if (CHANGES == stack.peek() && n.startsWith("file://")) {
-                                    n = n.substring(7);
-                                    tmp2 = ma.getFragmentManager().findFragmentByTag(n);
-                                    if (tmp2 == null) {
-                                        Document buf = new Document(null);
-                                        Reader is = new InputStreamReader(FileHelper.openInputStream(new File(n)));
-                                        char[] tmp = new char[2048];
-                                        int l;
-                                        List<Pair> spans = new ArrayList<>();
-                                        spans.add(new Pair(0,0));
-                                        buf.setSpans(spans);
-                                        long ts = System.nanoTime();
-                                        while ((l=is.read(tmp))>0) {
-                                            buf.insert(tmp, buf.length()-1, l, 0, ts, false);
-                                        }
-                                        is.close();
-                                        tmp2 = new android.util.Pair<Document,String>(buf, n);
-                                    }
-                                    jr.beginArray();
-                                    tmp1 = new ArrayList();
-                                    break;
-                                }
-								jr.skipValue();
-								break;
-						}
-						break;
-					case BEGIN_OBJECT:
-						jr.beginObject();
-						if (!stack.isEmpty()) {
-						switch (stack.peek()) {
-                            case RESU:
-                                if (id == Lsp.CODEACTION) {
-                                    tmp3 = new Command();
-                                    break;
-                                }
-							case ADDEDIT:
-								tmp3 = new Edit();
-								break;
-							case IT:
-								tmp2 = new ListItem();
-								break;
-							case DG:
-								tmp2 = new Diagnostic();
-								break;
-                            case CHANGES:
-                                tmp3 = new Edit(); // inner uri
-                                break;
-						}
-						}
-						break;
-					case END_OBJECT:
-						jr.endObject();
-						if (!stack.isEmpty())
-						switch (stack.peek()) {
-							case RESU:
-                                if (sc == -1) { // signature flag
-                                    List<String> ls = (List<String>)tmp1;
-                                    TextEditor ed = ma.getEditor();
-                                    ed.getAutoCompletePanel().dismiss();
-                                    SignatureHelpPanel sp = ed.getSigHelpPanel();
-                                    if (ls.size() > sl)
-                                        sp.show(ls, sl);
-                                    else sp.hide();
-                                    jr.close();
-                                    return;
-                                }
-                                if (tmp3 instanceof Command) {
-                                    ((List)tmp2).add(tmp3);
-                                    break;
-                                }
-                            case ADDEDIT:
-								if (!(tmp3 instanceof Edit))
-									break;
-								Edit _p = (Edit)tmp3;
-								Document te = ma.getEditor().getText();
-								_p.start = te.getLineOffset(sl) + sc;
-								_p.len = te.getLineOffset(el) + ec - _p.start;
-								if (tmp2 instanceof ListItem)
-									((ListItem)tmp2).edits.addLast(_p);
-								else
-									((List)tmp2).add(_p);
-								break;
-							case TEDIT:
-								_p = (Edit)tmp3;
-								te = ma.getEditor().getText();
-								_p.start = te.getLineOffset(sl) + sc;
-								_p.len = te.getLineOffset(el) + ec - _p.start;
-								((ListItem)tmp2).edits.addFirst(_p);
-								stack.pop();
-								break;
-							case IT:
-								((List)tmp1).add(tmp2);
-								break;
-							case DG:
-								if (sc != ec || sl != el) {
-									ErrSpan e = (ErrSpan)tmp2;
-									e.stl = sl + 1;
-									e.stc = sc;
-									e.enl = el + 1;
-									e.enc = ec;
-									((List)tmp1).add(e);
-								}
-								break;
-                            case SIGS:
-                                break;
-                            case CHANGES:
-                                if (tmp3 instanceof Edit) {
-                                    Document tx = null;
-                                    if (tmp2 instanceof EditFragment) { // a uri edit item ended
-                                        tx = ((EditFragment)tmp2).getView().getText();
-                                    } else if (tmp2 instanceof android.util.Pair) {
-                                        tx = ((android.util.Pair<Document,String>)tmp2).first;
-                                    }
-                                    if (tx instanceof Document) {
-                                        Edit p = (Edit)tmp3;
-                                        p.start = tx.getLineOffset(sl) + sc;
-                                        p.len = tx.getLineOffset(el) + ec - p.start;
-                                        ((List)tmp1).add(p);
-                                    } else { // all changes ended
-                                        lsp.reply(id, "{\"applied\":true}");
-                                        jr.close();
-                                        return;
-                                    }
-                                }
-                                break;
-							default:
-								stack.pop();
-						}
-						break;
-					case END_ARRAY:
-						jr.endArray();
-						if (!stack.isEmpty())
-						switch (stack.peek()) {
-                            case SIGS:
-                                sc = -1; // signature flag
-							case ADDEDIT:
-								stack.pop();
-								break;
-							case IT: {
-                                TextEditor ed = ma.getEditor();
-								AutoCompletePanel pan = ed.getAutoCompletePanel();
-                                pan.update((ArrayList<ListItem>)tmp1);
-                                if (pan.isShow()) {
-                                    ed.getSigHelpPanel().hide();
-                                }
-								return;
-                            }
-							case DG:
-                                if (tmp3 instanceof String) {
-                                    jr.close();
-                                    updateDiag((String)tmp3, (List<ErrSpan>)tmp1);
-                                    return;
-                                }
-                                break;
-							case RESU:
-								jr.close();
-								List l = (List)tmp2;
-								TextEditor te = ma.getEditor();
-								Document doc = te.getText();
-								if (tmp3 instanceof Edit) {
-                                    if (((Edit)l.get(0)).text == null) {
-										doc.setHighlights(l);
-										te.postInvalidateOnAnimation();
-									} else {
-                                        applyEdit(te, (List<Edit>)l);
-									}
-								} else if (tmp3 instanceof Command) {
-                                    int tit = ma.getSelectedItem();
-                                    EditFragment frag = (EditFragment)ma.getFragmentManager().findFragmentByTag(ma.getTag(tit));
-                                    frag.setActions(l);
-                                } else if (doc.getHighlights() != null) {
-									doc.setHighlights(null);
-									te.postInvalidateOnAnimation();
-								}
-								return;
-                            case CHANGES:
-                                if (tmp2 instanceof EditFragment) {
-                                    TextEditor ed = ((EditFragment)tmp2).getView();
-                                    applyEdit(ed, (List<Edit>)tmp1);
-                                    tmp2 = null;
-                                } else if (tmp2 instanceof android.util.Pair) {
-                                    if (!((List)tmp1).isEmpty()) {
-                                        android.util.Pair<Document,String> pair = (android.util.Pair<Document,String>)tmp2;
-                                        applyEdit(pair.first, (List<Edit>)tmp1, 0);
-                                        Writer wt = new OutputStreamWriter(FileHelper.openOutputStream(new File(pair.second)));
-                                        wt.write(pair.first.toString());
-                                        wt.close();
-                                    }
-                                    tmp2 = null;
-                                }
-                                break;
-						}
-						break;
-					case END_DOCUMENT:
-						jr.close();
-						return;
-					default:
-						jr.skipValue();
-				}
-			}
-		} catch (Exception j) {
-			Log.e("LSP", j.toString(), j);
-	    }
-	}
-
-    private void updateDiag(String uri, List<ErrSpan> list) {
-        String tag = Uri.parse(uri).getPath();
-        Fragment f = ma.getFragmentManager().findFragmentByTag(tag);
-        if (f==null)
-            return;
-        TextEditor te = (TextEditor)f.getView();
-        Collections.sort(list);
-        te.getText().setDiag(list);
-        te.postInvalidateOnAnimation();
-        return;
-    }
-
-    private static String nextValue(JsonReader rd) throws IOException {
-        StringBuilder sb = new StringBuilder();
-        int st = 0;
-        do {
-            switch (rd.peek()) {
-                case BEGIN_ARRAY:
-                    sb.append('[');
-                    rd.beginArray();
-                    st++;
-                    break;
-                case BEGIN_OBJECT:
-                    sb.append('{');
-                    rd.beginObject();
-                    st++;
-                    break;
-                case END_ARRAY:
-                    if (sb.charAt(sb.length()-1) == ',')
-                        sb.deleteCharAt(sb.length()-1);
-                    sb.append("],");
-                    rd.endArray();
-                    st--;
-                    break;
-                case END_OBJECT:
-                    if (sb.charAt(sb.length()-1) == ',')
-                        sb.deleteCharAt(sb.length()-1);
-                    sb.append("},");
-                    rd.endObject();
-                    st--;
-                    break;
-                case NUMBER: sb.append(rd.nextLong()); sb.append(','); break;
-                case STRING: sb.append(JSONObject.quote(rd.nextString())); sb.append(','); break;
-                case NAME: sb.append('"'); sb.append(rd.nextName()); sb.append("\":"); break;
-                case BOOLEAN: sb.append(rd.nextBoolean()); sb.append(","); break;
-                case END_DOCUMENT: break;
+        if (message.what == Lsp.ERROR) {
+            cacheData.clear();
+            if (ma != null) for (String path : ma.getOpenFilePaths()) {
+                EditFragment fragment = fragment(path);
+                if (fragment == null || fragment.getView() == null) continue;
+                TextEditor editor = fragment.getView();
+                editor.getLanguage().setTypes(EditFragment.DEFTYPES);
+                editor.getText().setDiag(null); editor.getText().setHighlights(null);
+                editor.setSemanticTokens(Collections.emptyList());
             }
-        } while (st > 0);
-        int l = sb.length()-1;
-        if (sb.charAt(l) == ',')
-            sb.deleteCharAt(l);
-        return sb.toString();
-    }
-
-    private static void applyEdit(TextEditor te, List<Edit> edits) {
-        Document doc = te.getText();
-        int mc = te.getCaretPosition();
-        mc = applyEdit(doc, edits, mc);
-        te.setSelection(mc);
-        te.setEdited(doc.getMarkedVersion() != doc.getCurrentVersion());
-        te.mCtrlr.determineSpans();
-   }
-
-   private static int applyEdit(Document doc, List<Edit> edits, int mc) {
-        doc.beginBatchEdit();
-        long tpl = System.nanoTime();
-        for (int i = edits.size()-1; i>=0; i--) {
-            Edit e = edits.get(i);
-            doc.deleteAt(e.start, e.len, tpl);
-            doc.insertBefore(e.text.toCharArray(), e.start, tpl);
-            if (e.start + e.len <= mc)
-                mc += e.text.length() - e.len;
-            else if (e.start < mc)
-                mc = e.start + e.text.length();
+            return;
         }
-        doc.endBatchEdit();
-        return mc;
-    }
-
-    private Set<String> parseSemTokens(Lsp lsp, JsonReader jr) throws IOException {
-        jr.beginArray();
-        MainActivity m = ma;
-        TextEditor te = m.getEditor();
-        Document doc = te.getText();
-        List<Pair> spans = doc.getSpans();
-        int curr = 0;
-        int line = 0, pos = 0;
-        final int dlen = doc.length();
-        Set<String> tps =new ArraySet<>();
-        while (jr.hasNext()) {
-            int deltaLine = jr.nextInt();
-            line += deltaLine;
-            if (deltaLine != 0) pos = doc.getLineOffset(line);
-            int deltaStart = jr.nextInt(), len = jr.nextInt(), tok = jr.nextInt();
-            jr.nextInt();
-            pos += deltaStart;
-            int rpos = doc.logicalToRealIndex(pos);
-            while (curr < spans.size()) {
-                Pair p = spans.get(curr++);
-                if (p.first >= rpos) {
-                    if (p.first == rpos && (curr == spans.size() || spans.get(curr).first == doc.logicalToRealIndex(pos+len))) {
-                        tok = lsp.nativeToken(tok);
-                        if (tok != Tokenizer.UNKNOWN) {
-                            p.second = tok;
-                            if (tok == Tokenizer.TYPE)
-                                tps.add(doc.subSequence(pos, Math.min(dlen, pos+len)).toString());
-                        }
-                        curr++;
-                    }
+        if (!(message.obj instanceof String)) return;
+        try {
+            JSONObject json = new JSONObject((String)message.obj);
+            String method = json.optString("method");
+            if ("textDocument/publishDiagnostics".equals(method)) {
+                if (ma != null) diagnostics(json.getJSONObject("params"));
+                return;
+            }
+            if ("workspace/applyEdit".equals(method)) {
+                try {
+                    if (ma == null) throw new IOException("Editor unavailable");
+                    Object requestId = json.get("id");
+                    applyWorkspaceEdit(json.getJSONObject("params").getJSONObject("edit")).whenComplete((ignored, error) -> {
+                        try {
+                            JSONObject reply = new JSONObject().put("applied", error == null);
+                            if (error != null) reply.put("failureReason", error.toString());
+                            lsp.reply(requestId, reply.toString());
+                        } catch (JSONException replyError) { Log.e("LSP", "Unable to reply to workspace edit", replyError); }
+                    });
+                } catch (Exception error) {
+                    lsp.reply(json.get("id"), new JSONObject().put("applied", false).put("failureReason", error.toString()).toString());
+                }
+                return;
+            }
+            int id = json.optInt("id", -1);
+            Lsp.Request request = lsp.takeRequest(id);
+            if (id >= 100 && request == null) return; // Superseded request or a previous server session.
+            if (request != null && !(request.kind == Lsp.SEMTOK ? sameRevision(request.path, request.revision)
+                : isCurrent(request.path, request.revision))) return;
+            if (request != null && (request.kind == Lsp.COMPLETION || request.kind == Lsp.SIGN_HELP ||
+                request.kind == Lsp.HIGHLIGHT || request.kind == Lsp.CODEACTION)) {
+                int[] current = selection(request.path);
+                if (current[0] != request.start || current[1] != request.end) return;
+            }
+            if (json.has("error")) {
+                if (ma != null) ma.toast(json.getJSONObject("error").optString("message", "Language-server error"));
+                return;
+            }
+            Object result = json.opt("result");
+            if (id == Lsp.INITIALIZE && result instanceof JSONObject) {
+                initialize(((JSONObject)result).optJSONObject("capabilities"));
+                lsp.initialized();
+                if (ma != null) for (String path : ma.getOpenFilePaths()) {
+                    EditFragment fragment = fragment(path);
+                    if (fragment != null && fragment.getView() != null && fragment.hasLsp()) fragment.onOpen(fragment.getView().getText());
+                }
+                return;
+            }
+            if (ma == null || request == null) return;
+            TextEditor editor = ma.getEditor();
+            if (request.kind == Lsp.SEMTOK) {
+                EditFragment target = fragment(request.path);
+                if (target == null || target.getView() == null) return;
+                editor = target.getView();
+            }
+            switch (request.kind) {
+                case Lsp.COMPLETION: completion(editor, result); break;
+                case Lsp.SIGN_HELP: {
+                    JSONObject help = result instanceof JSONObject ? (JSONObject)result : null;
+                    List<String> labels = new ArrayList<>();
+                    JSONArray signatures = help == null ? null : help.optJSONArray("signatures");
+                    if (signatures != null) for (int i = 0; i < signatures.length(); i++)
+                        labels.add(signatures.getJSONObject(i).getString("label"));
+                    editor.getAutoCompletePanel().dismiss();
+                    editor.getSigHelpPanel().show(labels, help == null ? 0 : help.optInt("activeSignature"));
                     break;
                 }
+                case Lsp.FORMAT:
+                    if (result instanceof JSONArray) apply(editor, edits(editor.getText().toString(), (JSONArray)result));
+                    break;
+                case Lsp.HIGHLIGHT: {
+                    List<Edit> highlights = new ArrayList<>();
+                    TextPositions positions = new TextPositions(editor.getText().toString());
+                    if (result instanceof JSONArray) for (int i = 0; i < ((JSONArray)result).length(); i++)
+                        highlights.add(range(positions, ((JSONArray)result).getJSONObject(i).getJSONObject("range"), null));
+                    editor.getText().setHighlights(highlights); editor.postInvalidateOnAnimation();
+                    break;
+                }
+                case Lsp.SEMTOK: semanticTokens(editor, result, request.path); break;
+                case Lsp.DEFIN: definition(result); break;
+                case Lsp.RENAM:
+                    if (result instanceof JSONObject) reportWorkspaceResult(applyWorkspaceEdit((JSONObject)result));
+                    break;
+                case Lsp.CODEACTION: codeActions(result, request); break;
             }
+        } catch (Exception error) {
+            Log.e("LSP", "Unable to handle language-server response", error);
+            if (ma != null) ma.toast(error.getMessage() == null ? error.toString() : error.getMessage());
         }
-        jr.endArray();
-        return tps;
     }
 
-    private void performGoto(String uri, int line, int off) {
-        uri = uri.substring(7);
-        if (uri.startsWith(Utils.PREF) && !uri.startsWith("/home", Utils.PREF.length())) {
-            uri = Utils.PREF + "/home/.." + uri.substring(Utils.PREF.length());
+    private boolean isCurrent(String path, long revision) {
+        if (ma == null || ma.getEditor() == null || ma.getSelectedItem() < 0 || !path.equals(ma.getTag(ma.getSelectedItem()))) return false;
+        return sameRevision(path, revision);
+    }
+
+    private boolean sameRevision(String path, long revision) {
+        for (DocumentSession session : Application.getInstance().getDocuments().getState().getValue())
+            if (path.equals(session.getPath())) return session.getRevision() == revision;
+        return revision == -1;
+    }
+
+    private void initialize(JSONObject capabilities) throws JSONException {
+        if (capabilities == null) return;
+        Lsp lsp = Application.getInstance().lsp;
+        lsp.setCompTrigs(triggers(capabilities.optJSONObject("completionProvider")));
+        lsp.setSigTrigs(triggers(capabilities.optJSONObject("signatureHelpProvider")));
+        JSONObject semantic = capabilities.optJSONObject("semanticTokensProvider");
+        JSONObject legend = semantic == null ? null : semantic.optJSONObject("legend");
+        JSONArray names = legend == null ? null : legend.optJSONArray("tokenTypes");
+        Lsp.SemToken[] types = new Lsp.SemToken[names == null ? 0 : names.length()];
+        for (int i = 0; i < types.length; i++) types[i] = Lsp.semValueOf(names.getString(i).toUpperCase(Locale.ROOT));
+        lsp.setSemToks(types);
+    }
+
+    private static char[] triggers(JSONObject provider) throws JSONException {
+        JSONArray values = provider == null ? null : provider.optJSONArray("triggerCharacters");
+        StringBuilder text = new StringBuilder();
+        if (values != null) for (int i = 0; i < values.length(); i++) text.append(values.getString(i));
+        return text.toString().toCharArray();
+    }
+
+    private void completion(TextEditor editor, Object result) throws JSONException {
+        JSONArray values = result instanceof JSONArray ? (JSONArray)result
+            : result instanceof JSONObject ? ((JSONObject)result).optJSONArray("items") : null;
+        ArrayList<ListItem> items = new ArrayList<>();
+        String text = editor.getText().toString();
+        TextPositions positions = new TextPositions(text);
+        if (values != null) for (int i = 0; i < values.length(); i++) {
+            JSONObject value = values.getJSONObject(i);
+            ListItem item = new ListItem(); item.label = value.getString("label"); item.kind = value.optInt("kind", 1);
+            JSONObject edit = value.optJSONObject("textEdit");
+            if (edit != null) {
+                JSONObject bounds = edit.optJSONObject("range");
+                if (bounds == null) bounds = edit.getJSONObject("replace");
+                item.edits.add(range(positions, bounds, edit.getString("newText")));
+            } else if (value.has("insertText")) {
+                int end = editor.getCaretPosition(), start = end;
+                while (start > 0 && Character.isUnicodeIdentifierPart(text.charAt(start - 1))) start--;
+                Edit insertion = new Edit(); insertion.start = start; insertion.len = end - start;
+                insertion.text = value.getString("insertText"); item.edits.add(insertion);
+            }
+            JSONArray additional = value.optJSONArray("additionalTextEdits");
+            if (additional != null) {
+                if (item.edits.isEmpty()) {
+                    int end = editor.getCaretPosition(), start = end;
+                    while (start > 0 && Character.isUnicodeIdentifierPart(text.charAt(start - 1))) start--;
+                    Edit insertion = new Edit(); insertion.start = start; insertion.len = end - start; insertion.text = item.label;
+                    item.edits.add(insertion);
+                }
+                item.edits.addAll(edits(text, additional));
+            }
+            items.add(item);
         }
-        MainActivity ma = this.ma;
-        String curr = ma.getTag(ma.getSelectedItem());
-        if (!curr.equals(uri)) {
-            ma.openFile(new File(uri));
-            ma.getFragmentManager().executePendingTransactions();
+        editor.getAutoCompletePanel().update(items);
+        if (editor.getAutoCompletePanel().isShow()) editor.getSigHelpPanel().hide();
+    }
+
+    private void diagnostics(JSONObject params) throws JSONException {
+        EditFragment fragment = fragment(file(params.getString("uri")).getPath());
+        if (fragment == null || fragment.getView() == null) return;
+        if (params.has("version") && !params.isNull("version") && params.getInt("version") != fragment.getVersion()) return;
+        JSONArray values = params.getJSONArray("diagnostics");
+        List<ErrSpan> diagnostics = new ArrayList<>();
+        for (int i = 0; i < values.length(); i++) {
+            JSONObject value = values.getJSONObject(i), range = value.getJSONObject("range");
+            JSONObject start = range.getJSONObject("start"), end = range.getJSONObject("end");
+            Diagnostic diagnostic = new Diagnostic();
+            diagnostic.stl = start.getInt("line") + 1; diagnostic.stc = start.getInt("character");
+            diagnostic.enl = end.getInt("line") + 1; diagnostic.enc = end.getInt("character");
+            diagnostic.severity = Math.max(0, Math.min(3, value.optInt("severity", 1) - 1));
+            diagnostic.msg = value.optString("message"); diagnostic.code = value.opt("code");
+            diagnostics.add(diagnostic);
         }
-        TextEditor ed = ma.getEditor();
-        Document doc = ed.getText();
-        line = doc.getLineOffset(line);
-        if (line < 0) return;
-        off += line;
-        if (off >= doc.length()) return;
-        ed.setSelection(off);
-        ed.requestFocus();
+        Collections.sort(diagnostics);
+        fragment.getView().getText().setDiag(diagnostics); fragment.getView().postInvalidateOnAnimation();
+    }
+
+    private void semanticTokens(TextEditor editor, Object result, String path) throws JSONException {
+        JSONArray values = result instanceof JSONObject ? ((JSONObject)result).optJSONArray("data") : null;
+        List<TextEditor.SemanticToken> tokens = new ArrayList<>();
+        Set<String> types = new HashSet<>();
+        String text = editor.getText().toString();
+        TextPositions positions = new TextPositions(text);
+        int line = 0, column = 0;
+        if (values != null) for (int i = 0; i + 4 < values.length(); i += 5) {
+            int delta = values.getInt(i); line += delta; if (delta != 0) column = 0;
+            column += values.getInt(i + 1);
+            int kind = Application.getInstance().lsp.nativeToken(values.getInt(i + 3));
+            if (kind == Tokenizer.UNKNOWN) continue;
+            int start = positions.offset(line, column);
+            int end = positions.offset(line, column + values.getInt(i + 2));
+            tokens.add(new TextEditor.SemanticToken(start, end, kind));
+            if (kind == Tokenizer.TYPE) types.add(text.substring(start, end));
+        }
+        cacheData.put(path, types); editor.getLanguage().setTypes(types); editor.setSemanticTokens(tokens);
+    }
+
+    private void definition(Object result) throws JSONException {
+        if (result instanceof JSONArray) result = ((JSONArray)result).opt(0);
+        if (!(result instanceof JSONObject)) return;
+        JSONObject location = (JSONObject)result;
+        File target = file(location.has("targetUri") ? location.getString("targetUri") : location.getString("uri"));
+        JSONObject range = location.optJSONObject("targetSelectionRange");
+        if (range == null) range = location.getJSONObject("range");
+        if (!ma.getOpenFilePaths().contains(target.getPath())) ma.openFile(target);
+        else ma.selectItem(ma.getOpenFilePaths().indexOf(target.getPath()));
+        ma.getFragmentManager().executePendingTransactions();
+        EditFragment fragment = fragment(target.getPath());
+        if (fragment == null || fragment.getView() == null) return;
+        TextEditor editor = fragment.getView();
+        JSONObject start = range.getJSONObject("start");
+        editor.setSelection(new TextPositions(editor.getText().toString()).offset(start.getInt("line"), start.getInt("character")));
+        editor.requestFocus();
+    }
+
+    private void codeActions(Object result, Lsp.Request request) throws JSONException {
+        List<Command> actions = new ArrayList<>();
+        if (result instanceof JSONArray) for (int i = 0; i < ((JSONArray)result).length(); i++) {
+            JSONObject value = ((JSONArray)result).getJSONObject(i);
+            if (value.has("disabled")) continue;
+            Command action = new Command(); action.title = value.getString("title"); action.edit = value.optJSONObject("edit");
+            JSONObject command = value.optJSONObject("command");
+            if (command == null && value.opt("command") instanceof String) command = value;
+            if (command != null) { action.command = command.getString("command"); action.args = command.optJSONArray("arguments") == null ? "[]" : command.getJSONArray("arguments").toString(); }
+            action.path = request.path; action.revision = request.revision;
+            action.start = request.start; action.end = request.end;
+            if (action.edit != null || action.command != null) actions.add(action);
+        }
+        EditFragment fragment = fragment(request.path);
+        if (fragment != null) fragment.setActions(actions);
+    }
+
+    void executeCodeAction(Command action) {
+        if (!isCurrent(action.path, action.revision)) return;
+        int[] current = selection(action.path);
+        if (current[0] != action.start || current[1] != action.end) return;
+        try {
+            CompletableFuture<Void> applied = action.edit == null ? CompletableFuture.completedFuture(null) : applyWorkspaceEdit(action.edit);
+            reportWorkspaceResult(applied.thenRun(() -> {
+                if (action.command != null) Application.getInstance().lsp.executeCommand(action);
+            }));
+        } catch (Exception error) { Log.e("LSP", "Code action failed", error); ma.toast(error.toString()); }
+    }
+
+    private void reportWorkspaceResult(CompletableFuture<Void> result) {
+        result.whenComplete((ignored, error) -> {
+            if (error != null) {
+                Log.e("LSP", "Unable to save workspace edit; retaining recovery", error);
+                if (ma != null) ma.toast(ma.getString(R.string.save_failed));
+            }
+        });
+    }
+
+    private EditFragment fragment(String path) {
+        if (ma == null) return null;
+        String normalized = new File(path).toPath().normalize().toString();
+        for (String opened : ma.getOpenFilePaths()) if (new File(opened).toPath().normalize().toString().equals(normalized)) {
+            Fragment fragment = ma.getFragmentManager().findFragmentByTag(opened);
+            return fragment instanceof EditFragment ? (EditFragment)fragment : null;
+        }
+        return null;
+    }
+
+    private static File file(String uri) {
+        Uri parsed = Uri.parse(uri);
+        if (!"file".equals(parsed.getScheme()) || parsed.getPath() == null) throw new IllegalArgumentException("Unsupported document URI");
+        String path = parsed.getPath();
+        if (path.startsWith(Utils.PREF) && !path.startsWith("/home", Utils.PREF.length())) path = Utils.PREF + "/home/.." + path.substring(Utils.PREF.length());
+        return new File(path);
+    }
+
+    static List<Edit> edits(String text, JSONArray values) throws JSONException {
+        List<Edit> edits = new ArrayList<>();
+        TextPositions positions = new TextPositions(text);
+        for (int i = 0; i < values.length(); i++) {
+            JSONObject value = values.getJSONObject(i); edits.add(range(positions, value.getJSONObject("range"), value.getString("newText")));
+        }
+        return edits;
+    }
+    private static Edit range(TextPositions positions, JSONObject range, String replacement) throws JSONException {
+        JSONObject start = range.getJSONObject("start"), end = range.getJSONObject("end");
+        Edit edit = new Edit(); edit.start = positions.offset(start.getInt("line"), start.getInt("character"));
+        edit.len = positions.offset(end.getInt("line"), end.getInt("character")) - edit.start; edit.text = replacement;
+        if (edit.len < 0) throw new IllegalArgumentException("Reversed text range");
+        return edit;
+    }
+    private static void apply(TextEditor editor, List<Edit> edits) {
+        int caret = EditorTextEdits.apply(editor.getText(), edits, editor.getCaretPosition());
+        editor.refreshDocument(); editor.setSelection(caret);
+    }
+
+    private static final class WorkspaceChange {
+        final File file;
+        final TextEditor editor;
+        final Document document;
+        final List<Edit> edits;
+        final Supplier<String> source;
+        WorkspaceChange(File file, TextEditor editor, Document document, List<Edit> edits) {
+            this.file = file; this.editor = editor; this.document = document; this.edits = edits;
+            this.source = document::toString;
+        }
+    }
+
+    CompletableFuture<Void> applyWorkspaceEdit(JSONObject workspace) throws IOException, JSONException {
+        Map<String, JSONArray> changes = new LinkedHashMap<>();
+        JSONObject simple = workspace.optJSONObject("changes");
+        if (simple != null) { Iterator<String> keys = simple.keys(); while (keys.hasNext()) { String uri = keys.next(); changes.put(uri, simple.getJSONArray(uri)); } }
+        JSONArray documents = workspace.optJSONArray("documentChanges");
+        if (documents != null) for (int i = 0; i < documents.length(); i++) {
+            JSONObject change = documents.getJSONObject(i), document = change.optJSONObject("textDocument");
+            if (document == null) throw new IOException("File resource operations are not supported");
+            EditFragment fragment = fragment(file(document.getString("uri")).getPath());
+            if (fragment != null && document.has("version") && !document.isNull("version") && document.getInt("version") != fragment.getVersion())
+                throw new IOException("Workspace edit refers to an older document version");
+            changes.put(document.getString("uri"), change.getJSONArray("edits"));
+        }
+        DocumentSessions sessions = Application.getInstance().getDocuments();
+        List<WorkspaceChange> prepared = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        for (Map.Entry<String, JSONArray> change : changes.entrySet()) {
+            File file = file(change.getKey()); EditFragment fragment = fragment(file.getPath());
+            if (Application.getInstance().saver.isSaving(file.getAbsolutePath())) throw new IOException("Document is being saved");
+            if (!seen.add(file.toPath().normalize().toString())) throw new IOException("Duplicate workspace document");
+            if (fragment != null && fragment.getView() != null) {
+                Document document = fragment.getView().getText();
+                List<Edit> edits = edits(document.toString(), change.getValue());
+                EditorTextEdits.validate(document, edits);
+                prepared.add(new WorkspaceChange(file, fragment.getView(), document, edits));
+                continue;
+            }
+            for (DocumentSession session : sessions.getState().getValue())
+                if (session.getDirty() && new File(session.getPath()).toPath().normalize().equals(file.toPath().normalize()))
+                    throw new IOException("Open the recovered document before applying workspace edits");
+            String original;
+            try (Reader reader = new InputStreamReader(FileHelper.openInputStream(file), StandardCharsets.UTF_8)) {
+                StringBuilder text = new StringBuilder(); char[] buffer = new char[4096];
+                for (int count; (count = reader.read(buffer)) != -1;) text.append(buffer, 0, count);
+                original = text.toString();
+            }
+            Document document = new Document(null); document.setText(original); document.clearSpans(); document.analyzeWordWrap();
+            List<Edit> edits = edits(original, change.getValue());
+            EditorTextEdits.validate(document, edits);
+            prepared.add(new WorkspaceChange(file, null, document, edits));
+        }
+        for (WorkspaceChange change : prepared) {
+            if (change.editor != null) apply(change.editor, change.edits);
+            else {
+                EditorTextEdits.apply(change.document, change.edits, 0);
+                sessions.open(change.file.getAbsolutePath(), change.source);
+                sessions.changed(change.file.getAbsolutePath());
+            }
+        }
+        List<CompletableFuture<Boolean>> writes = new ArrayList<>();
+        for (WorkspaceChange change : prepared) if (change.editor == null) {
+            String path = change.file.getAbsolutePath();
+            writes.add(Application.getInstance().saver.save(path, change.document.toString(), null, timestamp -> {
+                Application.getInstance().sourceSaved(path, change.document, timestamp);
+                sessions.closeIfSource(path, change.source);
+            }));
+        }
+        return CompletableFuture.allOf(writes.toArray(new CompletableFuture[0]));
     }
 }

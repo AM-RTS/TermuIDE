@@ -28,22 +28,18 @@ public class LanguageJson extends Language
         return true;
     }
 
-    private Lexer lx = null;
     @Override
     public Lexer newLexer(CharSeqReader reader) {
-        if (lx==null) {
-            CppLexer cx = new CppLexer(reader);
-            lx = cx;
-            int l = keywords.length;
-            Set<String> keys = new HashSet<>();
-            for (int i=0;i<l;i++) {
-                keys.add(keywords[i]);
-            }
-            cx.keywords = keys;
-            cx.types = Collections.emptySet();
-            cx.trackPreprocessor = false;
-            cx.backquoteString = false;
-        } else lx.yyreset(reader);
-        return lx;
+        CppLexer cx = new CppLexer(reader);
+        int l = keywords.length;
+        Set<String> keys = new HashSet<>();
+        for (int i=0;i<l;i++) {
+            keys.add(keywords[i]);
+        }
+        cx.keywords = keys;
+        cx.types = Collections.emptySet();
+        cx.trackPreprocessor = false;
+        cx.backquoteString = false;
+        return cx;
 	}
 }

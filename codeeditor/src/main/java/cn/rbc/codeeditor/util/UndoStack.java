@@ -64,6 +64,10 @@ public class UndoStack {
 		return _stack.get(_top - 1);
 	}
 
+    Command commandAt(int version) {
+        return version > 0 && version <= _stack.size() ? _stack.get(version - 1) : null;
+    }
+
 	/**
 	 * Undo the previous insert/delete operation
 	 * 

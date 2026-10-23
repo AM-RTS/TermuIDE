@@ -1,12 +1,10 @@
 package cn.rbc.termuc;
 import android.app.*;
-import android.app.AlertDialog.*;
 import android.content.*;
 import android.content.res.*;
 import android.os.*;
 import android.util.*;
 import android.view.*;
-import android.view.inputmethod.*;
 import android.widget.*;
 import cn.rbc.codeeditor.common.*;
 import cn.rbc.codeeditor.lang.*;
@@ -15,17 +13,20 @@ import cn.rbc.codeeditor.util.*;
 import cn.rbc.codeeditor.view.*;
 import java.io.*;
 import java.util.*;
+import java.util.function.Supplier;
+import java.util.concurrent.CompletableFuture;
 
 import cn.rbc.codeeditor.lang.Formatter;
 import cn.rbc.codeeditor.util.Range;
 
 public class EditFragment extends Fragment
-implements OnTextChangeListener, DialogInterface.OnClickListener, Formatter, OnCaretScrollListener,
-ActionMode.Callback, EditText.OnEditorActionListener, DialogInterface.OnDismissListener,
-TextEditor.OnEditedListener {
+implements OnTextChangeListener, Formatter, OnCaretScrollListener,
+ActionMode.Callback, TextEditor.OnEditedListener {
 	public final static int
 	TYPE_C = 1,
 	TYPE_CPP = 2,
+    // Language IDs occupy the low five bits; keep legacy header/saved-state bits unchanged.
+    TYPE_PYTHON = 3,
     TYPE_JAVA = 4,
     TYPE_JAVASCRIPT = 8,
     TYPE_JSON = 16,
@@ -39,10 +40,12 @@ TextEditor.OnEditedListener {
 	int type;
 	private String C;
 	private long lastModified;
-	private final List<Range> changes = new ArrayList<>();
+    private Runnable languageChange;
+    private Runnable autoSave;
+    private boolean autoSaveWarningShown;
+    private boolean sourceLoaded;
     static final Set<String> DEFTYPES = new HashSet<>(0);
-    private AlertDialog transD;
-    private TextView transT;
+    private Supplier<String> documentText;
 
 	public EditFragment() {
 	}
@@ -85,21 +88,55 @@ TextEditor.OnEditedListener {
             doc = Application.getInstance().load(pth);
             editor.setTextSize(savedInstanceState.getInt(TS));
         }
-        invalidateType();
+        Integer knownType = Languages.fileType(fl.getName());
+        if (knownType != null) type = knownType;
+        invalidateType(editor);
+        DocumentSessions sessions = Application.getInstance().getDocuments();
+        String recovery = sessions.recoveryText(fl.getAbsolutePath());
+        boolean recoveredSourceLoaded = sessions.isSourceLoaded(fl.getAbsolutePath())
+            && (savedInstanceState == null || savedInstanceState.getBoolean("sourceLoaded", true));
         if (doc != null) {
+            sourceLoaded = recoveredSourceLoaded;
             doc.setMetrics(editor);
             doc.resetRowTable();
             editor.setDocument(doc);
         } else {
             ma.setEditor(editor);
             try {
-                doc = load(editor);
+                if (recovery != null) {
+                    doc = editor.getText();
+                    doc.setText(recovery);
+                    doc.resetUndos();
+                    doc.markUnsaved();
+                    doc.clearSpans();
+                    doc.analyzeWordWrap();
+                    sourceLoaded = recoveredSourceLoaded;
+                } else doc = load(editor);
                 if ("s" == Application.completion)
                     onOpen(doc);
             } catch (IOException fnf) {
+                sourceLoaded = false;
                 fnf.printStackTrace();
                 HelperUtils.show(Toast.makeText(ma, getString(R.string.open_failed) + fnf.getMessage(), Toast.LENGTH_SHORT));
             }
+        }
+        editor.refreshDocument();
+        final Document currentDocument = editor.getText();
+        documentText = () -> {
+            synchronized (currentDocument) { return currentDocument.toString(); }
+        };
+        sessions.open(fl.getAbsolutePath(), documentText, sourceLoaded);
+        currentDocument.setOnTextChangeListener(this);
+        editor.setEdited(sessions.isDirty(fl.getAbsolutePath()));
+        if (savedInstanceState != null) {
+            editor.setSelection(savedInstanceState.getInt("selectionStart"),
+                Math.max(0, savedInstanceState.getInt("selectionEnd") - savedInstanceState.getInt("selectionStart")));
+            int scrollX = savedInstanceState.getInt("scrollX"), scrollY = savedInstanceState.getInt("scrollY");
+            editor.post(() -> {
+                if (editor.getSoraEditor().isReleased()) return;
+                editor.getSoraEditor().getScroller().startScroll(0, 0, scrollX, scrollY, 0);
+                editor.getSoraEditor().invalidate();
+            });
         }
 		if ((type & TYPE_MASK) != TYPE_TXT) {
 			if (hasLsp() && "s" == Application.completion)
@@ -115,7 +152,7 @@ TextEditor.OnEditedListener {
 	}
 
     static boolean isExecutable(int type) {
-        return (type & TYPE_HEADER) == 0;
+        return Languages.canRun(type);
     }
 
     final boolean isText() {
@@ -123,30 +160,13 @@ TextEditor.OnEditedListener {
     }
 
     final boolean hasLsp() {
-        return (type & (TYPE_C|TYPE_CPP)) != 0;
+        return Languages.forType(type).getHasLsp();
     }
 
-    private void invalidateType() {
-        int tp = type & TYPE_MASK;
-        if (tp == TYPE_C) {
-            C = "clang";
-            TextEditor.setLanguage(CLanguage.getInstance());
-        } else if (tp == TYPE_CPP) {
-            C = "clang++";
-            TextEditor.setLanguage(CppLanguage.getInstance());
-        } else if (tp == TYPE_JAVA) {
-            C = "javac";
-            TextEditor.setLanguage(LanguageJava.getInstance());
-        } else if (tp == TYPE_JAVASCRIPT) {
-            C = "node";
-            TextEditor.setLanguage(LanguageJavascript.getInstance());
-        } else if (tp == TYPE_JSON) {
-            C = null;
-            TextEditor.setLanguage(LanguageJson.getInstance());
-        } else {
-            C = null;
-            TextEditor.setLanguage(LanguageNonProg.getInstance());
-        }
+    private void invalidateType(TextEditor editor) {
+        Languages.Definition language = Languages.forType(type);
+        C = language.getCompiler();
+        editor.setLanguage(language.highlighting());
     }
 
     @Override
@@ -167,14 +187,15 @@ TextEditor.OnEditedListener {
 			return;
 		}
 		Lsp ls = Application.getInstance().lsp;
-		int stl = text.findLineNumber(caretIndex);
-		int stc = caretIndex - text.getLineOffset(stl);
+        int stl = ed.getSoraEditor().getCursor().getRightLine();
+        int stc = ed.getSoraEditor().getCursor().getRightColumn();
 		ls.documentHighlight(fl, stl, stc);
 	}
 
 	@Override
 	public void format(Document txt, int width) {
         if (!hasLsp()) return;
+        flushLanguageChange();
         TextEditor ed = getView();
 		int start = ed.getSelectionStart(), end = ed.getSelectionEnd();
 		Lsp lsp = Application.getInstance().lsp;
@@ -183,70 +204,81 @@ TextEditor.OnEditedListener {
 		else {
 			Range range = new Range();
 			Document text = ed.getText();
-			if (ed.isWordWrap()) {
-				range.stl = text.findLineNumber(start);
-				range.stc = text.getLineOffset(range.stl);
-				range.enl = text.findLineNumber(end);
-				range.enc = text.getLineOffset(range.enl);
-			} else {
-				range.stl = text.findRowNumber(start);
-				range.stc = text.getRowOffset(range.stl);
-				range.enl = text.findRowNumber(end);
-				range.enc = text.getRowOffset(range.enl);
-			}
-			range.stc = start - range.stc;
-			range.enc = end - range.enc;
+	            TextPositions positions = new TextPositions(text.toString());
+            int[] left = positions.position(start), right = positions.position(end);
+            range.stl = left[0]; range.stc = left[1]; range.enl = right[0]; range.enc = right[1];
 			lsp.rangeFormatting(fl, range, width, ed.isUseSpace());
 	    }
 	}
 
 	private volatile int mVer = 0;
+    int getVersion() { return mVer; }
 
 	public void onChanged(String c, int start, boolean ins, boolean typ) {
-        if ("s" != Application.completion)
+        Application.getInstance().getDocuments().changed(fl.getAbsolutePath());
+        queueAutoSave();
+        if ("s" != Application.completion || !hasLsp())
             return;
 		TextEditor editor = getView();
         if (editor == null) return;
-		Document text = editor.getText();
-		text.setHighlights(null);
-		boolean wordwrap = editor.isWordWrap();
-		Range range = new Range();
-		if (wordwrap) {
-			range.stl = text.findLineNumber(start);
-			range.stc = text.getLineOffset(range.stl);
-		} else {
-			range.stl = text.findRowNumber(start);
-			range.stc = text.getRowOffset(range.stl);
-		}
-		range.stc = start - range.stc;
-		if (ins) { // insert
-			range.enl = range.stl;
-			range.enc = range.stc;
-		} else { // delete
-			int e = start + c.length();
-			c = "";
-			if (wordwrap) {
-				range.enl = text.findLineNumber(e);
-				range.enc = text.getLineOffset(range.enl);
-			} else {
-				range.enl = text.findRowNumber(e);
-				range.enc = text.getRowOffset(range.enl);
-			}
-			range.enc = e - range.enc;
-		}
-		range.msg = c;
-		changes.add(range);
-		Lsp lsp = Application.getInstance().lsp;
-		lsp.didChange(fl, ++mVer, changes);
-		// when inserting text and typing, call for completion
-		if (ins && typ && c.length() == 1) {
-            lsp.signatureHelpTry(fl, range.enl, range.enc + 1, c.charAt(0), editor.getSigHelpPanel().isShowing());
-			lsp.completionTry(fl, range.enl, range.enc + 1, c.charAt(0));
-        }
-        // TODO: support sematicTokensDelta
-        lsp.semanticTokensFull(fl);
-		changes.clear();
+        ++mVer;
+        editor.getText().setHighlights(null);
+        if (languageChange != null) editor.removeCallbacks(languageChange);
+        // Document callbacks run before mutation; send the completed buffer and capture the final caret.
+        languageChange = () -> {
+            languageChange = null;
+            if (getView() != editor || editor.getSoraEditor().isReleased() || "s" != Application.completion) return;
+            try {
+                Lsp lsp = Application.getInstance().lsp;
+                lsp.didChange(fl, mVer, editor.getText().toString());
+                if (ins && typ && c.length() == 1) {
+                    int[] position = new TextPositions(editor.getText().toString()).position(editor.getCaretPosition());
+                    lsp.signatureHelpTry(fl, position[0], position[1], c.charAt(0), editor.getSigHelpPanel().isShowing());
+                    lsp.completionTry(fl, position[0], position[1], c.charAt(0));
+                }
+                lsp.semanticTokensFull(fl);
+            } catch (RuntimeException error) { Log.e("LSP", "Unable to synchronize document", error); }
+        };
+        editor.post(languageChange);
 	}
+
+    private void flushLanguageChange() {
+        Runnable pending = languageChange;
+        if (pending != null && getView() != null) {
+            getView().removeCallbacks(pending);
+            pending.run();
+        }
+    }
+
+    private void cancelAutoSave() {
+        if (autoSave != null && getView() != null) getView().removeCallbacks(autoSave);
+        autoSave = null;
+    }
+
+    private void queueAutoSave() {
+        cancelAutoSave();
+        TextEditor editor = getView();
+        if (!Application.auto_save || editor == null) return;
+        autoSave = () -> {
+            autoSave = null;
+            MainActivity activity = (MainActivity)getActivity();
+            if (!Application.auto_save || activity == null || getView() != editor || editor.getSoraEditor().isReleased()
+                || !Application.getInstance().getDocuments().isDirty(fl.getAbsolutePath())
+                || activity.isSavingClose() || activity.getPendingClosePaths().contains(fl.getAbsolutePath())
+                || activity.getPendingReload() == this) return;
+            if (Application.getInstance().saver.isSaving(fl.getAbsolutePath())) { queueAutoSave(); return; }
+            save(true).whenComplete((clean, error) -> {
+              if (error != null) {
+                Log.e("AutoSave", "Unable to save source; retaining dirty document", error);
+                if (!autoSaveWarningShown) {
+                    autoSaveWarningShown = true;
+                    HelperUtils.show(Toast.makeText(activity, R.string.auto_save_failed, Toast.LENGTH_LONG));
+                }
+              }
+            });
+        };
+        editor.postDelayed(autoSave, 1000L);
+    }
 
 	@Override
 	public void onResume() {
@@ -256,63 +288,59 @@ TextEditor.OnEditedListener {
 	}
 
 	private void refresh() {
+		if (Application.getInstance().saver.isSaving(fl.getAbsolutePath())) return;
 		long mLast = FileHelper.lastModified(fl);
 		if (mLast != lastModified) {
 			lastModified = mLast;
-			Builder bd = new Builder(getActivity());
-			bd.setTitle(fl.getName());
-			bd.setMessage(getString(R.string.file_modified, fl.getName()));
-			bd.setPositiveButton(android.R.string.ok, this);
-			bd.setNegativeButton(android.R.string.cancel, null);
-			bd.create().show();
+			((MainActivity)getActivity()).requestReload(this);
 		} else if ("s" == Application.completion) {// TODO: delay for throttle
             Set<String> typs = Application.getInstance().hand.cacheData.get(fl.toString());
             if (typs == null) typs = DEFTYPES;
-            Language lang = Tokenizer.getLanguage();
+            Language lang = getView().getLanguage();
             if (typs != lang.getTypes()) {
                 lang.setTypes(typs);
-                getView().mCtrlr.determineSpans();
+                getView().refreshDocument();
             }
         }
 	}
 
     public void onOpen(Document doc) {
         if (hasLsp()) {
+            mVer = 0;
             Lsp lsp = Application.getInstance().lsp;
             lsp.didOpen(fl, (type & TYPE_C) != 0 ? "c" : "cpp", doc.toString());
             lsp.semanticTokensFull(fl);
         }
     }
 
-	@Override
-	public void onClick(DialogInterface diag, int id) {
+	public void reloadFromDisk() {
+        if (Application.getInstance().saver.isSaving(fl.getAbsolutePath())) return;
         TextEditor ed = getView();
-        if (transD != null) {
-            int pos = ed.getSelectionStart();
-            int l, c;
-            Document doc = ed.getText();
-            if (doc.isWordWrap()) {
-                l = doc.findLineNumber(pos);
-                c = doc.getLineOffset(l);
-            } else {
-                l = doc.findRowNumber(pos);
-                c = doc.getRowOffset(l);
-            }
-            Application.getInstance().lsp.rename(fl, l, pos - c, transT.getText().toString());
-            return;
-        }
 		try {
 			Document cs = load(ed);
-            ed.mCtrlr.determineSpans();
+            if (languageChange != null) ed.removeCallbacks(languageChange);
+            languageChange = null;
+            Application.getInstance().getDocuments().saved(fl.getAbsolutePath());
+            ed.setEdited(false);
+            ed.refreshDocument();
             if ("s" == Application.completion && hasLsp()) {
 			    Lsp lsp = Application.getInstance().lsp;
-                lsp.didChange(fl, 0, cs.toString());
+                lsp.didChange(fl, ++mVer, cs.toString());
                 lsp.semanticTokensFull(fl);
             }
 		} catch (IOException ioe) {
 			ioe.printStackTrace();
 		}
 	}
+
+    public void renameSelection(String name) {
+        flushLanguageChange();
+        TextEditor ed = getView();
+        int pos = ed.getSelectionStart();
+        Document doc = ed.getText();
+        int[] position = new TextPositions(doc.toString()).position(pos);
+        Application.getInstance().lsp.rename(fl, position[0], position[1], name);
+    }
 
 	@Override
 	public void onHiddenChanged(boolean hidden) {
@@ -322,8 +350,8 @@ TextEditor.OnEditedListener {
 			if (ma == null) return;
 			TextEditor ed = getView();
 			ma.setEditor(ed);
-			ma.setFileRunnable((type & TYPE_HEADER) == 0);
-			invalidateType();
+			ma.setFileRunnable(Languages.canRun(type));
+			invalidateType(ed);
 			refresh();
 			ed.requestFocus();
 		}
@@ -338,45 +366,95 @@ TextEditor.OnEditedListener {
 		outState.putInt(TP, type);
 		outState.putInt(TS, (int)getView().getTextSize());
 		outState.putInt(VS, mVer);
+        outState.putBoolean("sourceLoaded", sourceLoaded);
+        outState.putInt("selectionStart", getView().getSelectionStart());
+        outState.putInt("selectionEnd", getView().getSelectionEnd());
+        outState.putInt("scrollX", getView().getSoraEditor().getOffsetX());
+        outState.putInt("scrollY", getView().getSoraEditor().getOffsetY());
 	}
 
-	public void save() throws IOException {
-        Writer writer = new OutputStreamWriter(FileHelper.openOutputStream(fl));
-        Document doc = getView().getText();
-        doc.markVersion();
-        Reader rd = new CharSeqReader(doc);
-        char[] buf = new char[1024];
-        int i;
-        while ((i = rd.read(buf)) != -1) {
-            writer.write(buf, 0, i);
+    @Override
+    public void onDestroyView() {
+        cancelAutoSave();
+        flushLanguageChange();
+        if (languageChange != null && getView() != null) getView().removeCallbacks(languageChange);
+        languageChange = null;
+        if (documentText != null) {
+            Application.getInstance().getDocuments().detach(fl.getAbsolutePath(), documentText);
+            documentText = null;
         }
-        rd.close();
-        writer.close();
-        lastModified = FileHelper.lastModified(fl);
-        getView().setEdited(doc.getMarkedVersion() != doc.getCurrentVersion());
-        if ("s" == Application.completion && hasLsp()) {
-            Application.getInstance().lsp.didSave(fl);
+        if (getView() != null) getView().release();
+        super.onDestroyView();
+    }
+
+    public CompletableFuture<Boolean> save() { return save(false); }
+
+    private CompletableFuture<Boolean> save(boolean automatic) {
+        cancelAutoSave();
+        Application app = Application.getInstance();
+        String path = fl.getAbsolutePath();
+        CompletableFuture<Boolean> pending = app.saver.pending(path);
+        if (pending != null) return pending.handle((clean, error) -> null).thenCompose(ignored -> save(automatic));
+        TextEditor editor = getView();
+        // A failed read leaves an empty editor; never publish it over the source.
+        if (!sourceLoaded || editor == null || editor.getSoraEditor().isReleased()) {
+            CompletableFuture<Boolean> failed = new CompletableFuture<>();
+            failed.completeExceptionally(new IOException("Document unavailable"));
+            return failed;
         }
+        if (automatic && (!Application.auto_save || !app.getDocuments().isDirty(path)))
+            return CompletableFuture.completedFuture(false);
+        Document doc = editor.getText();
+        String text = doc.toString();
+        TextBuffer.SavePoint point = doc.captureSavePoint();
+        TextBuffer.SavePoint previous = doc.markedSavePoint();
+        doc.markUnsaved();
+        editor.setEdited(true);
+        flushLanguageChange();
+        return app.saver.save(path, text, automatic ? lastModified : null, timestamp -> {
+            doc.markSaved(point);
+            app.sourceSaved(path, doc, timestamp);
+            autoSaveWarningShown = false;
+            if ("s" == Application.completion && hasLsp()) {
+                try { app.lsp.didSave(fl); } catch (RuntimeException error) { Log.e("LSP", "Unable to report saved source", error); }
+            }
+        }).whenComplete((clean, error) -> {
+            if (error != null) {
+                doc.markSaved(previous);
+                app.sourceSaved(path, doc, lastModified);
+            }
+        });
+    }
+
+    void sourceSaved(Document savedDocument, long timestamp) {
+        lastModified = timestamp;
+        TextEditor editor = getView();
+        if (editor == null || editor.getSoraEditor().isReleased()) return;
+        Document current = editor.getText();
+        if (current != savedDocument) {
+            if (Application.getInstance().getDocuments().isDirty(fl.getAbsolutePath())) current.markUnsaved();
+            else current.markVersion();
+        }
+        editor.setEdited(current.getMarkedVersion() != current.getCurrentVersion());
     }
 
 	public Document load(TextEditor ed) throws IOException {
-		Reader fr = new InputStreamReader(FileHelper.openInputStream(fl));
 		char[] buf = new char[1024];
         int i;
         Document doc = ed.getText();
         StringBuilder sb = new StringBuilder();
-        doc.delete(0, doc.length() - 1, 0L, false);
-        while ((i = fr.read(buf)) != -1) {
-            sb.append(buf, 0, i);
+        try (Reader reader = new InputStreamReader(FileHelper.openInputStream(fl))) {
+            while ((i = reader.read(buf)) != -1) sb.append(buf, 0, i);
         }
-		fr.close();
+        doc.setOnTextChangeListener(null);
         doc.setText(sb);
         doc.resetUndos();
+        doc.markVersion();
         doc.clearSpans();
         doc.analyzeWordWrap();
-		if (hasLsp() && "s" == Application.completion) {
-			doc.setOnTextChangeListener(this);
-        }
+        doc.setOnTextChangeListener(this);
+		sourceLoaded = true;
+        Application.getInstance().getDocuments().setSourceLoaded(fl.getAbsolutePath(), true);
 		return doc;
 	}
 
@@ -385,26 +463,14 @@ TextEditor.OnEditedListener {
 	}
 
 	public static int fileType(File pwd) {
+        return fileType(pwd, false);
+    }
+
+    static int fileType(File pwd, boolean recovering) {
 		String _it = pwd.getName();
-        int idx = _it.lastIndexOf(".");
-        String exts = idx >= 0 ? _it.substring(idx+1) : "";
-        switch (exts) {
-            case "c": return TYPE_C;
-            case "cpp":
-            case "cxx":
-            case "cc":
-                return TYPE_CPP;
-            case "h":
-            case "hpp":
-                return TYPE_CPP | TYPE_HEADER;
-            case "java":
-                return TYPE_JAVA | TYPE_HEADER;
-            case "js":
-                return TYPE_JAVASCRIPT | TYPE_HEADER;
-            case "json":
-                return TYPE_JSON | TYPE_HEADER;
-        }
-        if (Utils.isBlob(pwd))
+        Integer known = Languages.fileType(_it);
+        if (known != null) return known;
+        if (!recovering && Utils.isBlob(pwd))
             return TYPE_BLOB;
         return TYPE_TXT | TYPE_HEADER;
 	}
@@ -439,13 +505,13 @@ TextEditor.OnEditedListener {
     private List<Command> tActs;
     void setActions(List<Command> actions) {
         tActs = actions;
-        getView().getClipboardPanel().invalidate();
+        if (getView() != null) getView().getClipboardPanel().invalidate();
     }
 
     @Override
     public boolean onPrepareActionMode(ActionMode p1, Menu p2)
     {
-        FreeScrollingTextField te = getView();
+        TextEditor te = getView();
         
         int start = te.getSelectionStart(), end = te.getSelectionEnd();
         p2.removeGroup(1);
@@ -466,46 +532,20 @@ TextEditor.OnEditedListener {
             return true;
         }
         List<ErrSpan> dg;
-        if ((dg = te.getText().getDiag()) != null && dg.size()>0) {
-            // before
-            Lsp lsp = Application.getInstance().lsp;
-            int stl, stc, enl, enc;
-            Document doc = te.getText();
-            if (doc.isWordWrap()) {
-                stl = doc.findLineNumber(start);
-                stc = doc.getLineOffset(stl);
-                enl = doc.findLineNumber(end);
-                enc = doc.getLineOffset(enl);
-            } else {
-                stl = doc.findRowNumber(start);
-                stc = doc.getRowOffset(stl);
-                enl = doc.findRowNumber(end);
-                enc = doc.getRowOffset(enl);
-            }
+        if (hasLsp() && "s" == Application.completion && (dg = te.getText().getDiag()) != null && !dg.isEmpty()) {
+            TextPositions positions = new TextPositions(te.getText().toString());
+            int[] left = positions.position(start), right = positions.position(end);
             Range rng = new Range();
-            rng.stl = stl;
-            rng.stc = start -= stc;
-            rng.enl = enl;
-            rng.enc = end - enc;
-            stl += 1;
-
-            int y = dg.size() - 1;
-            int x = 0;
-            ErrSpan errspan;
-            while (x < y) {
-                int m = (x + y) >> 1;
-                errspan = dg.get(m);
-                if (errspan.enl > stl || errspan.enl == stl && errspan.enc >= start)
-                    y = m;
-                else
-                    x = m + 1;
+            rng.stl = left[0]; rng.stc = left[1]; rng.enl = right[0]; rng.enc = right[1];
+            List<ErrSpan> overlapping = new ArrayList<>();
+            for (ErrSpan diagnostic : dg) {
+                if (diagnostic.msg == null) continue;
+                try {
+                    if (positions.offset(diagnostic.stl - 1, diagnostic.stc) <= end &&
+                        positions.offset(diagnostic.enl - 1, diagnostic.enc) >= start) overlapping.add(diagnostic);
+                } catch (IllegalArgumentException staleDiagnostic) { /* Diagnostics may precede the latest edit. */ }
             }
-            errspan = dg.get(y);
-            if ((errspan.stl < stl || errspan.stl == stl && errspan.stc <= end)
-                && (stl < errspan.enl || stl == errspan.enl && start <= errspan.enc)
-                && errspan.msg != null) {
-                lsp.codeAction(fl, rng, dg.subList(y,y+1));
-            }
+            if (!overlapping.isEmpty()) Application.getInstance().lsp.codeAction(fl, rng, overlapping);
         }
         return true;
     }
@@ -517,12 +557,9 @@ TextEditor.OnEditedListener {
         TextEditor ed = getView();
         switch (id) {
             case R.id.goto_:
-                if ("s" == Application.completion) {
-                    int pos = ed.getCaretPosition();
-                    Document doc = ed.getText();
-                    int line = doc.findLineNumber(pos);
-                    int off = pos-doc.getLineOffset(line);
-                    Application.getInstance().lsp.definition(fl, line, off);
+                if ("s" == Application.completion && hasLsp()) {
+                    Application.getInstance().lsp.definition(fl, ed.getSoraEditor().getCursor().getRightLine(),
+                        ed.getSoraEditor().getCursor().getRightColumn());
                 }
                 p1.finish();
                 break;
@@ -533,29 +570,11 @@ TextEditor.OnEditedListener {
                 p1.finish();
                 break;
             case R.id.rename:
-                Context ctx = getContext();
                 TextEditor te = getView();
-                EditText txt = new EditText(ctx);
                 String selTxt = te.getSelectedText();
-                txt.setMinEms(selTxt.length());
-                txt.setText(selTxt);
-                txt.setImeOptions(EditorInfo.IME_ACTION_DONE);
-                txt.setSingleLine(true);
-                txt.setMaxLines(1);
-                txt.setOnEditorActionListener(this);
-                transT = txt;
                 p1.finish();
-                AlertDialog dg = new Builder(getActivity())
-                .setTitle(R.string.rename)
-                .setView(txt)
-                .setPositiveButton(android.R.string.ok,this)
-                .setNegativeButton(android.R.string.cancel,null)
-                .setOnDismissListener(this)
-                .create();
-                transD = dg;
-                dg.show();
+                ((MainActivity)getActivity()).requestRename(this, selTxt);
                 te.clearFocus();
-                txt.requestFocus();
                 break;
             default:
                 id -= ACTION_BASE_ID;
@@ -563,7 +582,7 @@ TextEditor.OnEditedListener {
                     break;
                 List<Command> cmds = (List<Command>)p1.getTag();
                 if (cmds != null && id < cmds.size()) {
-                    Application.getInstance().lsp.executeCommand(cmds.get(id));
+                    Application.getInstance().hand.executeCodeAction(cmds.get(id));
                     p1.finish();
                 }
                 break;
@@ -577,28 +596,8 @@ TextEditor.OnEditedListener {
     }
 
     @Override
-    public boolean onEditorAction(TextView p1, int p2, KeyEvent p3) {
-        onClick(null, DialogInterface.BUTTON_POSITIVE);
-        transD.dismiss();
-        return true;
-    }
-
-    @Override
-    public void onDismiss(DialogInterface p1) {
-        transD = null;
-        transT = null;
-    }
-
-    @Override
     public void onEdited(TextEditor te, boolean edited) {
-        int idx = 0;
-        MainActivity ma = (MainActivity)getActivity();
-        for (; idx<ma.getItemCount(); idx++) {
-            if (ma.getTag(idx).equals(fl.getPath())) {
-                break;
-            }
-        }
-        if (idx == ma.getItemCount()) return;
-        ma.setItemEdited(idx, edited);
+        Application.getInstance().getDocuments().setDirty(fl.getAbsolutePath(), edited);
+
     }
 }

@@ -1,20 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-	<item type="id" name="keys"/>
 	<item type="id" name="editFrag"/>
-	<item type="id" name="msg_empty"/>
-	<item type="id" name="show_list"/>
-	<item type="id" name="subcontainer"/>
-	<item type="id" name="file_list"/>
-	<item type="id" name="delete"/>
+    <item type="id" name="main_compose"/>
+    <item type="id" name="settings_compose"/>
+    <item type="id" name="picker_compose"/>
     <item type="id" name="rename"/>
-	<item type="id" name="newfile"/>
-	<item type="id" name="newprj"/>
 	<item type="id" name="debug"/>
 	<item type="id" name="build"/>
 	<item type="id" name="compile"/>
 	<item type="id" name="exstorage"/>
 	<item type="id" name="tmxstorage"/>
+	<item type="id" name="run"/>
+	<item type="id" name="undo"/>
+	<item type="id" name="redo"/>
+	<item type="id" name="save"/>
+	<item type="id" name="search"/>
+	<item type="id" name="close"/>
+	<item type="id" name="prj_attr"/>
+	<item type="id" name="prj_close"/>
+	<item type="id" name="settings"/>
     <item type="id" name="goto_"/>
-    <item type="id" name="tabScroller"/>
 </resources>

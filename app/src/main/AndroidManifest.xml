@@ -7,11 +7,10 @@
     </queries>
 
 	<uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" tools:ignore="ScopedStorage"/>
-	<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
-	<uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
+	<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29"/>
+	<uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="29"/>
 	<uses-permission android:name="android.permission.INTERNET" />
 	<uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
-	<uses-permission android:name="android.permission.SYSTEM_OVERLAY_WINDOW" />
 	<uses-permission android:name="com.termux.permission.RUN_COMMAND"/>
 
     <application
@@ -24,10 +23,10 @@
 		android:supportsRtl="true"
 		android:resizeableActivity="true"
 		android:theme="@style/AppTheme"
-		android:windowSoftInputMode="adjustResize"
 		android:configChanges="orientation|screenSize|keyboardHidden">
+        <receiver android:name=".RunResultReceiver" android:exported="false" />
 		<activity
-            android:name=".MainActivity"
+            android:name=".MainActivity" android:windowSoftInputMode="adjustResize"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -36,7 +35,7 @@
         </activity>
 		<activity
 			android:label="@string/settings"
-			android:name=".SettingsActivity"/>
+			android:name=".SettingsActivity" android:windowSoftInputMode="adjustResize"/>
 		<activity
 			android:icon="@android:drawable/ic_menu_close_clear_cancel"
 			android:name=".FileActivity"/>

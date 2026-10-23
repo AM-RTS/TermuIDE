@@ -1,9 +1,6 @@
 package cn.rbc.codeeditor.util;
 
 import java.io.*;
-import cn.rbc.codeeditor.lang.*;
-import android.view.*;
-import android.os.*;
 
 public class CharSeqReader extends Reader {
 	int offset = 0;
@@ -21,18 +18,14 @@ public class CharSeqReader extends Reader {
 
 	@Override
 	public int read(char[] chars, int i, int i1) throws IOException {
-		int len = Math.min(src.length() - offset, i1);
-		for (int n = 0; n < len; n++) {
-			try {
-				char c = src.charAt(offset++);
-                if (c == Language.EOF) len = n;
-				chars[i++] = c;
-			} catch (Exception e) {
-                e.printStackTrace();
-			}
-		}
-		if (len <= 0)
-			return  -1;
+        if (src == null) throw new IOException("Reader is closed");
+        if (i < 0 || i1 < 0 || i > chars.length || i1 > chars.length - i) throw new IndexOutOfBoundsException();
+        if (i1 == 0) return 0;
+        // Only TextBuffer's final unit is a sentinel; U+FFFF elsewhere is real document content.
+        int length = src.length() - (src instanceof TextBuffer ? 1 : 0);
+        int len = Math.min(length - offset, i1);
+        if (len <= 0) return -1;
+        for (int n = 0; n < len; n++) chars[i + n] = src.charAt(offset++);
 		return len;
 	}
 }
