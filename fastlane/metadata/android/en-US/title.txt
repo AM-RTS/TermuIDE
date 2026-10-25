@@ -1,1 +1,1 @@
-TermuC
+TermuIDE

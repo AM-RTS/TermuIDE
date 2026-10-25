@@ -8,6 +8,6 @@ pluginManagement {
         gradlePluginPortal()
     }
 }
-rootProject.name='TermuC'
+rootProject.name='TermuIDE'
 include ':app' //, ':lib-n-ide'
 include ':codeeditor'

@@ -1,28 +1,18 @@
-TermuC is a simple C/C++ IDE backed on powerful Termux. Install Termux first and install clang in Termux to supply the compiler and language server.
+TermuIDE is an independent fork of TermuC by RainbowC0 and contributors, maintained by AM-RTS and contributors. Its Android package is amrts.termuide.
 
-For more details, please visit the project's Github presence.
+<b>What this fork adds</b>
+Material 3 Compose screens and adaptive layouts; the Sora editor; durable recovery of unsaved documents; optional auto-save; background revision-aware saves; shared entry-file, argument and working-directory settings; basic Python and Java console execution; and debugger/save hardening.
+
+C/C++ retains highlighting, clangd completion and diagnostics, formatting, code actions, definitions, renaming, project commands and GDB debugging. Python/Java support is basic execution, without language-server or debugger integration.
 
 <b>Setup</b>
+Install Termux separately, install the required compiler/runtime tools, and enable third-party RUN_COMMAND access. Grant TermuIDE its own storage, command and overlay permissions. The application does not bundle these runtimes.
 
-To support the full functions as an IDE, please follow the setup instruction.
+Projects use termuide.json. Legacy termuc.json projects are not detected automatically. The new package does not automatically import old TermuC settings or private recovery drafts; save/export unsaved work before removing the old app.
 
-1. Install Termux(https://f-droid.org/packages/com.termux) first.
-2. Run `pkg install clang' to install the clang compiler & clangd language server.
-3. See https://github.com/termux/termux-app/wiki/RUN_COMMAND-Intent#setup-instructions to enable calls from 3rd-party apps.
-4. Then install TermuC.
+<b>Credits and license</b>
+Based on TermuC (RainbowC0 and contributors) and CodeEditor (MrIkso and contributors), including TextWarrior by Tah Wei Hoon. Uses Sora by Rosemoe and contributors, AndroidX, Compose Material 3 and Kotlin. Thanks to the Termux community.
 
-<b>Features</b>
+The application is GNU GPL v3. Sora is LGPL 2.1 or later; attributed TextWarrior files and AndroidX/Kotlin are Apache 2.0. Original notices remain applicable. Full license texts, acknowledgements and source links are available offline in Settings > About > About TermuIDE. No warranty is provided.
 
-✅ Highlighting
-✅ Auto-completion
-✅ Signature help
-✅ Formatting
-✅ Diagnosing
-✅ Code action
-✅ Semantic highlighting
-✅ Goto definition
-✅ Symbol renaming
-✅ Compile flags
-✅ Dark mode
-✅ Debugging
-✅ Project management
+Fork source: https://github.com/AM-RTS/TermuC

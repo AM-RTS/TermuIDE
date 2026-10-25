@@ -1,1 +1,1 @@
-A simple C/C++ IDE backed on Termux
+Termux-based C/C++ IDE with Python/Java execution and a Material 3 interface

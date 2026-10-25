@@ -1,4 +1,5 @@
 /*
+ * Modified in the TermuIDE fork; see NOTICE.md for provenance.
  * Copyright (c) 2011 Tah Wei Hoon.
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Apache License Version 2.0,

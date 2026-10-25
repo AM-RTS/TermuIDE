@@ -3,10 +3,10 @@ apply plugin: 'org.jetbrains.kotlin.android'
 apply plugin: 'org.jetbrains.kotlin.plugin.compose'
 
 android {
-    namespace 'cn.rbc.termuc'
+    namespace 'amrts.termuide'
     compileSdk 34
     defaultConfig {
-        applicationId "cn.rbc.termuc"
+        applicationId "amrts.termuide"
         minSdkVersion 27
         targetSdkVersion 34
         versionCode 13

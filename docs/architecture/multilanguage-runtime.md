@@ -1,6 +1,12 @@
 # Multi-language runtime architecture
 
-Status: shared runtime foundation and basic Python/Java execution implemented; advanced integrations remain planned. Updated 2026-10-23.
+Status: TermuIDE (`amrts.termuide`); shared runtime foundation and basic Python/Java execution implemented; advanced integrations remain planned. Updated 2026-10-25.
+
+## Fork identity and provenance
+
+TermuIDE is the AM-RTS fork of RainbowC0/TermuC. The application ID, namespace and source package are `amrts.termuide`; the `codeeditor` library retains its upstream namespace and author notices. Projects and templates use `termuide.json` only, with no automatic fallback for legacy `termuc.json`. The new application ID has its own Android sandbox; old settings, permissions and recovery drafts are not imported automatically. See [README.md](../../README.md#what-is-different-in-this-fork) for fork differences and [NOTICE.md](../../NOTICE.md) for authors and licensing. Full licenses are bundled for the Settings About dialog.
+
+The identity/attribution work and workspace refactor have not been built or tested, as requested. Historical device checkpoints below retain their original package names, artifact paths and results.
 
 ## Direction and initial scope
 
@@ -16,7 +22,7 @@ Initial delivery covers existing C/C++ behavior plus running a saved Python scri
 | `MainActivity.performAction()` | Receive user actions and present errors | Delegate execution planning and runtime checks; keep navigation and editor hosting. |
 | `EditFragment.save()`, `DocumentSaver`, `SourceWriter` | Background, interruption-aware source saves and completion | Reuse the returned future; execution must await a current, successful save. |
 | `DocumentSessions`, `DraftStore`, `TextBuffer` | Observable revisions, undo and durable recovery | Use existing revision/ownership checks; keep source execution independent of private draft storage. |
-| `Project` | Existing `termuc.json` commands and environment variables | Expose an immutable configuration snapshot for a run; preserve the current schema and native execution behavior. Closing saves current commands and tab order through `DocumentSaver` and `SourceWriter`. |
+| `Project` | Existing `termuide.json` commands and environment variables | Expose an immutable configuration snapshot for a run; preserve the current schema and native execution behavior. Closing saves current commands and tab order through `DocumentSaver` and `SourceWriter`. |
 | `TextEditor`, Sora and `codeeditor` language classes | Editing, input, highlighting and local editing utilities | Select the existing Python/Java highlighters through shared language lookup. |
 | `Lsp`, `MainHandler`, `DebugSession`, `DebugPanel` | Current clangd and GDB features | Keep C/C++ integration; do not attach these tools to Python or Java. `DebugSession` owns GDB transport/protocol state; `DebugPanel` presents immutable session snapshots. |
 | `TermuCCompose`, settings and setup prompts | Material3 controls and accessibility | Bind Run availability/status and missing-tool feedback to the new execution state. |
@@ -26,11 +32,16 @@ No new Gradle modules, runtime bundles, embedded terminal, plugin framework, DI 
 ### Maintenance boundaries
 
 - Startup and Settings reuse `Application.initConfs()` for defaults and numeric validation. The port dialog rejects values outside 1–65535 before persisting them. Existing stored word-wrap preferences are retained; the missing-value default matches the original XML default of false.
-- `DocumentSessions` owns dirty state; `HeaderAdapter` retains only tab order and its change listener. Save-point and document undo ownership remain unchanged.
+- `DocumentSessions` owns dirty state. `WorkspaceSession` reuses `HeaderAdapter` for tab order and owns selection by file path, project-open prompts, close requests and pending save completion. `MainActivity` derives tab indices and hosts the Fragments. Save-point and document undo ownership remain unchanged.
 - Language definitions are reused across tabs. Discovered local completion words belong to each `TextEditor` rather than the shared language singleton.
 - Project-close saves serialize current disk commands on the existing save worker and publish with the existing atomic/journaled writer. Failure leaves the project open; tab/session revision changes during the operation cancel closing. A restored close prompt can still close documents after process-local project state is lost.
+
 - The unused old editor UI (10 files, 5,149 lines) and old search/progress group (five files, 497 lines) were removed after caller and shrinker checks. Active model, undo, lexer, color and completion-edit utilities remain in `codeeditor`.
 - GDB replies are parsed with `StreamTokenizer` into MI values. Token-correlated variable requests tolerate interleaved asynchronous events and out-of-order replies. Transport and session data have no Activity dependency; the overlay receives immutable snapshots on the main thread and ignores callbacks from closed sessions. Overlay layout/input behavior is retained; this does not establish a fix for the deferred physical-device input issue.
+
+### Workspace coordination
+
+Workspace coordination refactor (after checkpoint `d0135bd`): retain the workspace through the existing custom non-configuration mechanism, detach the old Activity's tab listener on destruction, and resume source/project close completion only when the new host is resumed and Fragment state can be changed. Bundle metadata stores the selected path while retaining the old selected-index key for compatibility. Process-death restoration recreates close prompts without replaying a Discard approval. Project file opening reuses `openFile()` and shared LSP startup; `Project` remains the canonical configuration and `DocumentSessions`/`DocumentSaver`/`SourceWriter` retain document and write ownership. No dependency, module or recovery-format change was introduced. This refactor has source review only: builds, tests, device and emulator checks were skipped at the user's request. The 198-test and physical-device results below apply to the preceding checkpoint.
 
 Review hardening:
 
@@ -101,7 +112,7 @@ flowchart TD
 ```
 
 1. Capture the requested source and execution context before asynchronous work; never read whichever tab happens to be selected in a late callback.
-2. Save through the existing source-save path, then reload project configuration into an immutable snapshot before probing source readability. This preserves both editing `termuc.json` before Run and recreating a deleted source from a recovered draft. Probe only fixed tool requirements in Termux; do not run project commands for detection or install packages automatically. Keep existing C setup and add optional Python/Java setup feedback when adding those runners.
+2. Save through the existing source-save path, then reload project configuration into an immutable snapshot before probing source readability. This preserves both editing `termuide.json` before Run and recreating a deleted source from a recovered draft. Probe only fixed tool requirements in Termux; do not run project commands for detection or install packages automatically. Keep existing C setup and add optional Python/Java setup feedback when adding those runners.
 3. Await `EditFragment.save()` through the existing save path. A failed checkpoint/write or newer unsaved edits abort execution. Generated single-file execution saves that file; preserve the current project save policy in the compatibility extraction. Saving all dirty project dependencies belongs with explicit multi-file project support.
 4. After successful save, record the accepted session identity/revision. Revalidate it and the captured execution context immediately before dispatch. Save completion itself advances session state, so do not compare against the pre-save revision. Additional asynchronous preparation must perform this check again.
 5. Pass the saved, Termux-readable source path. Never pass private recovery files, app-private paths or content URIs as though they were Termux filesystem paths. Fail clearly when Termux cannot read the source or enter its working directory; do not silently copy an entire project into another workspace.
@@ -113,7 +124,7 @@ flowchart TD
 
 ### Shared run configurations
 
-One configuration is saved per project root or standalone browser folder. Entry file and working directory may be absolute or relative to that scope; empty fields keep the selected file and existing working-directory defaults. Arguments are entered as separate literal values, including empty arguments, without shell parsing. Private preferences store the configuration so editing it cannot overwrite an open or unsaved `termuc.json`; existing project commands remain authoritative and portable in that file. The additional run settings are local to this installation.
+One configuration is saved per project root or standalone browser folder. Entry file and working directory may be absolute or relative to that scope; empty fields keep the selected file and existing working-directory defaults. Arguments are entered as separate literal values, including empty arguments, without shell parsing. Private preferences store the configuration so editing it cannot overwrite an open or unsaved `termuide.json`; existing project commands remain authoritative and portable in that file. The additional run settings are local to this installation.
 
 Run/Debug open a configured entry through the existing document host, then await its normal revision-aware save and recovery checks. Other dirty tabs remain intact. Changing the configuration during preparation cancels that preparation. Build/Compile keep their current commands, selected file and project directory. Native compilation/staging retain their original directory; an optional runtime directory is entered only before launching the native program or GDB. Python/Java use that directory directly.
 
@@ -121,7 +132,7 @@ Before entering an overridden runtime directory, explicitly relative project exe
 
 The shared save path also rejects a buffer whose source read failed, so an automatically opened entry cannot replace existing source with an empty editor. This guard survives Activity recreation and fresh process recovery, including subsequent edits to the partial buffer. Recovery format version 2 persists source-read readiness alongside the existing text and metadata and reads version 1 drafts unchanged. Version 1 has no readiness field and defaults to successfully loaded; it cannot identify a historical failed read without saved Activity state. A successful source reload clears the guard. Successfully loaded recovery drafts remain saveable through the normal path.
 
-`RunConfiguration.kt` owns the immutable values and their private-preference persistence. The existing More options menu opens a Material3 dialog with saved form state and accessible argument rows. `MainActivity` opens a configured entry through its normal document host and includes the configuration in the immutable request; context matching rejects changed configuration values before dispatch. `RunController.onConfigurationChanged()` cancels only pending Run/Debug preparation, leaving Build/Compile and already dispatched processes alone. No `termuc.json` rewrite, module, dependency or SDK change is needed.
+`RunConfiguration.kt` owns the immutable values and their private-preference persistence. The existing More options menu opens a Material3 dialog with saved form state and accessible argument rows. `MainActivity` opens a configured entry through its normal document host and includes the configuration in the immutable request; context matching rejects changed configuration values before dispatch. `RunController.onConfigurationChanged()` cancels only pending Run/Debug preparation, leaving Build/Compile and already dispatched processes alone. No `termuide.json` rewrite, module, dependency or SDK change is needed.
 
 Checks cover configuration isolation/defaults/corrupt and trailing data, failed-commit rollback, NUL rejection, literal argument boundaries, native preparation versus runtime cwd, project `$@` expansion, relative and empty project commands, open and recovered entries whose sources were deleted, failed saves, other dirty tabs, configuration changes during probes, native breakpoints, menu/form restoration, large-font RTL controls, actual host Python/Java execution and the native shell flow with a fixture compiler. Recovery checks cover failed reads across fresh session ownership without an Activity bundle, version 1 compatibility and UTF-16 retention. Physical verification of these additions is deferred and emulator checks are excluded.
 

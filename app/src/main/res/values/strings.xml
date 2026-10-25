@@ -29,7 +29,8 @@
     <string name="save_before_close">Save changes before closing?\n\n%1$s</string>
     <string name="discard">Discard</string>
     <string name="save_failed">Could not save the file. Your unsaved changes have been kept.</string>
-    <string name="app_name">TermuC</string>
+    <string name="app_name">TermuIDE</string>
+    <string name="project_create_failed">Could not create the project. Choose a new folder name and check storage access. The current project has been kept.</string>
     <string name="settings">Settings</string>
     <string name="global">Global</string>
     <string name="theme">Theme</string>
@@ -240,4 +241,17 @@
     <string name="run_config_changed">The project or folder changed. Reopen the run configuration.</string>
     <string name="run_entry_failed">Cannot open the configured entry file.</string>
     <string name="invalid_port">Enter a port from 1 to 65535.</string>
+    <string name="about">About</string>
+    <string name="about_termuide">About TermuIDE</string>
+    <string name="about_version">Version %1$s · %2$s</string>
+    <string name="about_fork">TermuIDE is an independent fork of TermuC by RainbowC0 and contributors, maintained by AM-RTS and contributors. It is not an official TermuC or Termux release.</string>
+    <string name="about_differences">This fork adds a Material 3 Compose interface, the Sora editor, durable unsaved-document recovery, optional auto-save, shared run configurations, basic Python and Java execution, and save/debugger hardening. C/C++ tooling continues to use Termux, clangd and GDB. Projects use termuide.json; legacy termuc.json is not detected automatically.</string>
+    <string name="about_license">Free software under the GNU General Public License version 3. You may copy, modify and redistribute it under that license. Provided without warranty, including merchantability or fitness for a particular purpose. Copyright remains with the respective authors; see acknowledgements and file notices.</string>
+    <string name="about_credits">Thanks to RainbowC0 and TermuC contributors; MrIkso and CodeEditor contributors; Tah Wei Hoon and TextWarrior contributors (Apache 2.0); Rosemoe and Sora contributors (LGPL 2.1 or later); AndroidX, Material and Kotlin contributors (Apache 2.0); and the Termux community. External runtimes are installed separately and retain their own licenses.</string>
+    <string name="fork_source">Fork source code</string>
+    <string name="acknowledgements">Acknowledgements and notices</string>
+    <string name="license_gpl">GNU GPL v3 — application license</string>
+    <string name="license_lgpl">GNU LGPL v2.1 — Sora license</string>
+    <string name="license_apache">Apache 2.0 — library license</string>
+    <string name="no_browser">No browser is available. The source URL is listed in acknowledgements.</string>
 </resources>

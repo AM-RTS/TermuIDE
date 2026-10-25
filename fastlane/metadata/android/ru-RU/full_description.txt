@@ -1,4 +1,8 @@
-TermuC — простая IDE для C/C++, работающая на базе мощного Termux.
+TermuIDE — независимая ветка TermuC (RainbowC0 и участники), поддерживаемая AM-RTS и участниками. Пакет приложения: amrts.termuide.
+
+В этой ветке: интерфейс Material 3 / Compose, редактор Sora, восстановление несохранённых документов, автосохранение, общие настройки запуска и базовое выполнение Python/Java. Для C/C++ сохранены clangd и GDB. Проекты используют termuide.json; старый termuc.json автоматически не распознаётся. Настройки и черновики старого приложения автоматически не переносятся.
+
+TermuIDE — простая IDE для C/C++, работающая на базе мощного Termux.
 
 <b>Установка</b>
 
@@ -7,7 +11,7 @@ TermuC — простая IDE для C/C++, работающая на базе �
 1. сначала установите Termux(https://f-droid.org/packages/com.termux);
 2. выполните `pkg install clang' для установки компилятора clang & сервера языка clangd;
 3. см. https://github.com/termux/termux-app/wiki/RUN_COMMAND-Intent#setup-instructions для разрешения вызовов из сторонних приложений;
-4. затем установите TermuC.
+4. затем установите TermuIDE.
 
 <b>Особенности</b>
 
@@ -23,3 +27,7 @@ TermuC — простая IDE для C/C++, работающая на базе �
 ✅ Управление проектами
 
 Для подробностей посетите страницу проекта на GitHub.
+
+Лицензия приложения: GNU GPL v3. Благодарности: TermuC, CodeEditor (MrIkso), TextWarrior (Tah Wei Hoon, Apache 2.0), Sora (Rosemoe, LGPL 2.1 или новее), AndroidX, Material, Kotlin и сообщество Termux. Полные тексты лицензий и ссылки на исходники доступны в разделе «About TermuIDE» в настройках. Гарантии не предоставляются.
+
+Исходный код ветки: https://github.com/AM-RTS/TermuC

@@ -1,27 +1,41 @@
-# TermuC
+# TermuIDE
 
-[![release](https://img.shields.io/github/release/RainbowC0/TermuC.svg)](https://github.com/RainbowC0/TermuC/releases/) [![license](https://img.shields.io/github/license/RainbowC0/TermuC.svg)](https://github.com/RainbowC0/TermuC/blob/master/LICENSE.md) ![CI](https://github.com/RainbowC0/TermuC/actions/workflows/build-debug.yml/badge.svg?event=push)
+[Source](https://github.com/AM-RTS/TermuC) · [GPL v3](LICENSE.md) · [Acknowledgements](NOTICE.md) · [中文 README](README_zh.md)
 
-[中文 README](./README_zh.md)
+TermuIDE is an independent fork of [TermuC](https://github.com/RainbowC0/TermuC), a Termux-backed C/C++ IDE. This fork adds a Material 3 Compose interface, the [Sora editor](https://github.com/Rosemoe/sora-editor/tree/0.24.4), durable recovery and basic Python/Java console execution. It is maintained by AM-RTS and contributors and is not an official TermuC or Termux release.
 
-TermuC is a simple C/C++ IDE backed on Termux, with basic Python and Java console execution, a Material 3 Compose interface and a [Sora](https://github.com/Rosemoe/sora-editor) editor.
+- App name: **TermuIDE**
+- Application ID and app namespace: **`amrts.termuide`**
+- Minimum Android: **8.1 / API 27**; target SDK: **34**
+- Build environment: **JDK 17**; Sora dependency: **0.24.4**
 
-Sora handles rendering and input. The existing document, undo and language utilities from [MrIkso/CodeEditor](https://github.com/MrIkso/CodeEditor) retain clangd integration and editor-independent recovery. The `codeeditor` module remains a dependency for those utilities; the unused old renderer, input handlers, popups and search worker have been removed.
+## What is different in this fork
 
-The app pins Sora 0.24.4 ([LGPL-2.1-or-later license and source](https://github.com/Rosemoe/sora-editor)) and builds with JDK 17.
+| Area | Changes from the inherited TermuC app |
+| --- | --- |
+| Interface | Material 3 Compose screens, settings and dialogs; adaptive browser/editor layout; labeled accessibility controls and saved form/dialog state. |
+| Editor | Sora rendering/input integrated with the inherited document, undo, lexer, completion and clangd utilities. Unused legacy rendering/input code was removed. |
+| Saving and recovery | Private durable drafts, background revision-aware saves, atomic/journaled publication, source-read failure protection, and optional auto-save. |
+| Execution | Shared preparation and save checks for C/C++, basic Python 3 and Java source execution, literal program arguments, entry file and working-directory overrides. |
+| Projects and tabs | `termuide.json` project files; retained workspace coordination and path-based tab selection reuse existing save/document components. |
+| Debugger | Separate GDB transport/parser state and Compose presentation; fixes for overlay layout/reconnection, stale inspection data and breakpoint controls. |
+| Attribution | In-app About, offline license texts, source links, and explicit upstream/component acknowledgements. |
 
-[<img src="https://fdroid.gitlab.io/artwork/badge/get-it-on.png"
-    alt="Get it on F-Droid"
-    height="80">](https://f-droid.org/packages/cn.rbc.termuc)
+Python/Java execution is basic console support; their language servers, debuggers, dependency managers and build-tool integration remain future work. C/C++ retains clangd and GDB integration.
 
-## Download
+## Installation and project identity
 
-- Artifacts in [Github Actions](//github.com/RainbowC0/TermuC/actions)
-- [F-Droid](//f-droid.org/packages/cn.rbc.termuc)
+Use APKs published by this fork in [its releases](https://github.com/AM-RTS/TermuC/releases) or build from this source. Upstream TermuC releases and its F-Droid listing are different applications.
 
-## Screenshot
+`amrts.termuide` installs separately from `cn.rbc.termuc` and the earlier `cn.rbc.termuc.devicecheck` test app. Android does not automatically copy their private settings, saved run configurations, permissions or recovery drafts into TermuIDE. Save/export unsaved work in the old app before removing it. Shared source files remain on disk; grant TermuIDE its own storage, Termux RUN_COMMAND and overlay permissions.
 
-![1](fastlane/metadata/android/en-US/images/phoneScreenshots/1.jpg)
+Projects are detected through **`termuide.json`**. There is no `termuc.json` fallback or automatic project migration. To reuse an older project, rename its configuration to `termuide.json` and review its commands and paths, or create a new TermuIDE project. All bundled templates use the new name.
+
+New projects require a fresh destination folder so templates cannot overwrite existing files. A failed creation keeps the current project and its unsaved documents; a partially created folder may remain after a storage error. Inspect that folder before retrying with a new name.
+
+## Development status
+
+The rename, About/licensing additions and preceding workspace-coordination refactor have source review only: Gradle, builds and tests were deliberately skipped due to limited host memory. Earlier test/device results in the [architecture notes](docs/architecture/multilanguage-runtime.md) describe the older TermuC-named checkpoint, not a validated TermuIDE APK.
 
 ## Technology
 
@@ -42,7 +56,7 @@ This app uses `com.termux.RUN_COMMAND` to call Termux to run command, and run `c
 - [x] Goto definition
 - [x] Symbol renaming
 - [x] Recovery of unsaved documents
-- [ ] Workspace
+- [ ] Multiple independent workspaces
 
 ## Interface
 
@@ -54,7 +68,7 @@ Wide windows can keep the file browser beside the editor; compact windows use a 
 
 Source saves run in the background. Newer edits remain dirty when an earlier revision finishes saving; Run, Build, Debug and Save-before-close wait for the save result. Local files use synced staging and atomic replacement. Termux document-provider files use synced staging, a source backup and a private recovery journal; interrupted rename sequences are restored when the source is next opened. Providers must support rename operations or saving fails without truncating the source.
 
-Closing an active project saves `termuc.json` through the same background worker and hardened writer. Failed saves keep the project and tabs open. Edits made while that save is running cancel the close and remain recoverable. Pending closes follow Activity recreation and finish when the Activity resumes. Auto-save stays paused throughout closing so it cannot publish discarded edits; a later explicit source save cancels the pending close.
+Closing an active project saves `termuide.json` through the same background worker and hardened writer. Failed saves keep the project and tabs open. Edits made while that save is running cancel the close and remain recoverable. Pending closes follow Activity recreation and finish when the Activity resumes. Auto-save stays paused throughout closing so it cannot publish discarded edits; a later explicit source save cancels the pending close.
 
 Open documents are checkpointed in private storage at 500 ms intervals while editing and flushed when the app enters the background. On restart, unsaved text is recovered into the editor without overwriting the source file. Closing dirty tabs or switching projects offers Save, Discard, and Cancel.
 
@@ -66,11 +80,11 @@ Drafts are excluded from Android backup. An abrupt termination before the next c
 
 The [shared runtime](docs/architecture/multilanguage-runtime.md) handles C/C++ Run, Debug, Build and Compile, plus basic Python and Java execution through Termux. All use the existing background save path, revision checks and durable recovery. Preparation aborts after a failed save or if newer edits appear before dispatch.
 
-Open a saved `.py` or `.java` file outside an active TermuC project and press **Run**:
+Open a saved `.py` or `.java` file outside an active TermuIDE project and press **Run**:
 
 - Python requires Termux's `python` executable (Python 3). Scripts run from their source directory, supporting relative files, sibling imports and terminal input.
 - Java requires Termux's `java` executable from a full JDK 11 or newer with the `jdk.compiler` module. The launcher compiles and runs the UTF-8 source in memory; it does not generate an Android APK. Put the entry class first in the file and use the conventional `public static void main(String[] args)` entry point.
-- Install runtimes in Termux yourself; TermuC checks availability and reports missing/incompatible tools. Compiler/runtime errors appear in the terminal and completion preserves the program's exit code.
+- Install runtimes in Termux yourself; TermuIDE checks availability and reports missing/incompatible tools. Compiler/runtime errors appear in the terminal and completion preserves the program's exit code.
 
 Open **More options → Run configuration** to set an entry file, program arguments and a working directory. One configuration is saved per project root or standalone browser folder. Empty path fields retain the selected file and default working directory; relative paths start in the configuration's folder. Add one row per argument, without shell quoting; an empty row passes an empty argument. **Use defaults**, then **Save**, clears the overrides. Unconfirmed form values survive Activity recreation.
 
@@ -78,11 +92,22 @@ Run and Debug open the configured entry and save it through the existing recover
 
 Relative project executables such as `./build/app` retain their project location when a runtime directory is selected. Configured arguments are appended once, after expansion of the existing project command; an empty project command reports an error. A failed configuration save keeps the previous configuration active.
 
-An active `termuc.json` project continues to use its configured commands. Run-configuration arguments are appended to the existing program arguments; selecting a Python/Java entry does not replace the project's command. Additional run settings are stored privately on this installation, so changing them cannot overwrite an unsaved `termuc.json`. Python/Java highlighting and execution do not enable clangd or GDB for those languages. Language servers, debuggers, dependency environments and Maven/Gradle project integration remain separate future work.
+An active `termuide.json` project continues to use its configured commands. Run-configuration arguments are appended to the existing program arguments; selecting a Python/Java entry does not replace the project's command. Additional run settings are stored privately on this installation, so changing them cannot overwrite an unsaved `termuide.json`. Python/Java highlighting and execution do not enable clangd or GDB for those languages. Language servers, debuggers, dependency environments and Maven/Gradle project integration remain separate future work.
 
 Runtime preparation can be cancelled without affecting editor drafts. Programs use the existing Termux terminal; its controls handle running processes. Execution status distinguishes dispatch from confirmed completion, preserves nonzero exit codes, and reports unknown previous status after an app restart. Runtime checks need a Termux version supporting RUN_COMMAND results (0.109+), its RUN_COMMAND permission and external-app access. A missing result produces a bounded preparation timeout; no emulator validation is claimed.
 
-## Wiki
+## Acknowledgements and license
 
-- [*Setup* (Critical)](//github.com/RainbowC0/TermuC/wiki/Setup)
-- [Usage](//github.com/RainbowC0/TermuC/wiki/Usage)
+TermuIDE is a modified fork of [TermuC](https://github.com/RainbowC0/TermuC) by RainbowC0 and contributors. The inherited editor utilities come through [CodeEditor](https://github.com/MrIkso/CodeEditor) by MrIkso and contributors, including TextWarrior code by Tah Wei Hoon. Sora 0.24.4 supplies rendering/input; AndroidX, Compose Material 3 and Kotlin supply the application framework. Termux and compiler/runtime/debugger tools are installed separately.
+
+The application retains the **GNU GPL v3** license in [LICENSE.md](LICENSE.md). Individual component notices remain in effect: Sora uses **LGPL 2.1 or later**; attributed TextWarrior files and AndroidX/Kotlin use **Apache 2.0**. See [NOTICE.md](NOTICE.md) for authors, source links, modifications and redistribution information. Full license texts and acknowledgements are also readable offline in **Settings → About → About TermuIDE**. There is no warranty; see the licenses for terms.
+
+When distributing an APK, provide the corresponding source and build instructions for that exact release, retain author notices, and include the applicable licenses. The fork source remains in [AM-RTS/TermuC](https://github.com/AM-RTS/TermuC); the repository has not been renamed.
+
+## Upstream resources
+
+- [TermuC setup guide](https://github.com/RainbowC0/TermuC/wiki/Setup)
+- [TermuC usage guide](https://github.com/RainbowC0/TermuC/wiki/Usage)
+- [Upstream F-Droid listing](https://f-droid.org/packages/cn.rbc.termuc) — installs the original TermuC, not this fork.
+
+These resources describe upstream behavior and may differ from TermuIDE.
