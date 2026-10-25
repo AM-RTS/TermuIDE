@@ -32,7 +32,7 @@ jobs:
           done
 
       - name: Checkout the pushed commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -97,7 +97,7 @@ jobs:
           } > dist/change-notes.md
 
       - name: Upload signed APK artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: TermuIDE-${{ steps.apk.outputs.tag }}
           path: |

@@ -35,7 +35,7 @@ New projects require a fresh destination folder so templates cannot overwrite ex
 
 ## Development status
 
-The rename, About/licensing additions and preceding workspace-coordination refactor have source review only: Gradle, builds and tests were deliberately skipped due to limited host memory. Earlier test/device results in the [architecture notes](docs/architecture/multilanguage-runtime.md) describe the older TermuC-named checkpoint, not a validated TermuIDE APK.
+The renamed TermuIDE app, About/licensing additions and preceding workspace-coordination refactor have a successful [signed-release build on GitHub Actions](https://github.com/AM-RTS/TermuC/actions/runs/40168892630). Local Gradle/builds and all tests/device checks were deliberately skipped. The CI build and signature verification do not establish behavioral correctness; earlier test/device results in the [architecture notes](docs/architecture/multilanguage-runtime.md) describe the older TermuC-named checkpoint.
 
 ## Automated prereleases
 
