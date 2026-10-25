@@ -161,7 +161,7 @@ public final class Lsp implements Runnable {
 		tp = INITIALIZE;
 		StringBuilder sb = new StringBuilder("{\"processId\":");
 		sb.append(android.os.Process.myPid());
-		sb.append(",\"capabilities\":{\"workspace\":{\"applyEdit\":true,\"workspaceFolders\":true}}");
+		sb.append(",\"capabilities\":{\"workspace\":{\"applyEdit\":true,\"workspaceFolders\":true},\"textDocument\":{\"publishDiagnostics\":{\"versionSupport\":true}}}");
 		if (root!=null) {
 			sb.append(",\"rootUri\":");
 			sb.append(JSONObject.quote(new File(root).toURI().toString()));

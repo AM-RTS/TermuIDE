@@ -6,6 +6,8 @@ Status: TermuIDE (`amrts.termuide`); shared runtime foundation and basic Python/
 
 TermuIDE is the AM-RTS fork of RainbowC0/TermuC. The application ID, namespace and source package are `amrts.termuide`; the `codeeditor` library retains its upstream namespace and author notices. Projects and templates use `termuide.json` only, with no automatic fallback for legacy `termuc.json`. The new application ID has its own Android sandbox; old settings, permissions and recovery drafts are not imported automatically. See [README.md](../../README.md#what-is-different-in-this-fork) for fork differences and [NOTICE.md](../../NOTICE.md) for authors and licensing. Full licenses are bundled for the Settings About dialog.
 
+Fork-owned UI names are `TermuIDECompose` and `TermuIDETheme`; runtime labels, callback scheme and native staging use `termuide`. Upstream credits and historical checkpoint names remain unchanged. `SourceWriter` retains its existing `.termuc-*` staging/journal identifiers so interrupted saves can still be recovered; branding changes do not rewrite recovery records.
+
 The identity/attribution work and workspace refactor have a successful [GitHub-hosted signed release build](https://github.com/AM-RTS/TermuIDE/actions/runs/40169775316). The prerelease workflow now requires the JVM/Robolectric regression suite to pass before building, signing and publishing; test reports are retained as workflow artifacts even when tests fail. Coverage includes restored workspace prompts, tab selection, scoped discard approval, stale save completion, durable drafts and safe project creation. Local Gradle, builds, tests, phone and emulator checks remain skipped. CI host tests do not establish physical-device behavior. Historical device checkpoints below retain their original package names, artifact paths and results.
 
 ## Direction and initial scope
@@ -25,7 +27,7 @@ Initial delivery covers existing C/C++ behavior plus running a saved Python scri
 | `Project` | Existing `termuide.json` commands and environment variables | Expose an immutable configuration snapshot for a run; preserve the current schema and native execution behavior. Closing saves current commands and tab order through `DocumentSaver` and `SourceWriter`. |
 | `TextEditor`, Sora and `codeeditor` language classes | Editing, input, highlighting and local editing utilities | Select the existing Python/Java highlighters through shared language lookup. |
 | `Lsp`, `MainHandler`, `DebugSession`, `DebugPanel` | Current clangd and GDB features | Keep C/C++ integration; do not attach these tools to Python or Java. `DebugSession` owns GDB transport/protocol state; `DebugPanel` presents immutable session snapshots. |
-| `TermuCCompose`, settings and setup prompts | Material3 controls and accessibility | Bind Run availability/status and missing-tool feedback to the new execution state. |
+| `TermuIDECompose`, settings and setup prompts | Material3 controls and accessibility | Bind Run availability/status and missing-tool feedback to the new execution state. |
 
 No new Gradle modules, runtime bundles, embedded terminal, plugin framework, DI framework or editor replacement are needed.
 
@@ -34,6 +36,7 @@ No new Gradle modules, runtime bundles, embedded terminal, plugin framework, DI 
 - Startup and Settings reuse `Application.initConfs()` for defaults and numeric validation. The port dialog rejects values outside 1–65535 before persisting them. Existing stored word-wrap preferences are retained; the missing-value default matches the original XML default of false.
 - `DocumentSessions` owns dirty state. `WorkspaceSession` reuses `HeaderAdapter` for tab order and owns selection by file path, project-open prompts, close requests and pending save completion. `MainActivity` derives tab indices and hosts the Fragments. Save-point and document undo ownership remain unchanged.
 - Language definitions are reused across tabs. Discovered local completion words belong to each `TextEditor` rather than the shared language singleton.
+- Diagnostic entries record the document version at publication. Edits hide older entries from the diagnostics sheet, and opening a new LSP document session clears obsolete diagnostic metadata. The client advertises [LSP diagnostic version support](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_publishDiagnostics) so servers can identify and the client can reject stale replies.
 - Project-close saves serialize current disk commands on the existing save worker and publish with the existing atomic/journaled writer. Failure leaves the project open; tab/session revision changes during the operation cancel closing. A restored close prompt can still close documents after process-local project state is lost.
 
 - The unused old editor UI (10 files, 5,149 lines) and old search/progress group (five files, 497 lines) were removed after caller and shrinker checks. Active model, undo, lexer, color and completion-edit utilities remain in `codeeditor`.

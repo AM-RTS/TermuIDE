@@ -51,14 +51,14 @@ object RunCommands {
         val file = request.path?.let(::File)
         val project = request.project
         val arguments = if (usesRunConfiguration(request)) request.configuration.arguments else emptyList()
-        val extraArguments = if (arguments.isEmpty()) "" else " \"\${termuc_program_args[@]}\""
+        val extraArguments = if (arguments.isEmpty()) "" else " \"\${termuide_program_args[@]}\""
         val changeDirectory = if (usesRunConfiguration(request) && request.configuration.workingDirectory.isNotEmpty())
             "cd -- ${quote(workingDirectory(request))} && " else ""
-        val pause = "\ntermuc_status=\$?;read -n1 -rsp \$'\\nPress any key to exit...';exit \"\$termuc_status\""
+        val pause = "\ntermuide_status=\$?;read -n1 -rsp \$'\\nPress any key to exit...';exit \"\$termuide_status\""
         if (project.rootPath == null && Languages.forType(request.type).id in listOf("python", "java")) {
             val language = Languages.forType(request.type)
             val runtime = tools.getValue(language.runtime!!)
-            val command = listOf("-c", "\"\$@\"$pause", "termuc-run", runtime) +
+            val command = listOf("-c", "\"\$@\"$pause", "termuide-run", runtime) +
                 (if (language.id == "java") listOf("-Dfile.encoding=UTF-8") else emptyList()) + file!!.absolutePath + arguments
             return Plan(Utils.PREF + "/usr/bin/bash", command, workingDirectory(request))
         }
@@ -76,7 +76,7 @@ object RunCommands {
                     append(" -o \"\$x\" && ")
                 } else {
                     append(environment(project, file))
-                    append("x=\"\$TMPDIR/termuc\";find \"\$o\" -maxdepth 1 -type f \\( -iname '*.so' -o ! -name '*.*' \\) -exec install -D -t \"\$x\" {} \\;;")
+                    append("x=\"\$TMPDIR/termuide\";find \"\$o\" -maxdepth 1 -type f \\( -iname '*.so' -o ! -name '*.*' \\) -exec install -D -t \"\$x\" {} \\;;")
                     append(if (project.runCmd == "\$x/\$e") "x=(\"\$x/\$e\") && " else "x=(${project.runCmd}) && ")
                     append("{ [ \"\${#x[@]}\" -gt 0 ] && [ -n \"\${x[0]}\" ] || { printf '%s\\n' 'Project run command is empty' >&2; false; }; } && ")
                     // Resolve explicit relative executables before switching to the runtime directory.
@@ -89,7 +89,7 @@ object RunCommands {
         }
         // Pause after failures too, and keep the program's exit status rather than read's status.
         // Keep program arguments out of compiler flags and legacy project command expansion.
-        val script = (if (arguments.isEmpty()) "" else "termuc_program_args=(\"\$@\");set --;\n") + body + pause
+        val script = (if (arguments.isEmpty()) "" else "termuide_program_args=(\"\$@\");set --;\n") + body + pause
         val command = listOf("-c", script) + if (arguments.isEmpty()) emptyList() else listOf(Utils.PREF + "/usr/bin/bash") + arguments
         return Plan(Utils.PREF + "/usr/bin/bash", command, project.rootPath ?: request.directory)
     }
@@ -109,7 +109,7 @@ object RunCommands {
             "if [ -z \"\$resolved\" ] || [ ! -x \"\$resolved\" ]; then resolved=\$(command -v -- \"\$tool\") || { printf 'Missing runtime: %s\\n' \"\$tool\" >&2; exit 127; }; fi; " +
             "case \"\$resolved\" in /*) ;; *) exit 127;; esac;" + check + "printf '%s\\n' \"\$resolved\";done"
         val source = if (request.project.rootPath == null) request.path.orEmpty() else ""
-        return Plan(Utils.PREF + "/usr/bin/bash", listOf("-c", script, "termuc-probe", workingDirectory(request), source) + tools.flatMap { listOf(it, cached[it].orEmpty()) },
+        return Plan(Utils.PREF + "/usr/bin/bash", listOf("-c", script, "termuide-probe", workingDirectory(request), source) + tools.flatMap { listOf(it, cached[it].orEmpty()) },
             Utils.PREF + "/home", true)
     }
 }

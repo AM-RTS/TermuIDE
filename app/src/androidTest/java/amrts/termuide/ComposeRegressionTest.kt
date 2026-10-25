@@ -203,7 +203,7 @@ class ComposeRegressionTest {
             lateinit var overlay: ComposeView
             lateinit var windowManager: WindowManager
             scenario.onActivity { activity ->
-                overlay = TermuCCompose.debugView(activity, DebugPanel(activity)) as ComposeView
+                overlay = TermuIDECompose.debugView(activity, DebugPanel(activity)) as ComposeView
                 windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
             }
             scenario.moveToState(Lifecycle.State.CREATED)

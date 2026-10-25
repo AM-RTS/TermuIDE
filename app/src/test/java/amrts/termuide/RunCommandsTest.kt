@@ -59,7 +59,7 @@ class RunCommandsTest {
             assertEquals(listOf(runtime), RunCommands.requiredTools(req))
             val plan = RunCommands.build(req, mapOf(runtime to "/bin/$runtime"))
             assertEquals(File(req.path!!).absoluteFile.parent, plan.directory)
-            assertEquals(listOf("termuc-run", "/bin/$runtime") +
+            assertEquals(listOf("termuide-run", "/bin/$runtime") +
                 (if (runtime == "java") listOf("-Dfile.encoding=UTF-8") else emptyList()) + File(req.path).absolutePath,
                 plan.arguments.drop(2))
             assertTrue(plan.arguments[1].startsWith("\"\$@\"\n"))
@@ -146,7 +146,7 @@ class RunCommandsTest {
         assertTrue("A host bash is required for the shell regression", bash.isFile)
         val plan = RunCommands.build(request(RunCommands.Action.BUILD, project = project("/project")), emptyMap())
         val suffix = plan.arguments[1].substringAfter('\n')
-        val script = Files.createTempFile("termuc-exit", ".sh").toFile()
+        val script = Files.createTempFile("termuide-exit", ".sh").toFile()
         try {
             // Capture the prompt argument even without a host TTY; read only prints -p on a TTY.
             script.writeText("read() { printf '%s' \"\${@: -1}\"; return 1; }\n(exit 17)\n$suffix\n")
@@ -172,13 +172,13 @@ class RunCommandsTest {
             if (language.hasLsp) {
                 assertEquals(req.directory, plan.directory)
                 assertTrue(plan.arguments[1].contains("cd -- "))
-                assertTrue(plan.arguments[1].contains("\"\${x[@]}\" \"\${termuc_program_args[@]}\""))
+                assertTrue(plan.arguments[1].contains("\"\${x[@]}\" \"\${termuide_program_args[@]}\""))
             } else assertEquals(RunCommands.workingDirectory(req), plan.directory)
             assertEquals(RunCommands.workingDirectory(req), RunCommands.probe(req).arguments[3])
         }
         val debug = request(RunCommands.Action.DEBUG).copy(configuration = run)
         assertTrue(RunCommands.build(debug, mapOf("clang" to "/bin/clang", "gdb" to "/bin/gdb"))
-            .arguments[1].contains("--args \"\${x[@]}\" \"\${termuc_program_args[@]}\""))
+            .arguments[1].contains("--args \"\${x[@]}\" \"\${termuide_program_args[@]}\""))
     }
 
     @Test fun projectCommandsAndBuildCompileDefaultsSurviveRunOverrides() {

@@ -134,7 +134,7 @@ class RunController @JvmOverloads constructor(
         job.probe = probe
         val token = UUID.randomUUID().toString()
         val intent = Intent(app, RunResultReceiver::class.java).setAction(RESULT_ACTION)
-            .setData(Uri.Builder().scheme("termuc-run").authority(app.packageName).appendPath(token).build())
+            .setData(Uri.Builder().scheme(RESULT_SCHEME).authority(app.packageName).appendPath(token).build())
         val flags = PendingIntent.FLAG_ONE_SHOT or if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0
         val result = PendingIntent.getBroadcast(app, 0, intent, flags)
         job.token = token
@@ -238,6 +238,7 @@ class RunController @JvmOverloads constructor(
 
     companion object {
         const val RESULT_ACTION = "amrts.termuide.RUNTIME_RESULT"
+        const val RESULT_SCHEME = "termuide-run"
         const val PROBE_TIMEOUT = 15_000L
     }
 }

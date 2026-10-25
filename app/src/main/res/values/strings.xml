@@ -76,7 +76,7 @@
     <string name="close_file">Close %1$s</string>
     <string name="diagnostics">Diagnostics</string>
     <string name="diagnostics_count">Diagnostics (%1$d)</string>
-    <string name="no_diagnostics">No diagnostics for open files.</string>
+    <string name="no_diagnostics">No current diagnostics for open files.</string>
     <string name="diagnostic_error">Error</string>
     <string name="diagnostic_warning">Warning</string>
     <string name="diagnostic_info">Information</string>

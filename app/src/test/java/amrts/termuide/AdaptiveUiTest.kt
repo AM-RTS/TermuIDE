@@ -104,19 +104,19 @@ class AdaptiveUiTest {
                 activity.editor.paste("draft ")
             }
             compose.onNodeWithContentDescription(app.getString(R.string.open_files)).performClick()
-            compose.onNodeWithContentDescription(app.getString(R.string.close_file, first.name)).performClick()
+            compose.onNodeWithContentDescription(app.getString(R.string.close_file, first.path)).performClick()
             scenario.onActivity { activity ->
                 assertEquals(listOf(second.path), activity.openFilePaths)
                 assertEquals(second.path, activity.selectedFilePath)
                 assertTrue(app.documents.isDirty(second.path))
             }
             compose.onNodeWithContentDescription(app.getString(R.string.open_files)).performClick()
-            compose.onNodeWithContentDescription(app.getString(R.string.close_file, second.name)).performClick()
+            compose.onNodeWithContentDescription(app.getString(R.string.close_file, second.path)).performClick()
             compose.onNodeWithText(app.getString(R.string.unsaved_changes)).assertIsDisplayed()
             compose.onNodeWithText(app.getString(android.R.string.cancel)).performClick()
             scenario.onActivity { assertEquals(listOf(second.path), it.openFilePaths) }
             compose.onNodeWithContentDescription(app.getString(R.string.open_files)).performClick()
-            compose.onNodeWithContentDescription(app.getString(R.string.close_file, second.name)).performClick()
+            compose.onNodeWithContentDescription(app.getString(R.string.close_file, second.path)).performClick()
             compose.onNodeWithText(app.getString(R.string.discard)).performClick()
             scenario.onActivity { activity ->
                 app.documents.flush()
@@ -125,6 +125,104 @@ class AdaptiveUiTest {
             }
             assertEquals("second original", second.readText())
             assertEquals("original", first.readText())
+        }
+    }
+
+    @Test @Config(qualifiers = "w360dp-h640dp-port")
+    fun duplicateFileNamesExposeDistinctCloseControlsAndDiscardOnlyTheirTarget() {
+        val first = temporary.newFolder("one").resolve("same.c").apply { writeText("first original") }
+        val second = temporary.newFolder("two").resolve("same.c").apply { writeText("second original") }
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                activity.openFile(first)
+                activity.fragmentManager.executePendingTransactions()
+                activity.editor.paste("draft ")
+                activity.openFile(second)
+                activity.fragmentManager.executePendingTransactions()
+            }
+            compose.onNodeWithContentDescription(app.getString(R.string.open_files)).performClick()
+            compose.onNodeWithContentDescription(app.getString(R.string.close_file, second.path)).assertIsDisplayed()
+            compose.onNodeWithContentDescription(app.getString(R.string.close_file, first.path)).performClick()
+            scenario.onActivity { activity ->
+                assertEquals(listOf(first.path), activity.pendingClosePaths)
+                assertEquals(second.path, activity.selectedFilePath)
+            }
+            compose.onNodeWithText(app.getString(R.string.discard)).performClick()
+            scenario.onActivity { activity ->
+                assertEquals(listOf(second.path), activity.openFilePaths)
+                assertEquals(second.path, activity.selectedFilePath)
+                app.documents.flush()
+                assertFalse(app.documents.isDirty(first.path))
+            }
+            assertEquals("first original", first.readText())
+            assertEquals("second original", second.readText())
+        }
+    }
+
+    @Test @Config(qualifiers = "w360dp-h640dp-port")
+    fun savingFromThePickerCannotCloseOrLoseTheDraftWhenWritingFails() {
+        val source = temporary.root.resolve("first.txt")
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                activity.openFile(source)
+                activity.fragmentManager.executePendingTransactions()
+                activity.editor.paste("keep this draft ")
+                app.saver.shutdown()
+                app.saver = DocumentSaver(app.documents) { _, _ -> throw java.io.IOException("simulated write failure") }
+            }
+            try {
+                compose.onNodeWithContentDescription(app.getString(R.string.open_files)).performClick()
+                compose.onNodeWithContentDescription(app.getString(R.string.close_file, source.path)).performClick()
+                compose.onNodeWithText(app.getString(R.string.save)).performClick()
+                scenario.onActivity { activity ->
+                    drainSourceSaves()
+                    assertEquals(listOf(source.path), activity.openFilePaths)
+                    assertEquals(listOf(source.path), activity.pendingClosePaths)
+                    assertTrue(app.documents.isDirty(source.path))
+                    app.documents.flush()
+                    val record = DraftStore(java.io.File(app.noBackupFilesDir, "documents"))
+                        .readAll { throw AssertionError(it) }.single { it.session.path == source.path }
+                    assertEquals("keep this draft original", record.text)
+                }
+                assertEquals("original", source.readText())
+            } finally {
+                scenario.onActivity { app.saver.shutdown(); app.saver = DocumentSaver(app.documents) }
+            }
+        }
+    }
+
+    @Test @Config(qualifiers = "w360dp-h640dp-port")
+    fun oldDiagnosticsAreHiddenAfterEditsAndOldVersionRepliesCannotRestoreThem() {
+        val source = temporary.root.resolve("first.txt")
+        val warning = JSONObject().put("message", "old diagnostic").put("severity", 2)
+            .put("range", JSONObject()
+                .put("start", JSONObject().put("line", 0).put("character", 0))
+                .put("end", JSONObject().put("line", 0).put("character", 1)))
+        val values = JSONArray().put(warning)
+        var oldVersion = -1
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                activity.openFile(source)
+                activity.fragmentManager.executePendingTransactions()
+                val fragment = activity.fragmentManager.findFragmentByTag(source.path) as EditFragment
+                oldVersion = fragment.version
+                publishDiagnostics(source, values, oldVersion)
+            }
+            compose.onNodeWithTag("diagnostics-button").performClick()
+            compose.onNodeWithText("old diagnostic").assertIsDisplayed()
+            scenario.onActivity { activity ->
+                activity.editor.paste("draft ")
+                publishDiagnostics(source, values, oldVersion)
+            }
+            compose.onNodeWithText("old diagnostic").assertDoesNotExist()
+            compose.onNodeWithText(app.getString(R.string.no_diagnostics)).assertIsDisplayed()
+            scenario.onActivity { activity ->
+                val fragment = activity.fragmentManager.findFragmentByTag(source.path) as EditFragment
+                publishDiagnostics(source, JSONArray().put(warning.put("message", "fresh diagnostic")), fragment.version)
+                assertTrue(app.documents.isDirty(source.path))
+            }
+            compose.onNodeWithText("fresh diagnostic").assertIsDisplayed()
+            assertEquals("original", source.readText())
         }
     }
 
@@ -159,19 +257,13 @@ class AdaptiveUiTest {
             .put("range", JSONObject()
                 .put("start", JSONObject().put("line", 1).put("character", 0))
                 .put("end", JSONObject().put("line", 1).put("character", 1)))
-        fun publish(values: JSONArray) {
-            app.hand.handleMessage(Message.obtain().apply {
-                obj = JSONObject().put("method", "textDocument/publishDiagnostics")
-                    .put("params", JSONObject().put("uri", source.toURI().toString()).put("diagnostics", values)).toString()
-            })
-        }
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
                 activity.openFile(source)
                 activity.fragmentManager.executePendingTransactions()
                 activity.openFile(other)
                 activity.fragmentManager.executePendingTransactions()
-                publish(JSONArray().put(diagnostic("sample warning", 2)))
+                publishDiagnostics(source, JSONArray().put(diagnostic("sample warning", 2)))
                 assertTrue(activity.editor.soraEditor.lineNumberMarginLeft > 0)
                 assertTrue(activity.editor.soraEditor.dividerMarginRight > 0)
             }
@@ -179,9 +271,9 @@ class AdaptiveUiTest {
             compose.onNodeWithTag("diagnostics-button").assertTextContains(app.getString(R.string.diagnostics_count, 1)).performClick()
             compose.onNodeWithText("sample warning").assertIsDisplayed()
             compose.onNodeWithText("example-code", substring = true).assertIsDisplayed()
-            scenario.onActivity { publish(JSONArray()) }
+            scenario.onActivity { publishDiagnostics(source, JSONArray()) }
             compose.onNodeWithText(app.getString(R.string.no_diagnostics)).assertIsDisplayed()
-            scenario.onActivity { publish(JSONArray().put(diagnostic("sample error", 1))) }
+            scenario.onActivity { publishDiagnostics(source, JSONArray().put(diagnostic("sample error", 1))) }
             compose.onNodeWithText("sample error").performClick()
             compose.onNodeWithText(app.getString(R.string.no_diagnostics)).assertDoesNotExist()
             scenario.onActivity { activity ->
@@ -191,6 +283,14 @@ class AdaptiveUiTest {
                 assertFalse(app.documents.isDirty(source.path))
             }
         }
+    }
+
+    private fun publishDiagnostics(source: java.io.File, values: JSONArray, version: Int? = null) {
+        val params = JSONObject().put("uri", source.toURI().toString()).put("diagnostics", values)
+        if (version != null) params.put("version", version)
+        app.hand.handleMessage(Message.obtain().apply {
+            obj = JSONObject().put("method", "textDocument/publishDiagnostics").put("params", params).toString()
+        })
     }
 
     @Test fun runConfigurationMenuRestoresUnconfirmedValuesAndEnablesTheConfiguredEntry() {

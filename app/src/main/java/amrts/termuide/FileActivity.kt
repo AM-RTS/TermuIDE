@@ -24,7 +24,7 @@ class FileActivity : ComponentActivity(), FileFilter {
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() = navigateBack()
         })
-        setContentView(TermuCCompose.fileView(this))
+        setContentView(TermuIDECompose.fileView(this))
     }
 
     override fun accept(file: File): Boolean {

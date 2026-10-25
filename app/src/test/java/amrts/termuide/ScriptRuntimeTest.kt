@@ -258,7 +258,7 @@ class ScriptRuntimeTest {
         val values = ran.stdout.split('\u0000').dropLast(1)
         assertEquals(data.canonicalFile, File(values.first()).canonicalFile)
         assertEquals(arguments, values.drop(1))
-        assertTrue(File(stage, "termuc/native").isFile)
+        assertTrue(File(stage, "termuide/native").isFile)
         val legacyPositional = Project.Config(directory.path, "build", "unused-build", "unused-compile",
             "\"\$x/\$e\" \"\$@\"", 0, emptyList())
         val legacy = execute(RunCommands.build(req.copy(project = legacyPositional), emptyMap()), environment = environment)

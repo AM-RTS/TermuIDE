@@ -95,7 +95,7 @@ public class MainActivity extends androidx.activity.ComponentActivity implements
 		workspace.setOnChangedListener(this);
 		adp = new FileAdapter(pwd);
         panel = new DebugPanel(this);
-		setContentView(TermuCCompose.mainView(this));
+		setContentView(TermuIDECompose.mainView(this));
 		final int sdk = android.os.Build.VERSION.SDK_INT;
 		String[] s;
 		if (sdk >= android.os.Build.VERSION_CODES.R) {

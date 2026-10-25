@@ -215,13 +215,13 @@ ActionMode.Callback, TextEditor.OnEditedListener {
     int getVersion() { return mVer; }
 
 	public void onChanged(String c, int start, boolean ins, boolean typ) {
+        ++mVer;
         Application.getInstance().getDocuments().changed(fl.getAbsolutePath());
         queueAutoSave();
         if ("s" != Application.completion || !hasLsp())
             return;
 		TextEditor editor = getView();
         if (editor == null) return;
-        ++mVer;
         editor.getText().setHighlights(null);
         if (languageChange != null) editor.removeCallbacks(languageChange);
         // Document callbacks run before mutation; send the completed buffer and capture the final caret.
@@ -307,6 +307,10 @@ ActionMode.Callback, TextEditor.OnEditedListener {
     public void onOpen(Document doc) {
         if (hasLsp()) {
             mVer = 0;
+            doc.setDiag(null);
+            if (getView() != null) getView().postInvalidateOnAnimation();
+            MainActivity activity = (MainActivity)getActivity();
+            if (activity != null) activity.notifyUiChanged();
             Lsp lsp = Application.getInstance().lsp;
             lsp.didOpen(fl, (type & TYPE_C) != 0 ? "c" : "cpp", doc.toString());
             lsp.semanticTokensFull(fl);

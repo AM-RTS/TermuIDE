@@ -301,7 +301,7 @@ class RuntimeActivityTest {
             val execution = shadowOf(app).nextStartedService
             assertEquals(directory.path, execution.getStringExtra("com.termux.RUN_COMMAND_WORKDIR"))
             assertFalse(execution.getBooleanExtra("com.termux.RUN_COMMAND_BACKGROUND", true))
-            assertEquals(listOf("termuc-run", "/termux/bin/$runtime") +
+            assertEquals(listOf("termuide-run", "/termux/bin/$runtime") +
                 (if (runtime == "java") listOf("-Dfile.encoding=UTF-8") else emptyList()) + source.path,
                 execution.getStringArrayExtra("com.termux.RUN_COMMAND_ARGUMENTS")!!.drop(2))
         }

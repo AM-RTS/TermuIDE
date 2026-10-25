@@ -44,7 +44,7 @@ public class DebugPanel implements Runnable {
         params.width = WRAP_CONTENT;
         params.height = WRAP_CONTENT;
         this.params = params;
-        ctrlr = TermuCCompose.debugView((androidx.activity.ComponentActivity)mCtx, this);
+        ctrlr = TermuIDECompose.debugView((androidx.activity.ComponentActivity)mCtx, this);
     }
 
     @Override public void run() {
@@ -56,7 +56,7 @@ public class DebugPanel implements Runnable {
     public void connect() {
         if (session != null) return;
         // A detached overlay's window recomposer belongs to its previous window.
-        ctrlr = TermuCCompose.debugView((androidx.activity.ComponentActivity)mCtx, this);
+        ctrlr = TermuIDECompose.debugView((androidx.activity.ComponentActivity)mCtx, this);
         final long expected = ++generation;
         session = new DebugSession(update -> main.post(() -> {
             if (generation == expected) applyState(update);

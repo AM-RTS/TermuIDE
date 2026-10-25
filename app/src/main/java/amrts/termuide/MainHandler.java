@@ -225,6 +225,7 @@ public class MainHandler extends Handler {
             JSONObject value = values.getJSONObject(i), range = value.getJSONObject("range");
             JSONObject start = range.getJSONObject("start"), end = range.getJSONObject("end");
             Diagnostic diagnostic = new Diagnostic();
+            diagnostic.documentVersion = fragment.getVersion();
             diagnostic.stl = start.getInt("line") + 1; diagnostic.stc = start.getInt("character");
             diagnostic.enl = end.getInt("line") + 1; diagnostic.enc = end.getInt("character");
             diagnostic.severity = Math.max(0, Math.min(3, value.optInt("severity", 1) - 1));

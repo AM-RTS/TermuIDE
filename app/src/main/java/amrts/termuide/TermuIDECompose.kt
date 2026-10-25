@@ -164,7 +164,7 @@ import android.preference.PreferenceManager
 import kotlinx.coroutines.launch
 import cn.rbc.codeeditor.util.HelperUtils
 
-object TermuCCompose {
+object TermuIDECompose {
     @JvmStatic
     fun mainView(activity: MainActivity): View {
         val editorHost = FrameLayout(activity).apply { id = R.id.editFrag }
@@ -172,7 +172,7 @@ object TermuCCompose {
             // Platform fragments restore before Compose attaches to the window.
             addView(editorHost, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
             addView(composeView(activity) {
-                TermuCTheme(activity) { MainScreen(activity, editorHost) }
+                TermuIDETheme(activity) { MainScreen(activity, editorHost) }
             }.apply { id = R.id.main_compose }, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         }
     }
@@ -181,14 +181,14 @@ object TermuCCompose {
     fun settingsView(activity: SettingsActivity): View = composeView(activity) {
         val prefs = PreferenceManager.getDefaultSharedPreferences(activity)
         val theme = rememberSaveable { mutableStateOf(prefs.getString(Application.KEY_THEME, "l") ?: "l") }
-        TermuCTheme(activity, theme.value) {
+        TermuIDETheme(activity, theme.value) {
             SettingsScreen(activity, prefs) { theme.value = it }
         }
     }.apply { id = R.id.settings_compose }
 
     @JvmStatic
     fun fileView(activity: FileActivity): View = composeView(activity) {
-        TermuCTheme(activity) { FilePickerScreen(activity) }
+        TermuIDETheme(activity) { FilePickerScreen(activity) }
     }.apply { id = R.id.picker_compose }
 
     @JvmStatic
@@ -197,7 +197,7 @@ object TermuCCompose {
         setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
         setViewTreeLifecycleOwner(owner)
         setViewTreeSavedStateRegistryOwner(owner)
-        setContent { TermuCTheme(activity) { DebugOverlay(activity, panel) } }
+        setContent { TermuIDETheme(activity) { DebugOverlay(activity, panel) } }
     }
 
     private fun composeView(context: Context, content: @Composable () -> Unit): ComposeView =
@@ -404,7 +404,7 @@ private fun DebugDetails(panel: DebugPanel, state: DebugSession.Snapshot, revisi
 }
 
 @Composable
-private fun TermuCTheme(
+private fun TermuIDETheme(
     context: Context,
     preference: String = Application.theme ?: "l",
     content: @Composable () -> Unit
@@ -474,7 +474,8 @@ private fun MainScreen(activity: MainActivity, editorHost: FrameLayout) {
         val labels = paths.map { path -> (if (path in dirtyPaths) "*" else "") + java.io.File(path).name }
         val selected = activity.selectedItem
         val diagnostics = paths.flatMap { path ->
-            (activity.fragmentManager.findFragmentByTag(path) as? EditFragment)?.view?.text?.diag.orEmpty()
+            val fragment = activity.fragmentManager.findFragmentByTag(path) as? EditFragment
+            fragment?.view?.text?.diag.orEmpty().filter { diagnosticIsCurrent(it, fragment) }
                 .map { path to it }
         }
         val editorColors = MaterialTheme.colorScheme
@@ -695,6 +696,8 @@ private fun MainScreen(activity: MainActivity, editorHost: FrameLayout) {
         if (newFileOpen) NewFileDialog(activity, onDismiss = { newFileOpen = false })
         if (diagnosticsOpen) DiagnosticsSheet(diagnostics, execution, onDismiss = { diagnosticsOpen = false }) { path, diagnostic ->
             val index = activity.openFilePaths.indexOf(path)
+            val fragment = activity.fragmentManager.findFragmentByTag(path) as? EditFragment
+            if (!diagnosticIsCurrent(diagnostic, fragment)) return@DiagnosticsSheet
             if (index >= 0) {
                 activity.selectItem(index)
                 activity.editor?.let { editor ->
@@ -869,7 +872,7 @@ private fun OpenFilesTitle(activity: MainActivity, paths: List<String>, labels: 
                             expanded = false
                             activity.closeFile(activity.openFilePaths.indexOf(path))
                         }) {
-                            Icon(Icons.Filled.Close, context.getString(R.string.close_file, java.io.File(path).name))
+                            Icon(Icons.Filled.Close, context.getString(R.string.close_file, path))
                         }
                     },
                     onClick = { activity.selectItem(activity.openFilePaths.indexOf(path)); expanded = false }
@@ -878,6 +881,9 @@ private fun OpenFilesTitle(activity: MainActivity, paths: List<String>, labels: 
         }
     }
 }
+
+private fun diagnosticIsCurrent(diagnostic: cn.rbc.codeeditor.util.ErrSpan, fragment: EditFragment?): Boolean =
+    fragment != null && (diagnostic !is Diagnostic || diagnostic.documentVersion < 0 || diagnostic.documentVersion == fragment.version)
 
 private fun executionMessage(context: Context, execution: RunController.Status): String = when (execution.stage) {
     RunController.Stage.CHECKING -> context.getString(R.string.runtime_checking)

@@ -30,7 +30,7 @@ class SettingsActivity : ComponentActivity(), Utils.ComposeDialogHost {
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() = finishSettings()
         })
-        setContentView(TermuCCompose.settingsView(this))
+        setContentView(TermuIDECompose.settingsView(this))
     }
 
     fun pickFont() {
