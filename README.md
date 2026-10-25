@@ -81,6 +81,8 @@ This app uses `com.termux.RUN_COMMAND` to call Termux to run command, and run `c
 
 Wide windows can keep the file browser beside the editor; compact windows use a browser sheet. Settings and form controls have labeled touch targets and support larger text. Unfinished form input and pending Save/Discard prompts are restored when Android restores saved instance state.
 
+Tap the filename/path in the top bar to switch open files or close an entry; dirty files use the existing Save/Discard/Cancel prompt. The optional tab strip remains available. The bottom action bar provides Diagnostics, Undo, Redo and Save. Diagnostics opens an on-demand bottom sheet with messages for open files, diagnostic codes when supplied, and the current execution status/exit code. Tap a message to navigate to its file and position. Typing does not open the sheet automatically; extra Sora gutter spacing changes presentation without inserting whitespace into files.
+
 ## Unsaved document recovery
 
 **Settings → Editor → Auto-save** optionally saves source files after a one-second typing pause. It is off by default. Failed saves retain dirty recovery drafts. Auto-save pauses for detected external file changes and pending Save/Discard or Reload prompts. Restoring a draft alone does not trigger auto-save.

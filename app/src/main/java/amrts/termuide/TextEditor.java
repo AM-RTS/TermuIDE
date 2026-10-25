@@ -72,6 +72,9 @@ public class TextEditor extends FrameLayout implements Document.TextFieldMetrics
         sora = new SoraView(context);
         sora.setTypefaceText(Typeface.MONOSPACE);
         sora.setLineNumberEnabled(true);
+        float density = getResources().getDisplayMetrics().density;
+        sora.setLineNumberMarginLeft(8 * density);
+        sora.setDividerMargin(4 * density, 8 * density);
         sora.setUndoEnabled(false);
         sora.getProps().symbolPairAutoCompletion = false;
         sora.getProps().actionWhenLineNumberClicked = 0;

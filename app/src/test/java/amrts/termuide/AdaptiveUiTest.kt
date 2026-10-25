@@ -2,6 +2,7 @@ package amrts.termuide
 
 
 import android.preference.PreferenceManager
+import android.os.Message
 import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
@@ -15,6 +16,8 @@ import org.junit.rules.TemporaryFolder
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import org.json.JSONArray
+import org.json.JSONObject
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28])
@@ -33,8 +36,11 @@ class AdaptiveUiTest {
         app.documents.flush()
         Application.completion = "n"
         Application.theme = "l"
+        Application.navtab = false
+        Application.auto_save = false
         PreferenceManager.getDefaultSharedPreferences(app).edit()
-            .putString(Application.KEY_THEME, "l").putString(Application.KEY_COMPLETION, "n").commit()
+            .putString(Application.KEY_THEME, "l").putString(Application.KEY_COMPLETION, "n")
+            .putBoolean(Application.KEY_NAVTAB, false).putBoolean(Application.KEY_AUTOSAVE, false).commit()
         app.getSharedPreferences("MainActivity", 0).edit().putString(MainActivity.PWD, temporary.root.path)
             .putBoolean(MainActivity.INITAPP, false).putBoolean(MainActivity.TESTAPP, false).commit()
         temporary.newFile("first.txt").writeText("original")
@@ -82,6 +88,108 @@ class AdaptiveUiTest {
             compose.onNodeWithText("first.txt").assertIsDisplayed().performClick()
             compose.onNodeWithTag("browser-pane").assertIsDisplayed()
             compose.onNodeWithTag("editor-pane").assertIsDisplayed()
+        }
+    }
+
+    @Test @Config(qualifiers = "w360dp-h640dp-port")
+    fun titlePickerClosesTheRequestedFileAndProtectsDirtyChanges() {
+        val first = temporary.root.resolve("first.txt")
+        val second = temporary.newFile("second.txt").apply { writeText("second original") }
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                activity.openFile(first)
+                activity.fragmentManager.executePendingTransactions()
+                activity.openFile(second)
+                activity.fragmentManager.executePendingTransactions()
+                activity.editor.paste("draft ")
+            }
+            compose.onNodeWithContentDescription(app.getString(R.string.open_files)).performClick()
+            compose.onNodeWithContentDescription(app.getString(R.string.close_file, first.name)).performClick()
+            scenario.onActivity { activity ->
+                assertEquals(listOf(second.path), activity.openFilePaths)
+                assertEquals(second.path, activity.selectedFilePath)
+                assertTrue(app.documents.isDirty(second.path))
+            }
+            compose.onNodeWithContentDescription(app.getString(R.string.open_files)).performClick()
+            compose.onNodeWithContentDescription(app.getString(R.string.close_file, second.name)).performClick()
+            compose.onNodeWithText(app.getString(R.string.unsaved_changes)).assertIsDisplayed()
+            compose.onNodeWithText(app.getString(android.R.string.cancel)).performClick()
+            scenario.onActivity { assertEquals(listOf(second.path), it.openFilePaths) }
+            compose.onNodeWithContentDescription(app.getString(R.string.open_files)).performClick()
+            compose.onNodeWithContentDescription(app.getString(R.string.close_file, second.name)).performClick()
+            compose.onNodeWithText(app.getString(R.string.discard)).performClick()
+            scenario.onActivity { activity ->
+                app.documents.flush()
+                assertTrue(activity.openFilePaths.isEmpty())
+                assertFalse(app.documents.isDirty(second.path))
+            }
+            assertEquals("second original", second.readText())
+            assertEquals("original", first.readText())
+        }
+    }
+
+    @Test @Config(qualifiers = "w360dp-h640dp-port")
+    fun bottomActionsUndoRedoAndSaveTheActiveDocument() {
+        val first = temporary.root.resolve("first.txt")
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                activity.openFile(first)
+                activity.fragmentManager.executePendingTransactions()
+                activity.editor.paste("draft ")
+            }
+            compose.onNodeWithContentDescription(app.getString(R.string.undo)).assertIsEnabled().performClick()
+            scenario.onActivity { assertEquals("original", it.editor.text.toString()) }
+            compose.onNodeWithContentDescription(app.getString(R.string.redo)).assertIsEnabled().performClick()
+            scenario.onActivity { assertEquals("draft original", it.editor.text.toString()) }
+            compose.onNodeWithContentDescription(app.getString(R.string.save)).performClick()
+            scenario.onActivity {
+                drainSourceSaves()
+                assertFalse(app.documents.isDirty(first.path))
+            }
+            assertEquals("draft original", first.readText())
+        }
+    }
+
+    @Test @Config(qualifiers = "w360dp-h640dp-port")
+    fun diagnosticsStayOnDemandUpdateLiveAndNavigateToTheirOwnFile() {
+        val source = temporary.newFile("warning.c").apply { writeText("int main() {\nreturn 0;\n}\n") }
+        val other = temporary.root.resolve("first.txt")
+        fun diagnostic(message: String, severity: Int) = JSONObject()
+            .put("message", message).put("severity", severity).put("code", "example-code")
+            .put("range", JSONObject()
+                .put("start", JSONObject().put("line", 1).put("character", 0))
+                .put("end", JSONObject().put("line", 1).put("character", 1)))
+        fun publish(values: JSONArray) {
+            app.hand.handleMessage(Message.obtain().apply {
+                obj = JSONObject().put("method", "textDocument/publishDiagnostics")
+                    .put("params", JSONObject().put("uri", source.toURI().toString()).put("diagnostics", values)).toString()
+            })
+        }
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                activity.openFile(source)
+                activity.fragmentManager.executePendingTransactions()
+                activity.openFile(other)
+                activity.fragmentManager.executePendingTransactions()
+                publish(JSONArray().put(diagnostic("sample warning", 2)))
+                assertTrue(activity.editor.soraEditor.lineNumberMarginLeft > 0)
+                assertTrue(activity.editor.soraEditor.dividerMarginRight > 0)
+            }
+            compose.onNodeWithText("sample warning").assertDoesNotExist()
+            compose.onNodeWithTag("diagnostics-button").assertTextContains(app.getString(R.string.diagnostics_count, 1)).performClick()
+            compose.onNodeWithText("sample warning").assertIsDisplayed()
+            compose.onNodeWithText("example-code", substring = true).assertIsDisplayed()
+            scenario.onActivity { publish(JSONArray()) }
+            compose.onNodeWithText(app.getString(R.string.no_diagnostics)).assertIsDisplayed()
+            scenario.onActivity { publish(JSONArray().put(diagnostic("sample error", 1))) }
+            compose.onNodeWithText("sample error").performClick()
+            compose.onNodeWithText(app.getString(R.string.no_diagnostics)).assertDoesNotExist()
+            scenario.onActivity { activity ->
+                assertEquals(source.path, activity.selectedFilePath)
+                assertEquals(1, activity.editor.soraEditor.cursor.leftLine)
+                assertEquals(0, activity.editor.soraEditor.cursor.leftColumn)
+                assertFalse(app.documents.isDirty(source.path))
+            }
         }
     }
 

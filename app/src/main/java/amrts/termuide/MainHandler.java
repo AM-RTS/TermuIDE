@@ -54,6 +54,7 @@ public class MainHandler extends Handler {
                 editor.getText().setDiag(null); editor.getText().setHighlights(null);
                 editor.setSemanticTokens(Collections.emptyList());
             }
+            if (ma != null) ma.notifyUiChanged();
             return;
         }
         if (!(message.obj instanceof String)) return;
@@ -232,6 +233,7 @@ public class MainHandler extends Handler {
         }
         Collections.sort(diagnostics);
         fragment.getView().getText().setDiag(diagnostics); fragment.getView().postInvalidateOnAnimation();
+        ma.notifyUiChanged();
     }
 
     private void semanticTokens(TextEditor editor, Object result, String path) throws JSONException {

@@ -102,6 +102,7 @@ import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
@@ -129,6 +130,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.isTraversalGroup
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.CustomAccessibilityAction
@@ -455,6 +457,7 @@ private fun MainScreen(activity: MainActivity, editorHost: FrameLayout) {
     var renameTarget by rememberSaveable { mutableStateOf<String?>(null) }
     var deleteTarget by rememberSaveable { mutableStateOf<String?>(null) }
     var menuOpen by remember { mutableStateOf(false) }
+    var diagnosticsOpen by rememberSaveable { mutableStateOf(false) }
 
     DisposableEffect(activity) {
         activity.setUiRefresh { revision++ }
@@ -470,7 +473,10 @@ private fun MainScreen(activity: MainActivity, editorHost: FrameLayout) {
         val dirtyPaths = documents.filter { it.dirty }.map { it.path }.toSet()
         val labels = paths.map { path -> (if (path in dirtyPaths) "*" else "") + java.io.File(path).name }
         val selected = activity.selectedItem
-        val selectedName = labels.getOrNull(selected)
+        val diagnostics = paths.flatMap { path ->
+            (activity.fragmentManager.findFragmentByTag(path) as? EditFragment)?.view?.text?.diag.orEmpty()
+                .map { path to it }
+        }
         val editorColors = MaterialTheme.colorScheme
         SideEffect {
             paths.forEach { path ->
@@ -497,16 +503,7 @@ private fun MainScreen(activity: MainActivity, editorHost: FrameLayout) {
             topBar = {
                 TopAppBar(
                     title = {
-                        Column {
-                            Text(selectedName ?: context.getString(R.string.app_name), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            if (selected in paths.indices) {
-                                Text(
-                                    paths[selected],
-                                    style = MaterialTheme.typography.labelSmall,
-                                    maxLines = 1, overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                        }
+                        OpenFilesTitle(activity, paths, labels, dirtyPaths, selected)
                     },
                     navigationIcon = {
                         IconButton(onClick = { if (wide) wideBrowserOpen = !wideBrowserOpen else browserOpen = true }) {
@@ -519,12 +516,6 @@ private fun MainScreen(activity: MainActivity, editorHost: FrameLayout) {
                             onClick = { activity.performAction(R.id.run) }
                         ) {
                             Icon(painterResource(R.drawable.ic_play_24), context.getString(R.string.run))
-                        }
-                        IconButton(
-                            enabled = selected >= 0,
-                            onClick = { activity.performAction(R.id.save) }
-                        ) {
-                            Icon(painterResource(R.drawable.ic_file_24), context.getString(R.string.save))
                         }
                         if (!narrowToolbar) IconButton(
                             enabled = selected >= 0,
@@ -591,13 +582,7 @@ private fun MainScreen(activity: MainActivity, editorHost: FrameLayout) {
             bottomBar = {
                 Column {
                     if (execution.stage != RunController.Stage.IDLE) {
-                        val message = when (execution.stage) {
-                            RunController.Stage.CHECKING -> context.getString(R.string.runtime_checking)
-                            RunController.Stage.AWAITING_SAVE -> context.getString(R.string.runtime_saving)
-                            RunController.Stage.DISPATCHED -> context.getString(R.string.runtime_dispatched)
-                            RunController.Stage.FINISHED -> context.getString(R.string.runtime_finished, execution.exitCode ?: -1)
-                            else -> execution.detail.orEmpty()
-                        }
+                        val message = executionMessage(context, execution)
                         Surface(tonalElevation = 2.dp) {
                             Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(start = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Text(message, Modifier.weight(1f).semantics { liveRegion = LiveRegionMode.Polite },
@@ -621,19 +606,20 @@ private fun MainScreen(activity: MainActivity, editorHost: FrameLayout) {
                                 )
                             }
                         }
-                    } else if (!Application.navtab && paths.size > 1) {
-                        var tabsMenu by remember { mutableStateOf(false) }
-                        Box(Modifier.fillMaxWidth()) {
-                            TextButton(onClick = { tabsMenu = true }) {
-                                Text(selectedName ?: context.getString(R.string.no_open_files))
+                    }
+                    Surface(tonalElevation = 2.dp) {
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            TextButton(onClick = { diagnosticsOpen = true }, modifier = Modifier.weight(1f).testTag("diagnostics-button")) {
+                                Text(context.getString(R.string.diagnostics_count, diagnostics.size), maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
-                            DropdownMenu(expanded = tabsMenu, onDismissRequest = { tabsMenu = false }) {
-                                paths.forEachIndexed { index, _ ->
-                                    DropdownMenuItem(
-                                        text = { Text(labels[index]) },
-                                        onClick = { activity.selectItem(index); tabsMenu = false }
-                                    )
-                                }
+                            IconButton(enabled = activity.editor?.text?.canUndo() == true, onClick = { activity.performAction(R.id.undo) }) {
+                                Icon(painterResource(R.drawable.ic_undo_24), context.getString(R.string.undo))
+                            }
+                            IconButton(enabled = activity.editor?.text?.canRedo() == true, onClick = { activity.performAction(R.id.redo) }) {
+                                Icon(painterResource(R.drawable.ic_redo_24), context.getString(R.string.redo))
+                            }
+                            IconButton(enabled = selected >= 0, onClick = { activity.performAction(R.id.save) }) {
+                                Icon(painterResource(R.drawable.ic_file_24), context.getString(R.string.save))
                             }
                         }
                     }
@@ -707,6 +693,20 @@ private fun MainScreen(activity: MainActivity, editorHost: FrameLayout) {
             )
         }
         if (newFileOpen) NewFileDialog(activity, onDismiss = { newFileOpen = false })
+        if (diagnosticsOpen) DiagnosticsSheet(diagnostics, execution, onDismiss = { diagnosticsOpen = false }) { path, diagnostic ->
+            val index = activity.openFilePaths.indexOf(path)
+            if (index >= 0) {
+                activity.selectItem(index)
+                activity.editor?.let { editor ->
+                    val offset = runCatching {
+                        cn.rbc.codeeditor.util.TextPositions(editor.text.toString()).offset(diagnostic.stl - 1, diagnostic.stc)
+                    }.getOrNull()
+                    if (offset != null) editor.setSelection(offset) else editor.gotoLine(diagnostic.stl)
+                    editor.requestFocus()
+                }
+            }
+            diagnosticsOpen = false
+        }
         if (newProjectOpen) NewProjectDialog(activity, onDismiss = { newProjectOpen = false })
         runConfigurationScope?.let { scope ->
             key(scope) {
@@ -828,6 +828,110 @@ internal fun RunConfigurationDialog(
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text(context.getString(android.R.string.cancel)) } }
     )
+}
+
+@Composable
+private fun OpenFilesTitle(activity: MainActivity, paths: List<String>, labels: List<String>, dirtyPaths: Set<String>, selected: Int) {
+    val context = LocalContext.current
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        Row(
+            Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                .clickable(enabled = paths.isNotEmpty(), role = Role.Button) { expanded = true }
+                .semantics(mergeDescendants = true) { contentDescription = context.getString(R.string.open_files) },
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(labels.getOrNull(selected) ?: context.getString(R.string.app_name), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                paths.getOrNull(selected)?.let { path ->
+                    Text(path, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+            if (paths.isNotEmpty()) Icon(Icons.Filled.ArrowDropDown, contentDescription = null)
+        }
+        DropdownMenu(expanded = expanded && paths.isNotEmpty(), onDismissRequest = { expanded = false }, modifier = Modifier.widthIn(min = 240.dp, max = 360.dp)) {
+            paths.forEachIndexed { index, path ->
+                val active = index == selected
+                DropdownMenuItem(
+                    modifier = Modifier.semantics {
+                        this.selected = active
+                        stateDescription = context.getString(if (path in dirtyPaths) R.string.unsaved_changes else R.string.saved)
+                    },
+                    text = {
+                        Column {
+                            Text(labels[index], maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(path, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    },
+                    leadingIcon = { if (active) Icon(Icons.Filled.Check, contentDescription = null) },
+                    trailingIcon = {
+                        IconButton(enabled = !activity.isSavingClose, onClick = {
+                            expanded = false
+                            activity.closeFile(activity.openFilePaths.indexOf(path))
+                        }) {
+                            Icon(Icons.Filled.Close, context.getString(R.string.close_file, java.io.File(path).name))
+                        }
+                    },
+                    onClick = { activity.selectItem(activity.openFilePaths.indexOf(path)); expanded = false }
+                )
+            }
+        }
+    }
+}
+
+private fun executionMessage(context: Context, execution: RunController.Status): String = when (execution.stage) {
+    RunController.Stage.CHECKING -> context.getString(R.string.runtime_checking)
+    RunController.Stage.AWAITING_SAVE -> context.getString(R.string.runtime_saving)
+    RunController.Stage.DISPATCHED -> context.getString(R.string.runtime_dispatched)
+    RunController.Stage.FINISHED -> context.getString(R.string.runtime_finished, execution.exitCode ?: -1)
+    else -> execution.detail.orEmpty()
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DiagnosticsSheet(
+    diagnostics: List<Pair<String, cn.rbc.codeeditor.util.ErrSpan>>,
+    execution: RunController.Status,
+    onDismiss: () -> Unit,
+    onDiagnostic: (String, cn.rbc.codeeditor.util.ErrSpan) -> Unit
+) {
+    val context = LocalContext.current
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+        LazyColumn(Modifier.fillMaxWidth().heightIn(max = 400.dp).padding(bottom = 16.dp)) {
+            item {
+                Row(Modifier.fillMaxWidth().padding(start = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(context.getString(R.string.diagnostics), Modifier.weight(1f).semantics { heading() }, style = MaterialTheme.typography.titleLarge)
+                    IconButton(onClick = onDismiss) { Icon(Icons.Filled.Close, context.getString(R.string.close)) }
+                }
+            }
+            if (execution.stage != RunController.Stage.IDLE) item {
+                ListItem(headlineContent = { Text(context.getString(R.string.execution_status)) },
+                    supportingContent = { Text(executionMessage(context, execution)) })
+                HorizontalDivider()
+            }
+            if (diagnostics.isEmpty()) item {
+                Text(context.getString(R.string.no_diagnostics), Modifier.padding(16.dp), style = MaterialTheme.typography.bodyMedium)
+            }
+            items(diagnostics) { (path, diagnostic) ->
+                val severity = context.getString(when (diagnostic.severity) {
+                    0 -> R.string.diagnostic_error
+                    1 -> R.string.diagnostic_warning
+                    2 -> R.string.diagnostic_info
+                    else -> R.string.diagnostic_hint
+                })
+                val code = (diagnostic as? Diagnostic)?.code?.takeUnless { it == org.json.JSONObject.NULL }
+                ListItem(
+                    modifier = Modifier.clickable(role = Role.Button) { onDiagnostic(path, diagnostic) },
+                    headlineContent = { Text(diagnostic.msg.orEmpty()) },
+                    supportingContent = {
+                        Text(context.getString(R.string.diagnostic_location, severity, path, diagnostic.stl, diagnostic.stc + 1) +
+                            (code?.let { " · $it" } ?: ""))
+                    }
+                )
+                HorizontalDivider()
+            }
+        }
+    }
 }
 
 @Composable
