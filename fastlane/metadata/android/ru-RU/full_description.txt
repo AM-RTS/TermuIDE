@@ -30,4 +30,4 @@ TermuIDE — простая IDE для C/C++, работающая на базе
 
 Лицензия приложения: GNU GPL v3. Благодарности: TermuC, CodeEditor (MrIkso), TextWarrior (Tah Wei Hoon, Apache 2.0), Sora (Rosemoe, LGPL 2.1 или новее), AndroidX, Material, Kotlin и сообщество Termux. Полные тексты лицензий и ссылки на исходники доступны в разделе «About TermuIDE» в настройках. Гарантии не предоставляются.
 
-Исходный код ветки: https://github.com/AM-RTS/TermuC
+Исходный код ветки: https://github.com/AM-RTS/TermuIDE

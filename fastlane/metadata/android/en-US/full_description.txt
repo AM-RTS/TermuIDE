@@ -15,4 +15,4 @@ Based on TermuC (RainbowC0 and contributors) and CodeEditor (MrIkso and contribu
 
 The application is GNU GPL v3. Sora is LGPL 2.1 or later; attributed TextWarrior files and AndroidX/Kotlin are Apache 2.0. Original notices remain applicable. Full license texts, acknowledgements and source links are available offline in Settings > About > About TermuIDE. No warranty is provided.
 
-Fork source: https://github.com/AM-RTS/TermuC
+Fork source: https://github.com/AM-RTS/TermuIDE

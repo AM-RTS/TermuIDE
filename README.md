@@ -1,6 +1,6 @@
 # TermuIDE
 
-[Source](https://github.com/AM-RTS/TermuC) · [GPL v3](LICENSE.md) · [Acknowledgements](NOTICE.md) · [中文 README](README_zh.md)
+[Source](https://github.com/AM-RTS/TermuIDE) · [GPL v3](LICENSE.md) · [Acknowledgements](NOTICE.md) · [中文 README](README_zh.md)
 
 TermuIDE is an independent fork of [TermuC](https://github.com/RainbowC0/TermuC), a Termux-backed C/C++ IDE. This fork adds a Material 3 Compose interface, the [Sora editor](https://github.com/Rosemoe/sora-editor/tree/0.24.4), durable recovery and basic Python/Java console execution. It is maintained by AM-RTS and contributors and is not an official TermuC or Termux release.
 
@@ -25,7 +25,7 @@ Python/Java execution is basic console support; their language servers, debugger
 
 ## Installation and project identity
 
-Use APKs published by this fork in [its releases](https://github.com/AM-RTS/TermuC/releases) or build from this source. Upstream TermuC releases and its F-Droid listing are different applications.
+Use APKs published by this fork in [its releases](https://github.com/AM-RTS/TermuIDE/releases) or build from this source. Upstream TermuC releases and its F-Droid listing are different applications.
 
 `amrts.termuide` installs separately from `cn.rbc.termuc` and the earlier `cn.rbc.termuc.devicecheck` test app. Android does not automatically copy their private settings, saved run configurations, permissions or recovery drafts into TermuIDE. Save/export unsaved work in the old app before removing it. Shared source files remain on disk; grant TermuIDE its own storage, Termux RUN_COMMAND and overlay permissions.
 
@@ -35,7 +35,7 @@ New projects require a fresh destination folder so templates cannot overwrite ex
 
 ## Development status
 
-The renamed TermuIDE app, About/licensing additions and preceding workspace-coordination refactor have a successful [signed-release build on GitHub Actions](https://github.com/AM-RTS/TermuC/actions/runs/40168892630). Local Gradle/builds and all tests/device checks were deliberately skipped. The CI build and signature verification do not establish behavioral correctness; earlier test/device results in the [architecture notes](docs/architecture/multilanguage-runtime.md) describe the older TermuC-named checkpoint.
+The renamed TermuIDE app, About/licensing additions and preceding workspace-coordination refactor have a successful [signed-release build on GitHub Actions](https://github.com/AM-RTS/TermuIDE/actions/runs/40168892630). Local Gradle/builds and all tests/device checks were deliberately skipped. The CI build and signature verification do not establish behavioral correctness; earlier test/device results in the [architecture notes](docs/architecture/multilanguage-runtime.md) describe the older TermuC-named checkpoint.
 
 ## Automated prereleases
 
@@ -54,7 +54,7 @@ Use one persistent release key and keep a secure backup. Never commit the keysto
 
 CI calls `bash ./gradlew :app:assembleRelease --no-daemon --stacktrace -PciBuildNumber="$GITHUB_RUN_NUMBER"`, then aligns, signs and verifies the APK with Android Build Tools 34.0.0. The build number is added to the source `versionCode`, and CI version names use `0.2.4-ci.<run number>`; local builds keep the source version. Keep the workflow's run numbering and the source base version code increasing to support app updates. Tests, emulator and device checks are not part of this workflow, so a published prerelease is not a claim of behavioral validation.
 
-The workflow uses GitHub's current repository identity, including after a repository rename. To rename this fork to `AM-RTS/TermuIDE`, use **Settings > General > Repository name > Rename**, then update local remotes and the app/documentation source URLs. The existing URLs below describe the current repository name.
+The repository is **AM-RTS/TermuIDE**. The workflow uses GitHub's current repository identity for release publication and generated source/change links. Existing clones should use `git remote set-url origin https://github.com/AM-RTS/TermuIDE.git`.
 
 ## Technology
 
@@ -121,7 +121,7 @@ TermuIDE is a modified fork of [TermuC](https://github.com/RainbowC0/TermuC) by 
 
 The application retains the **GNU GPL v3** license in [LICENSE.md](LICENSE.md). Individual component notices remain in effect: Sora uses **LGPL 2.1 or later**; attributed TextWarrior files and AndroidX/Kotlin use **Apache 2.0**. See [NOTICE.md](NOTICE.md) for authors, source links, modifications and redistribution information. Full license texts and acknowledgements are also readable offline in **Settings → About → About TermuIDE**. There is no warranty; see the licenses for terms.
 
-When distributing an APK, provide the corresponding source and build instructions for that exact release, retain author notices, and include the applicable licenses. The fork source remains in [AM-RTS/TermuC](https://github.com/AM-RTS/TermuC); the repository has not been renamed.
+When distributing an APK, provide the corresponding source and build instructions for that exact release, retain author notices, and include the applicable licenses. The fork source is available in [AM-RTS/TermuIDE](https://github.com/AM-RTS/TermuIDE).
 
 ## Upstream resources
 

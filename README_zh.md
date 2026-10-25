@@ -18,7 +18,7 @@ Python/Java 目前仅提供基本运行功能，不包含语言服务器、调�
 
 ## 安装与项目
 
-最低系统版本为 Android 8.1（API 27），目标 API 为 34；构建需要 JDK 17。请使用[本分支发布页](https://github.com/AM-RTS/TermuC/releases)中的 APK 或从源码构建。上游 F-Droid 软件包仍是 TermuC。
+最低系统版本为 Android 8.1（API 27），目标 API 为 34；构建需要 JDK 17。请使用[本分支发布页](https://github.com/AM-RTS/TermuIDE/releases)中的 APK 或从源码构建。上游 F-Droid 软件包仍是 TermuC。
 
 新包名会单独安装，不会自动导入旧 TermuC/测试版的私有设置、权限、运行配置和恢复草稿。卸载旧应用前应先保存或导出未保存内容，并重新授予 TermuIDE 存储、Termux 命令和悬浮窗权限。
 
@@ -30,4 +30,4 @@ Python/Java 目前仅提供基本运行功能，不包含语言服务器、调�
 
 本应用保留 [GNU GPL v3](LICENSE.md) 许可证。感谢 TermuC（RainbowC0 及贡献者）、CodeEditor（MrIkso 及贡献者）、TextWarrior（Tah Wei Hoon 及贡献者）、Sora（Rosemoe 及贡献者）、AndroidX、Material、Kotlin 和 Termux 社区。Sora 使用 LGPL 2.1 或更新版本；带有原始声明的 TextWarrior 文件以及 AndroidX/Kotlin 使用 Apache 2.0。各组件保留其原始版权和许可证声明；详见 [NOTICE.md](NOTICE.md)。软件不提供担保。
 
-更名后的 TermuIDE、关于/许可证界面和工作区重构已通过 [GitHub Actions 签名发布构建](https://github.com/AM-RTS/TermuC/actions/runs/40168892630)。本地 Gradle/构建以及所有测试和设备检查仍未运行；构建和签名成功不代表应用行为已验证。每次推送到 master 会自动发布带有签名 APK、校验值和变更记录的预发行版，详见 [自动发布说明](README.md#automated-prereleases)。
+更名后的 TermuIDE、关于/许可证界面和工作区重构已通过 [GitHub Actions 签名发布构建](https://github.com/AM-RTS/TermuIDE/actions/runs/40168892630)。本地 Gradle/构建以及所有测试和设备检查仍未运行；构建和签名成功不代表应用行为已验证。每次推送到 master 会自动发布带有签名 APK、校验值和变更记录的预发行版，详见 [自动发布说明](README.md#automated-prereleases)。

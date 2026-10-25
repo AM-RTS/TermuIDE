@@ -1285,7 +1285,7 @@ private fun AboutDialog(onDismiss: () -> Unit) {
     fun openSource() {
         try {
             context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW,
-                android.net.Uri.parse("https://github.com/AM-RTS/TermuC")))
+                android.net.Uri.parse("https://github.com/AM-RTS/TermuIDE")))
         } catch (_: android.content.ActivityNotFoundException) {
             android.widget.Toast.makeText(context, R.string.no_browser, android.widget.Toast.LENGTH_SHORT).show()
         }

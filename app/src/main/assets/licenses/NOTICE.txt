@@ -22,6 +22,6 @@ Thanks to the Termux community and the maintainers of clang/clangd, GDB, Python 
 
 Fork changes and source
 
-The changes are described in README.md and docs/architecture/multilanguage-runtime.md. Source for this fork remains at https://github.com/AM-RTS/TermuC ; the repository name does not determine the Android app name. Preserve these notices and the applicable license texts when redistributing. Publish the corresponding source and build instructions for the exact binary release, including any modifications; a link to a different upstream revision is not a substitute.
+The changes are described in README.md and docs/architecture/multilanguage-runtime.md. Source for this fork remains at https://github.com/AM-RTS/TermuIDE ; the repository name does not determine the Android app name. Preserve these notices and the applicable license texts when redistributing. Publish the corresponding source and build instructions for the exact binary release, including any modifications; a link to a different upstream revision is not a substitute.
 
 TermuIDE is free software under GNU GPL v3. You may copy, modify and redistribute it under that license. It is provided WITHOUT ANY WARRANTY, including the implied warranties of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the full license texts for terms.
