@@ -37,6 +37,25 @@ New projects require a fresh destination folder so templates cannot overwrite ex
 
 The rename, About/licensing additions and preceding workspace-coordination refactor have source review only: Gradle, builds and tests were deliberately skipped due to limited host memory. Earlier test/device results in the [architecture notes](docs/architecture/multilanguage-runtime.md) describe the older TermuC-named checkpoint, not a validated TermuIDE APK.
 
+## Automated prereleases
+
+`.github/workflows/release.yml` builds a signed release APK on GitHub's Ubuntu runner for every push to `master`. Each successful run publishes a **prerelease**, its APK, SHA-256 checksum and commit notes for that push. Manual runs are supported on `master`; reruns get a distinct release tag. Builds are not cancelled by later pushes. Pull requests retain the separate debug build workflow and cannot publish releases or access signing secrets.
+
+Before pushing the workflow, add these repository secrets under **Settings > Secrets and variables > Actions**:
+
+| Secret | Value |
+| --- | --- |
+| `KEYSTORE_BASE64` | Base64 encoding of the release keystore file. |
+| `KEYSTORE_PASSWORD` | Keystore password. |
+| `KEY_ALIAS` | Signing key alias inside the keystore. |
+| `KEY_PASSWORD` | Private-key password (may equal the keystore password). |
+
+Use one persistent release key and keep a secure backup. Never commit the keystore, passwords or encoded keystore. For PowerShell, copy only the encoded value with `[Convert]::ToBase64String([IO.File]::ReadAllBytes('C:\path\to\release.jks')) | Set-Clipboard`, then paste it directly into the `KEYSTORE_BASE64` secret. The workflow fails if any signing secret is missing; it never publishes unsigned APKs. No personal access token is required: the publishing job uses `GITHUB_TOKEN` with `contents: write` (repository or organization policy must allow this).
+
+CI calls `bash ./gradlew :app:assembleRelease --no-daemon --stacktrace -PciBuildNumber="$GITHUB_RUN_NUMBER"`, then aligns, signs and verifies the APK with Android Build Tools 34.0.0. The build number is added to the source `versionCode`, and CI version names use `0.2.4-ci.<run number>`; local builds keep the source version. Keep the workflow's run numbering and the source base version code increasing to support app updates. Tests, emulator and device checks are not part of this workflow, so a published prerelease is not a claim of behavioral validation.
+
+The workflow uses GitHub's current repository identity, including after a repository rename. To rename this fork to `AM-RTS/TermuIDE`, use **Settings > General > Repository name > Rename**, then update local remotes and the app/documentation source URLs. The existing URLs below describe the current repository name.
+
 ## Technology
 
 This app uses `com.termux.RUN_COMMAND` to call Termux to run command, and run `clangd` language server with `netcat`, which builds an insistent I/O channel, offering functions as diagnosing and compilation.

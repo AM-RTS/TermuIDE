@@ -1,0 +1,117 @@
+name: Signed prerelease
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check signing secrets
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          for name in KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Missing Actions secret: $name. No unsigned release will be published."
+              exit 1
+            fi
+          done
+
+      - name: Checkout the pushed commit
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Install Android SDK packages
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-34" "build-tools;34.0.0" >/dev/null
+
+      - name: Build release APK
+        run: bash ./gradlew :app:assembleRelease --no-daemon --stacktrace -PciBuildNumber="$GITHUB_RUN_NUMBER"
+
+      - name: Sign and verify APK
+        id: apk
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          umask 077
+          signing_key="$RUNNER_TEMP/termuide-release.jks"
+          trap 'rm -f -- "$signing_key"' EXIT
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$signing_key"
+          tools="$ANDROID_HOME/build-tools/34.0.0"
+          version=$(jq -er '.elements[0].versionName' app/build/outputs/apk/release/output-metadata.json)
+          tag="ci-${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}-${GITHUB_SHA::7}"
+          mkdir -p dist
+          apk="TermuIDE-${version}-${GITHUB_SHA::7}.apk"
+          "$tools/zipalign" -f -p 4 app/build/outputs/apk/release/app-release-unsigned.apk "$RUNNER_TEMP/aligned.apk"
+          "$tools/apksigner" sign --ks "$signing_key" --ks-key-alias "$KEY_ALIAS" \
+            --ks-pass env:KEYSTORE_PASSWORD --key-pass env:KEY_PASSWORD --v4-signing-enabled false \
+            --out "dist/$apk" "$RUNNER_TEMP/aligned.apk"
+          "$tools/apksigner" verify --verbose --print-certs "dist/$apk"
+          (cd dist && sha256sum "$apk" > SHA256SUMS)
+          printf 'version=%s\ntag=%s\n' "$version" "$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Write change notes
+        run: |
+          before=$(jq -r '.before // ""' "$GITHUB_EVENT_PATH")
+          range="${GITHUB_SHA}^!"
+          source_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
+          if [[ -n "$before" && "$before" != 0000000000000000000000000000000000000000 ]] && git cat-file -e "${before}^{commit}" 2>/dev/null; then
+            range="$before..$GITHUB_SHA"
+            changes_url="$source_url/compare/$before...$GITHUB_SHA"
+          else
+            changes_url="$source_url/commit/$GITHUB_SHA"
+          fi
+          {
+            printf 'Automated prerelease from `master` at `%s`.\n\n' "$GITHUB_SHA"
+            printf '### Changes in this push\n\n'
+            git log --reverse --format='- %s (`%h`)' "$range" --
+            printf '\n[Full changes](%s) · [Exact source](%s/tree/%s)\n\n' "$changes_url" "$source_url" "$GITHUB_SHA"
+            printf 'Signed release APK; SHA-256 checksum attached. Build and signature verification completed; automated tests and device checks were not run.\n\n'
+            printf '[Build instructions](%s/blob/%s/README.md#automated-prereleases) · [License](%s/blob/%s/LICENSE.md) · [Acknowledgements](%s/blob/%s/NOTICE.md)\n' "$source_url" "$GITHUB_SHA" "$source_url" "$GITHUB_SHA" "$source_url" "$GITHUB_SHA"
+          } > dist/change-notes.md
+
+      - name: Upload signed APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TermuIDE-${{ steps.apk.outputs.tag }}
+          path: |
+            dist/*.apk
+            dist/SHA256SUMS
+          if-no-files-found: error
+
+      - name: Publish prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.apk.outputs.tag }}
+          VERSION: ${{ steps.apk.outputs.version }}
+        run: |
+          gh release create "$RELEASE_TAG" dist/*.apk dist/SHA256SUMS \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "TermuIDE $VERSION (${GITHUB_SHA::7}, attempt $GITHUB_RUN_ATTEMPT)" \
+            --notes-file dist/change-notes.md --prerelease --latest=false

@@ -2,6 +2,8 @@ apply plugin: 'com.android.application'
 apply plugin: 'org.jetbrains.kotlin.android'
 apply plugin: 'org.jetbrains.kotlin.plugin.compose'
 
+def ciBuildNumber = (findProperty('ciBuildNumber') ?: '0').toInteger()
+
 android {
     namespace 'amrts.termuide'
     compileSdk 34
@@ -9,8 +11,8 @@ android {
         applicationId "amrts.termuide"
         minSdkVersion 27
         targetSdkVersion 34
-        versionCode 13
-        versionName "0.2.4"
+        versionCode 13 + ciBuildNumber
+        versionName(ciBuildNumber > 0 ? "0.2.4-ci.${ciBuildNumber}" : "0.2.4")
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
     }
 
