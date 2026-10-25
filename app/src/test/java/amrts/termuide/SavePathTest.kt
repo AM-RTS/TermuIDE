@@ -160,6 +160,32 @@ class SavePathTest {
         assertFalse(app.documents.isDirty(file.path))
     }
 
+    @Test fun saveBeforeCloseFollowsActivityRecreationAndClosesOnlyAfterSuccess() {
+        val (file, fragment) = open()
+        val activity = controller!!.get()
+        fragment.view!!.paste("saved before closing ")
+        activity.closeFile(activity.selectedItem)
+        activity.resolveCloseDocuments(true)
+        assertTrue(entered.await(5, TimeUnit.SECONDS))
+        assertEquals("original", file.readText())
+        controller!!.recreate()
+        val restored = controller!!.get()
+        assertNotSame(activity, restored)
+        assertTrue(restored.isSavingClose)
+        assertEquals(listOf(file.path), restored.pendingClosePaths)
+        assertTrue(restored.openFilePaths.contains(file.path))
+        release.countDown()
+        drainSourceSaves()
+        restored.fragmentManager.executePendingTransactions()
+        assertEquals("saved before closing original", file.readText())
+        assertFalse(restored.isSavingClose)
+        assertTrue(restored.pendingClosePaths.isEmpty())
+        assertTrue(restored.openFilePaths.isEmpty())
+        app.documents.flush()
+        assertTrue(DraftStore(File(app.noBackupFilesDir, "documents")).readAll { throw AssertionError(it) }
+            .none { it.session.path == file.path })
+    }
+
     @Test fun failedSaveCannotCloseTheTabOrDiscardItsRecovery() {
         val (file, fragment) = open()
         app.saver.shutdown()
