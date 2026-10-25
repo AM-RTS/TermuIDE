@@ -48,6 +48,20 @@ jobs:
         run: |
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-34" "build-tools;34.0.0" >/dev/null
 
+      - name: Run host regression suite
+        id: regressions
+        run: bash ./gradlew :app:testDebugUnitTest --no-daemon --stacktrace
+
+      - name: Upload regression reports
+        if: always() && (steps.regressions.outcome == 'success' || steps.regressions.outcome == 'failure')
+        uses: actions/upload-artifact@v6
+        with:
+          name: TermuIDE-regressions-${{ github.run_number }}-${{ github.run_attempt }}
+          path: |
+            app/build/reports/tests/testDebugUnitTest/
+            app/build/test-results/testDebugUnitTest/
+          if-no-files-found: warn
+
       - name: Build release APK
         run: bash ./gradlew :app:assembleRelease --no-daemon --stacktrace -PciBuildNumber="$GITHUB_RUN_NUMBER"
 
@@ -92,7 +106,7 @@ jobs:
             printf '### Changes in this push\n\n'
             git log --reverse --format='- %s (`%h`)' "$range" --
             printf '\n[Full changes](%s) · [Exact source](%s/tree/%s)\n\n' "$changes_url" "$source_url" "$GITHUB_SHA"
-            printf 'Signed release APK; SHA-256 checksum attached. Build and signature verification completed; automated tests and device checks were not run.\n\n'
+            printf 'Signed release APK; SHA-256 checksum attached. Host regression tests, release build and signature verification passed. Phone and emulator checks were not run. Test reports are available in the workflow artifacts.\n\n'
             printf '[Build instructions](%s/blob/%s/README.md#automated-prereleases) · [License](%s/blob/%s/LICENSE.md) · [Acknowledgements](%s/blob/%s/NOTICE.md)\n' "$source_url" "$GITHUB_SHA" "$source_url" "$GITHUB_SHA" "$source_url" "$GITHUB_SHA"
           } > dist/change-notes.md
 

@@ -30,4 +30,4 @@ Python/Java 目前仅提供基本运行功能，不包含语言服务器、调�
 
 本应用保留 [GNU GPL v3](LICENSE.md) 许可证。感谢 TermuC（RainbowC0 及贡献者）、CodeEditor（MrIkso 及贡献者）、TextWarrior（Tah Wei Hoon 及贡献者）、Sora（Rosemoe 及贡献者）、AndroidX、Material、Kotlin 和 Termux 社区。Sora 使用 LGPL 2.1 或更新版本；带有原始声明的 TextWarrior 文件以及 AndroidX/Kotlin 使用 Apache 2.0。各组件保留其原始版权和许可证声明；详见 [NOTICE.md](NOTICE.md)。软件不提供担保。
 
-更名后的 TermuIDE、关于/许可证界面和工作区重构已通过 [GitHub Actions 签名发布构建](https://github.com/AM-RTS/TermuIDE/actions/runs/40168892630)。本地 Gradle/构建以及所有测试和设备检查仍未运行；构建和签名成功不代表应用行为已验证。每次推送到 master 会自动发布带有签名 APK、校验值和变更记录的预发行版，详见 [自动发布说明](README.md#automated-prereleases)。
+更名后的 TermuIDE、关于/许可证界面和工作区重构已通过 [GitHub Actions 签名发布构建](https://github.com/AM-RTS/TermuIDE/actions/runs/40169775316)。预发行流程现在要求 JVM/Robolectric 回归测试通过，失败会阻止构建、签名和发布，并保留已生成的测试报告。覆盖工作区选择、恢复后的关闭提示、保存/丢弃、持久草稿和项目创建。本地 Gradle/构建/测试、手机和模拟器检查仍跳过；主机测试不能代替真机验证。每次推送到 master 会在检查成功后发布带有签名 APK、校验值和变更记录的预发行版，详见 [自动发布说明](README.md#automated-prereleases)。

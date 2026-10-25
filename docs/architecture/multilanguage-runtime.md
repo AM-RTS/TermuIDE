@@ -1,12 +1,12 @@
 # Multi-language runtime architecture
 
-Status: TermuIDE (`amrts.termuide`); shared runtime foundation and basic Python/Java execution implemented; advanced integrations remain planned. Updated 2026-10-25.
+Status: TermuIDE (`amrts.termuide`); shared runtime foundation and basic Python/Java execution implemented; advanced integrations remain planned. Updated 2026-10-26.
 
 ## Fork identity and provenance
 
 TermuIDE is the AM-RTS fork of RainbowC0/TermuC. The application ID, namespace and source package are `amrts.termuide`; the `codeeditor` library retains its upstream namespace and author notices. Projects and templates use `termuide.json` only, with no automatic fallback for legacy `termuc.json`. The new application ID has its own Android sandbox; old settings, permissions and recovery drafts are not imported automatically. See [README.md](../../README.md#what-is-different-in-this-fork) for fork differences and [NOTICE.md](../../NOTICE.md) for authors and licensing. Full licenses are bundled for the Settings About dialog.
 
-The identity/attribution work and workspace refactor have not been built or tested, as requested. Historical device checkpoints below retain their original package names, artifact paths and results.
+The identity/attribution work and workspace refactor have a successful [GitHub-hosted signed release build](https://github.com/AM-RTS/TermuIDE/actions/runs/40169775316). The prerelease workflow now requires the JVM/Robolectric regression suite to pass before building, signing and publishing; test reports are retained as workflow artifacts even when tests fail. Coverage includes restored workspace prompts, tab selection, scoped discard approval, stale save completion, durable drafts and safe project creation. Local Gradle, builds, tests, phone and emulator checks remain skipped. CI host tests do not establish physical-device behavior. Historical device checkpoints below retain their original package names, artifact paths and results.
 
 ## Direction and initial scope
 

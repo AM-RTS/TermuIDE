@@ -79,6 +79,52 @@ class ProjectSaveTest {
         assertArrayEquals(intArrayOf(0, 0), app.hand.selection(retained))
     }
 
+    @Test fun allTemplatesRejectExistingFoldersWithoutChangingTheProjectOrDrafts() {
+        val (activity, fragment) = launch()
+        fragment.view!!.paste("// keep my draft\n")
+        val draft = fragment.view!!.text.toString()
+        val before = Project.snapshot()
+        val originalConfiguration = configuration.readText()
+        val occupied = File(directory, "occupied").apply { mkdir() }
+        val marker = File(occupied, Project.PROJ).apply { writeText("existing project data") }
+        for (template in listOf("Clang", "Clang++", "CMake", "Makefile")) {
+            assertFalse(template, activity.createProject(occupied.name, template, true, true))
+            assertEquals(before.rootPath, Project.rootPath)
+            assertEquals(before.buildCmd, Project.buildCmd)
+            assertEquals(before.runCmd, Project.runCmd)
+            assertEquals(fragment.file.path, activity.selectedFilePath)
+            assertEquals(listOf(fragment.file.path), activity.openFilePaths)
+            assertEquals("existing project data", marker.readText())
+            assertEquals(listOf(Project.PROJ), occupied.listFiles()!!.map { it.name })
+            assertTrue(app.documents.isDirty(fragment.file.path))
+        }
+        app.documents.flush()
+        val recovered = DraftStore(File(app.noBackupFilesDir, "documents")).readAll { throw AssertionError(it) }
+            .single { it.session.path == fragment.file.path }
+        assertEquals(draft, recovered.text)
+        assertEquals(originalConfiguration, configuration.readText())
+    }
+
+    @Test fun newTemplatesUseTermuideConfigurationWithoutDiscardingOpenDrafts() {
+        val (activity, fragment) = launch()
+        fragment.view!!.paste("// retained draft\n")
+        val draft = fragment.view!!.text.toString()
+        for ((index, template) in listOf("Clang", "Clang++", "CMake", "Makefile").withIndex()) {
+            val project = File(directory, "new-$index")
+            assertTrue(template, activity.createProject(project.name, template, false, false))
+            assertEquals(project.path, Project.rootPath)
+            assertTrue(File(project, "termuide.json").isFile)
+            assertFalse(File(project, "termuc.json").exists())
+            assertTrue(Project.read(File(project, Project.PROJ)).buildCmd.isNotEmpty())
+            assertEquals(listOf(fragment.file.path), activity.openFilePaths)
+            assertTrue(app.documents.isDirty(fragment.file.path))
+            activity.onFileSelected("..")
+            assertEquals(directory.path, activity.directoryPath)
+        }
+        app.documents.flush()
+        assertEquals(draft, app.documents.recoveryText(fragment.file.path))
+    }
+
     @Test fun projectSaveUsesTheBackgroundWriterAndRetainsRecentlySavedCommands() {
         configuration.writeText("""{"buildCmd":"new-build","runCmd":"new-run","outputDir":"new-output"}""")
         app.saver.shutdown()

@@ -277,6 +277,44 @@ class DocumentSessionsTest {
         }
     }
 
+    @Test fun staleSaveCompletionCannotClearAReopenedDocumentsRecovery() {
+        val source = temporary.newFile("reopened.c").apply { writeText("original") }
+        sessions().use { owner ->
+            owner.open(source.path) { "old draft" }
+            owner.changed(source.path)
+            val saving = owner.prepareSave(source.path)
+            owner.discard(source.path)
+            owner.open(source.path) { "new owner draft" }
+            owner.changed(source.path)
+            assertFalse(owner.owns(saving))
+            assertFalse(owner.completeSave(saving))
+            assertTrue(owner.isDirty(source.path))
+        }
+        sessions().use { restored ->
+            assertEquals("new owner draft", restored.recoveryText(source.path))
+            assertTrue(restored.isDirty(source.path))
+        }
+        assertEquals("original", source.readText())
+    }
+
+    @Test fun editsAfterASavePointStayRecoverableAfterRestart() {
+        val source = temporary.newFile("newer.py").apply { writeText("original") }
+        val text = AtomicReference("saving this revision")
+        sessions().use { owner ->
+            owner.open(source.path) { text.get() }
+            owner.changed(source.path)
+            val saving = owner.prepareSave(source.path)
+            text.set("newer edits\r\n🙂\uD800")
+            owner.changed(source.path)
+            assertFalse(owner.completeSave(saving))
+        }
+        sessions().use { restored ->
+            assertEquals(text.get(), restored.recoveryText(source.path))
+            assertTrue(restored.isDirty(source.path))
+        }
+        assertEquals("original", source.readText())
+    }
+
     @Test fun versionOneDraftsRemainReadableWithoutLosingUtf16Text() {
         val path = temporary.newFile("legacy.cpp").path
         val text = "legacy\r\n🧪\uD800"
