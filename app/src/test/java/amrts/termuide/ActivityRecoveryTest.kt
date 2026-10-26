@@ -246,7 +246,8 @@ class ActivityRecoveryTest {
         org.junit.Assume.assumeTrue("Enabled by the GitHub prerelease workflow", System.getenv("TERMUIDE_PYLSP_INTEGRATION") == "1")
         val file = directory.resolve("main.py").apply { writeText("# original source\n") }
         directory.resolve("sibling.py").writeText("greeting = 'hello'\n")
-        val draft = "import sibling\nsibling.gre"
+        directory.resolve("data-file.txt").writeText("example")
+        val draft = "import sibling\nlabel = '🧪'; sibling.gre; suffix = 1"
         app.documents.open(file.path) { draft }
         app.documents.changed(file.path)
         app.documents.flush()
@@ -278,15 +279,28 @@ class ActivityRecoveryTest {
             }
             assertTrue(lsp.supports("completionProvider"))
             assertFalse(lsp.supports("semanticTokensProvider"))
-            activity.editor.setSelection(draft.length)
-            assertTrue(lsp.completionTry(file, 1, "sibling.gre".length, 'e'))
+            val caret = draft.indexOf("; suffix")
+            activity.editor.setSelection(caret)
+            val position = cn.rbc.codeeditor.util.TextPositions(draft).position(caret)
+            assertTrue(lsp.completionTry(file, position[0], position[1], 'e'.code))
             await("pylsp did not provide sibling-module completion") { activity.editor.autoCompletePanel.isShow }
             val items = EditorCompletionPanel::class.java.getDeclaredField("items").apply { isAccessible = true }
                 .get(activity.editor.autoCompletePanel) as List<*>
             val index = items.indexOfFirst { (it as cn.rbc.codeeditor.view.autocomplete.ListItem).label == "greeting" }
             assertTrue("Missing greeting completion: $items", index >= 0)
             activity.editor.autoCompletePanel.select(index)
-            assertEquals("import sibling\nsibling.greeting", activity.editor.text.toString())
+            assertEquals("import sibling\nlabel = '🧪'; sibling.greeting; suffix = 1", activity.editor.text.toString())
+            activity.editor.setSelection(0, activity.editor.text.length() - 1)
+            activity.editor.paste("open('data-fi")
+            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+            assertTrue(lsp.completionTry(file, 0, activity.editor.caretPosition, 'i'.code))
+            await("pylsp did not provide filename completion") { activity.editor.autoCompletePanel.isShow }
+            val files = EditorCompletionPanel::class.java.getDeclaredField("items").apply { isAccessible = true }
+                .get(activity.editor.autoCompletePanel) as List<*>
+            val fileIndex = files.indexOfFirst { (it as cn.rbc.codeeditor.view.autocomplete.ListItem).label == "data-file.txt" }
+            assertTrue("Missing data-file.txt completion", fileIndex >= 0)
+            activity.editor.autoCompletePanel.select(fileIndex)
+            assertEquals("open('data-file.txt", activity.editor.text.toString())
             app.documents.flush()
             assertEquals(activity.editor.text.toString(), app.documents.recoveryText(file.path))
             assertEquals("# original source\n", file.readText())
@@ -298,6 +312,96 @@ class ActivityRecoveryTest {
             reader.join(3000)
             assertFalse("LSP reader did not terminate", reader.isAlive)
         }
+    }
+
+    @Test fun rotationAfterStateCaptureKeepsServerVersionsAndPendingDraftsCurrent() {
+        val file = directory.resolve("main.py").apply { writeText("value = 1") }
+        val activity = launch()
+        controller!!.visible()
+        activity.openFile(file)
+        activity.fragmentManager.executePendingTransactions()
+        val fragment = activity.fragmentManager.findFragmentByTag(file.path) as EditFragment
+        val lsp = fragment.languageServer()
+        lsp.connectedSender()
+        Application.completion = "s"
+        try {
+            fragment.onOpen(activity.editor.text)
+            val state = Bundle()
+            controller!!.saveInstanceState(state)
+            activity.editor.paste("# pending\n")
+            controller!!.pause().stop().destroy()
+            controller = null
+            val synchronizedVersion = lsp.documentVersion(file)
+            val restored = launch(state)
+            restored.fragmentManager.executePendingTransactions()
+            val restoredFragment = restored.fragmentManager.findFragmentByTag(file.path) as EditFragment
+            assertTrue(restoredFragment.version >= synchronizedVersion)
+            restored.editor.paste("# after rotation\n")
+            restoredFragment.flushLanguageChange()
+            assertTrue(lsp.documentVersion(file) > synchronizedVersion)
+            assertEquals(restoredFragment.version, lsp.documentVersion(file))
+            assertEquals(restored.editor.text.toString(), lsp.text(file))
+            app.documents.flush()
+            assertEquals(restored.editor.text.toString(), app.documents.recoveryText(file.path))
+            assertEquals("value = 1", file.readText())
+        } finally { Application.completion = "n" }
+    }
+
+    @Test fun pythonDiagnosticsConvertCodePointColumnsAndRejectUnsynchronizedBuffers() {
+        val text = "label = '🧪'; missing"
+        val file = directory.resolve("main.py").apply { writeText(text) }
+        val activity = launch()
+        activity.openFile(file)
+        activity.fragmentManager.executePendingTransactions()
+        val fragment = activity.fragmentManager.findFragmentByTag(file.path) as EditFragment
+        val lsp = fragment.languageServer()
+        lsp.connectedSender()
+        fragment.onOpen(activity.editor.text)
+        val start = text.indexOf("missing")
+        fun publish(message: String) {
+            val diagnostic = org.json.JSONObject().put("message", message).put("range", org.json.JSONObject()
+                .put("start", org.json.JSONObject().put("line", 0).put("character", start - 1))
+                .put("end", org.json.JSONObject().put("line", 0).put("character", text.length - 1)))
+            val notification = org.json.JSONObject().put("method", "textDocument/publishDiagnostics").put("params",
+                org.json.JSONObject().put("uri", file.toURI().toString()).put("diagnostics", org.json.JSONArray().put(diagnostic)))
+            app.hand.handleMessage(android.os.Message.obtain().apply { obj = lsp.incoming(notification.toString()) })
+        }
+        publish("unicode diagnostic")
+        assertEquals(start, activity.editor.text.diag.single().stc)
+        activity.editor.paste("new ")
+        publish("stale diagnostic")
+        assertEquals("unicode diagnostic", activity.editor.text.diag.single().msg)
+    }
+
+    @Test fun staleRenameCannotChangeAnotherEditedTabOrItsRecovery() {
+        val first = directory.resolve("first.c").apply { writeText("first") }
+        val second = directory.resolve("second.c").apply { writeText("second") }
+        val activity = launch()
+        activity.openFile(first)
+        activity.fragmentManager.executePendingTransactions()
+        activity.openFile(second)
+        activity.fragmentManager.executePendingTransactions()
+        val firstFragment = activity.fragmentManager.findFragmentByTag(first.path) as EditFragment
+        val secondFragment = activity.fragmentManager.findFragmentByTag(second.path) as EditFragment
+        val firstEditor = requireNotNull(firstFragment.view)
+        val secondEditor = requireNotNull(secondFragment.view)
+        val lsp = firstFragment.languageServer()
+        secondFragment.languageServer()
+        lsp.connectedSender()
+        activity.selectItem(activity.openFilePaths.indexOf(first.path))
+        val id = lsp.request(first, Lsp.RENAM)
+        secondEditor.paste("new ")
+        fun replace(length: Int) = org.json.JSONArray().put(org.json.JSONObject().put("newText", "wrong")
+            .put("range", org.json.JSONObject().put("start", org.json.JSONObject().put("line", 0).put("character", 0))
+                .put("end", org.json.JSONObject().put("line", 0).put("character", length))))
+        val changes = org.json.JSONObject().put(first.toURI().toString(), replace(5)).put(second.toURI().toString(), replace(6))
+        val response = org.json.JSONObject().put("id", id).put("result", org.json.JSONObject().put("changes", changes))
+        app.hand.handleMessage(android.os.Message.obtain().apply { obj = lsp.incoming(response.toString()) })
+        assertEquals("first", firstEditor.text.toString())
+        assertEquals("new second", secondEditor.text.toString())
+        app.documents.flush()
+        assertEquals("new second", app.documents.recoveryText(second.path))
+        assertEquals("second", second.readText())
     }
 
     @Test fun pythonDisconnectCannotClearNativeDiagnostics() {

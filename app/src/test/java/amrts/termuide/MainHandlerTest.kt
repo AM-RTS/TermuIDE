@@ -201,6 +201,49 @@ class MainHandlerTest {
         assertEquals("original", activity.field.text.toString())
     }
 
+    @Test fun pythonEditRangesCountCodePointsWithoutChangingNativeEditRanges() {
+        val text = "🧪 name"
+        val replacement = JSONArray().put(edit(0, 2, 6, "other"))
+        val python = app.languageServers.session(directory.resolve("main.py"), EditFragment.TYPE_PYTHON)!!
+        val converted = MainHandler.edits(python, text, replacement).single()
+        assertEquals(3, converted.start)
+        assertEquals(4, converted.len)
+        val native = MainHandler.edits(lsp, text, JSONArray().put(edit(0, 3, 7, "other"))).single()
+        assertEquals(converted.start, native.start)
+        assertEquals(converted.len, native.len)
+    }
+
+    @Test fun completionPrefixesHandleUnicodeIdentifiersAndWholeFileNames() {
+        val identifier = "𐐀name"
+        assertEquals(0, MainHandler.completionStart(identifier, identifier.length, 6))
+        val path = "open('sub/data-file"
+        assertEquals(path.indexOf("data-file"), MainHandler.completionStart(path, path.length, 17))
+    }
+
+    @Test fun workspaceEditCannotOverwriteAnotherServerSession() {
+        val file = directory.resolve("first.c").apply { writeText("original") }
+        open(file.path)
+        val python = app.languageServers.session(directory.resolve("main.py"), EditFragment.TYPE_PYTHON)!!
+        val changes = JSONObject().put(file.toURI().toString(), JSONArray().put(edit(0, 0, 8, "wrong")))
+        try { handler.applyWorkspaceEdit(python, null, JSONObject().put("changes", changes)); fail("Cross-session edit accepted") }
+        catch (error: java.io.IOException) { assertTrue(error.message!!.contains("another server")) }
+        assertEquals("original", file.readText())
+    }
+
+    @Test fun workspaceEditRejectsATabThatChangedOrClosedAfterTheRequest() {
+        val file = directory.resolve("first.c").apply { writeText("original") }
+        open(file.path)
+        val request = lsp.takeRequest(lsp.request(file, Lsp.RENAM))
+        val changes = JSONObject().put(file.toURI().toString(), JSONArray().put(edit(0, 0, 8, "wrong")))
+        app.documents.changed(file.path)
+        try { handler.applyWorkspaceEdit(lsp, request.revisions, JSONObject().put("changes", changes)); fail("Changed tab accepted") }
+        catch (_: java.io.IOException) {}
+        app.documents.discard(file.path)
+        try { handler.applyWorkspaceEdit(lsp, request.revisions, JSONObject().put("changes", changes)); fail("Closed tab accepted") }
+        catch (_: java.io.IOException) {}
+        assertEquals("original", file.readText())
+    }
+
     @Test fun positionsPreserveCrLfAndLoneCrLineBoundaries() {
         val positions = cn.rbc.codeeditor.util.TextPositions("one\r\ntwo\rthree\n")
         assertEquals(5, positions.offset(1, 0))

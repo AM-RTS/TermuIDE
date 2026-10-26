@@ -37,6 +37,10 @@ public class MainHandler extends Handler {
         EditFragment target = fragment(path);
         if (target != null) target.sourceSaved(document, timestamp);
     }
+    void synchronize(String path) {
+        EditFragment target = fragment(path);
+        if (target != null) target.flushLanguageChange();
+    }
     int[] selection(String path) {
         if (ma == null || ma.getEditor() == null || ma.getSelectedItem() < 0 || !path.equals(ma.getTag(ma.getSelectedItem()))) return new int[]{-1, -1};
         return new int[]{ma.getEditor().getSelectionStart(), ma.getEditor().getSelectionEnd()};
@@ -76,7 +80,7 @@ public class MainHandler extends Handler {
                 try {
                     if (ma == null) throw new IOException("Editor unavailable");
                     Object requestId = json.get("id");
-                    applyWorkspaceEdit(json.getJSONObject("params").getJSONObject("edit")).whenComplete((ignored, error) -> {
+                    applyWorkspaceEdit(lsp, null, json.getJSONObject("params").getJSONObject("edit")).whenComplete((ignored, error) -> {
                         if (!incoming.isCurrent()) return;
                         try {
                             JSONObject reply = new JSONObject().put("applied", error == null);
@@ -148,20 +152,20 @@ public class MainHandler extends Handler {
                     break;
                 }
                 case Lsp.FORMAT:
-                    if (result instanceof JSONArray) apply(editor, edits(editor.getText().toString(), (JSONArray)result));
+                    if (result instanceof JSONArray) apply(editor, edits(lsp, editor.getText().toString(), (JSONArray)result));
                     break;
                 case Lsp.HIGHLIGHT: {
                     List<Edit> highlights = new ArrayList<>();
                     TextPositions positions = new TextPositions(editor.getText().toString());
                     if (result instanceof JSONArray) for (int i = 0; i < ((JSONArray)result).length(); i++)
-                        highlights.add(range(positions, ((JSONArray)result).getJSONObject(i).getJSONObject("range"), null));
+                        highlights.add(range(lsp, positions, ((JSONArray)result).getJSONObject(i).getJSONObject("range"), null));
                     editor.getText().setHighlights(highlights); editor.postInvalidateOnAnimation();
                     break;
                 }
                 case Lsp.SEMTOK: semanticTokens(lsp, editor, result, request.path); break;
-                case Lsp.DEFIN: definition(result); break;
+                case Lsp.DEFIN: definition(lsp, result); break;
                 case Lsp.RENAM:
-                    if (result instanceof JSONObject) reportWorkspaceResult(applyWorkspaceEdit((JSONObject)result));
+                    if (result instanceof JSONObject) reportWorkspaceResult(applyWorkspaceEdit(lsp, request.revisions, (JSONObject)result));
                     break;
                 case Lsp.CODEACTION: codeActions(incoming, result, request); break;
             }
@@ -178,7 +182,7 @@ public class MainHandler extends Handler {
 
     private boolean sameRevision(String path, long revision) {
         for (DocumentSession session : Application.getInstance().getDocuments().getState().getValue())
-            if (path.equals(session.getPath())) return session.getRevision() == revision;
+            if (LanguageServers.path(new File(path)).equals(LanguageServers.path(new File(session.getPath())))) return session.getRevision() == revision;
         return revision == -1;
     }
 
@@ -210,38 +214,57 @@ public class MainHandler extends Handler {
         TextPositions positions = new TextPositions(text);
         if (values != null) for (int i = 0; i < values.length(); i++) {
             JSONObject value = values.getJSONObject(i);
+            if (value.optInt("insertTextFormat", 1) != 1) continue;
             ListItem item = new ListItem(); item.label = value.getString("label"); item.kind = value.optInt("kind", 1);
             JSONObject edit = value.optJSONObject("textEdit");
             if (edit != null) {
                 JSONObject bounds = edit.optJSONObject("range");
                 if (bounds == null) bounds = edit.getJSONObject("replace");
-                item.edits.add(range(positions, bounds, edit.getString("newText")));
+                item.edits.add(range(incoming.source, positions, bounds, edit.getString("newText")));
             } else if (value.has("insertText")) {
-                int end = editor.getCaretPosition(), start = end;
-                while (start > 0 && Character.isUnicodeIdentifierPart(text.charAt(start - 1))) start--;
+                int end = editor.getCaretPosition(), start = completionStart(text, end, item.kind);
                 Edit insertion = new Edit(); insertion.start = start; insertion.len = end - start;
                 insertion.text = value.getString("insertText"); item.edits.add(insertion);
             }
             JSONArray additional = value.optJSONArray("additionalTextEdits");
             if (additional != null) {
                 if (item.edits.isEmpty()) {
-                    int end = editor.getCaretPosition(), start = end;
-                    while (start > 0 && Character.isUnicodeIdentifierPart(text.charAt(start - 1))) start--;
+                    int end = editor.getCaretPosition(), start = completionStart(text, end, item.kind);
                     Edit insertion = new Edit(); insertion.start = start; insertion.len = end - start; insertion.text = item.label;
                     item.edits.add(insertion);
                 }
-                item.edits.addAll(edits(text, additional));
+                item.edits.addAll(edits(incoming.source, text, additional));
             }
+            if (item.edits.isEmpty()) {
+                Edit insertion = new Edit(); insertion.start = completionStart(text, editor.getCaretPosition(), item.kind);
+                insertion.len = editor.getCaretPosition() - insertion.start; insertion.text = item.label;
+                item.edits.add(insertion);
+            }
+            EditorTextEdits.validate(editor.getText(), item.edits);
             items.add(item);
         }
         editor.getAutoCompletePanel().update(items, incoming);
         if (editor.getAutoCompletePanel().isShow()) editor.getSigHelpPanel().hide();
     }
 
+    static int completionStart(String text, int end, int kind) {
+        int start = end;
+        while (start > 0) {
+            int codePoint = text.codePointBefore(start);
+            if (kind == 17) {
+                if (codePoint == '/' || codePoint == '\\' || codePoint == '\'' || codePoint == '"' || codePoint == '\n' || codePoint == '\r') break;
+            } else if (!Character.isUnicodeIdentifierPart(codePoint)) break;
+            start -= Character.charCount(codePoint);
+        }
+        return start;
+    }
+
     private void diagnostics(Lsp lsp, JSONObject params) throws JSONException {
         EditFragment fragment = fragment(file(params.getString("uri")).getPath());
         if (fragment == null || fragment.getView() == null || !Application.getInstance().languageServers.owns(lsp, fragment.getFile())) return;
         if (params.has("version") && !params.isNull("version") && params.getInt("version") != fragment.getVersion()) return;
+        if (lsp.documentVersion(fragment.getFile()) >= 0 && lsp.documentVersion(fragment.getFile()) != fragment.getVersion()) return;
+        TextPositions positions = new TextPositions(fragment.getView().getText().toString());
         JSONArray values = params.getJSONArray("diagnostics");
         List<ErrSpan> diagnostics = new ArrayList<>();
         for (int i = 0; i < values.length(); i++) {
@@ -249,8 +272,10 @@ public class MainHandler extends Handler {
             JSONObject start = range.getJSONObject("start"), end = range.getJSONObject("end");
             Diagnostic diagnostic = new Diagnostic();
             diagnostic.documentVersion = fragment.getVersion();
-            diagnostic.stl = start.getInt("line") + 1; diagnostic.stc = start.getInt("character");
-            diagnostic.enl = end.getInt("line") + 1; diagnostic.enc = end.getInt("character");
+            diagnostic.stl = start.getInt("line") + 1;
+            diagnostic.stc = lsp.codePointPositions() ? positions.position(lsp.offset(positions, diagnostic.stl - 1, start.getInt("character")))[1] : start.getInt("character");
+            diagnostic.enl = end.getInt("line") + 1;
+            diagnostic.enc = lsp.codePointPositions() ? positions.position(lsp.offset(positions, diagnostic.enl - 1, end.getInt("character")))[1] : end.getInt("character");
             diagnostic.severity = Math.max(0, Math.min(3, value.optInt("severity", 1) - 1));
             diagnostic.msg = value.optString("message"); diagnostic.code = value.opt("code");
             diagnostics.add(diagnostic);
@@ -272,15 +297,15 @@ public class MainHandler extends Handler {
             column += values.getInt(i + 1);
             int kind = lsp.nativeToken(values.getInt(i + 3));
             if (kind == Tokenizer.UNKNOWN) continue;
-            int start = positions.offset(line, column);
-            int end = positions.offset(line, column + values.getInt(i + 2));
+            int start = lsp.offset(positions, line, column);
+            int end = lsp.offset(positions, line, column + values.getInt(i + 2));
             tokens.add(new TextEditor.SemanticToken(start, end, kind));
             if (kind == Tokenizer.TYPE) types.add(text.substring(start, end));
         }
         cacheData.put(path, types); editor.getLanguage().setTypes(types); editor.setSemanticTokens(tokens);
     }
 
-    private void definition(Object result) throws JSONException {
+    private void definition(Lsp lsp, Object result) throws JSONException {
         if (result instanceof JSONArray) result = ((JSONArray)result).opt(0);
         if (!(result instanceof JSONObject)) return;
         JSONObject location = (JSONObject)result;
@@ -294,7 +319,7 @@ public class MainHandler extends Handler {
         if (fragment == null || fragment.getView() == null) return;
         TextEditor editor = fragment.getView();
         JSONObject start = range.getJSONObject("start");
-        editor.setSelection(new TextPositions(editor.getText().toString()).offset(start.getInt("line"), start.getInt("character")));
+        editor.setSelection(lsp.offset(new TextPositions(editor.getText().toString()), start.getInt("line"), start.getInt("character")));
         editor.requestFocus();
     }
 
@@ -307,7 +332,7 @@ public class MainHandler extends Handler {
             JSONObject command = value.optJSONObject("command");
             if (command == null && value.opt("command") instanceof String) command = value;
             if (command != null) { action.command = command.getString("command"); action.args = command.optJSONArray("arguments") == null ? "[]" : command.getJSONArray("arguments").toString(); }
-            action.origin = incoming;
+            action.origin = incoming; action.revisions = request.revisions;
             action.path = request.path; action.revision = request.revision;
             action.start = request.start; action.end = request.end;
             if (action.edit != null || action.command != null) actions.add(action);
@@ -322,7 +347,7 @@ public class MainHandler extends Handler {
         int[] current = selection(action.path);
         if (current[0] != action.start || current[1] != action.end) return;
         try {
-            CompletableFuture<Void> applied = action.edit == null ? CompletableFuture.completedFuture(null) : applyWorkspaceEdit(action.edit);
+            CompletableFuture<Void> applied = action.edit == null ? CompletableFuture.completedFuture(null) : applyWorkspaceEdit(action.origin.source, action.revisions, action.edit);
             reportWorkspaceResult(applied.thenRun(() -> {
                 if (action.command != null && action.origin.isCurrent()) action.origin.source.executeCommand(action);
             }));
@@ -356,18 +381,21 @@ public class MainHandler extends Handler {
         return new File(path);
     }
 
-    static List<Edit> edits(String text, JSONArray values) throws JSONException {
+    static List<Edit> edits(String text, JSONArray values) throws JSONException { return edits(null, text, values); }
+    static List<Edit> edits(Lsp lsp, String text, JSONArray values) throws JSONException {
         List<Edit> edits = new ArrayList<>();
         TextPositions positions = new TextPositions(text);
         for (int i = 0; i < values.length(); i++) {
-            JSONObject value = values.getJSONObject(i); edits.add(range(positions, value.getJSONObject("range"), value.getString("newText")));
+            JSONObject value = values.getJSONObject(i); edits.add(range(lsp, positions, value.getJSONObject("range"), value.getString("newText")));
         }
         return edits;
     }
-    private static Edit range(TextPositions positions, JSONObject range, String replacement) throws JSONException {
+    private static Edit range(Lsp lsp, TextPositions positions, JSONObject range, String replacement) throws JSONException {
         JSONObject start = range.getJSONObject("start"), end = range.getJSONObject("end");
-        Edit edit = new Edit(); edit.start = positions.offset(start.getInt("line"), start.getInt("character"));
-        edit.len = positions.offset(end.getInt("line"), end.getInt("character")) - edit.start; edit.text = replacement;
+        Edit edit = new Edit();
+        edit.start = lsp == null ? positions.offset(start.getInt("line"), start.getInt("character")) : lsp.offset(positions, start.getInt("line"), start.getInt("character"));
+        int right = lsp == null ? positions.offset(end.getInt("line"), end.getInt("character")) : lsp.offset(positions, end.getInt("line"), end.getInt("character"));
+        edit.len = right - edit.start; edit.text = replacement;
         if (edit.len < 0) throw new IllegalArgumentException("Reversed text range");
         return edit;
     }
@@ -389,6 +417,9 @@ public class MainHandler extends Handler {
     }
 
     CompletableFuture<Void> applyWorkspaceEdit(JSONObject workspace) throws IOException, JSONException {
+        return applyWorkspaceEdit(null, null, workspace);
+    }
+    CompletableFuture<Void> applyWorkspaceEdit(Lsp lsp, Map<String, Long> revisions, JSONObject workspace) throws IOException, JSONException {
         Map<String, JSONArray> changes = new LinkedHashMap<>();
         JSONObject simple = workspace.optJSONObject("changes");
         if (simple != null) { Iterator<String> keys = simple.keys(); while (keys.hasNext()) { String uri = keys.next(); changes.put(uri, simple.getJSONArray(uri)); } }
@@ -406,11 +437,24 @@ public class MainHandler extends Handler {
         Set<String> seen = new HashSet<>();
         for (Map.Entry<String, JSONArray> change : changes.entrySet()) {
             File file = file(change.getKey()); EditFragment fragment = fragment(file.getPath());
+            if (revisions != null && revisions.containsKey(LanguageServers.path(file))
+                && !sameRevision(file.getAbsolutePath(), revisions.get(LanguageServers.path(file))))
+                throw new IOException("Workspace document changed or closed after the request");
             if (Application.getInstance().saver.isSaving(file.getAbsolutePath())) throw new IOException("Document is being saved");
             if (!seen.add(file.toPath().normalize().toString())) throw new IOException("Duplicate workspace document");
+            Lsp owner = Application.getInstance().languageServers.find(file);
+            if (lsp != null && owner != null && owner != lsp) throw new IOException("Workspace document belongs to another server session");
             if (fragment != null && fragment.getView() != null) {
                 Document document = fragment.getView().getText();
-                List<Edit> edits = edits(document.toString(), change.getValue());
+                if (revisions != null) {
+                    Long expected = revisions.get(LanguageServers.path(file));
+                    if (expected == null || !sameRevision(fragment.getFile().getAbsolutePath(), expected))
+                        throw new IOException("Workspace document changed after the request");
+                }
+                String synchronizedText = lsp == null ? null : lsp.text(fragment.getFile());
+                if (synchronizedText != null && !synchronizedText.equals(document.toString()))
+                    throw new IOException("Workspace document has pending local edits");
+                List<Edit> edits = edits(lsp, document.toString(), change.getValue());
                 EditorTextEdits.validate(document, edits);
                 prepared.add(new WorkspaceChange(file, fragment.getView(), document, edits));
                 continue;
@@ -425,7 +469,7 @@ public class MainHandler extends Handler {
                 original = text.toString();
             }
             Document document = new Document(null); document.setText(original); document.clearSpans(); document.analyzeWordWrap();
-            List<Edit> edits = edits(original, change.getValue());
+            List<Edit> edits = edits(lsp, original, change.getValue());
             EditorTextEdits.validate(document, edits);
             prepared.add(new WorkspaceChange(file, null, document, edits));
         }

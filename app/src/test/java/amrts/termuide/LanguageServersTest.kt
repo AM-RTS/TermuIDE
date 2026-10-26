@@ -117,6 +117,68 @@ class LanguageServersTest {
             .getJSONObject("completion").getJSONObject("completionItem").getBoolean("snippetSupport"))
     }
 
+    @Test fun quoteTriggersRemainValidJsonAndNativePositionsRemainUtf16() {
+        val file = File("/workspace/main.c")
+        val lsp = servers.session(file, EditFragment.TYPE_C)!!
+        val sender = lsp.connectedSender()
+        lsp.didOpen(file, "c", 0, "/*🧪*/ name")
+        lsp.setCompTrigs(charArrayOf('"', '\\'))
+        lsp.setSigTrigs(charArrayOf('"', '\\'))
+        sender.clear()
+        lsp.completionTry(file, 0, 11, '"'.code)
+        lsp.signatureHelpTry(file, 0, 11, '\\', false)
+        val messages = sender.map { JSONObject(String(it, Charsets.UTF_8)) }
+        assertEquals("\"", messages[0].getJSONObject("params").getJSONObject("context").getString("triggerCharacter"))
+        assertEquals("\\", messages[1].getJSONObject("params").getJSONObject("context").getString("triggerCharacter"))
+        assertEquals(11, messages[0].getJSONObject("params").getJSONObject("position").getInt("character"))
+    }
+
+    @Test fun pythonPositionsUseCodePointsAndExplicitUtf16NegotiationTakesPrecedence() {
+        val file = File("/workspace/main.py")
+        val lsp = servers.session(file, EditFragment.TYPE_PYTHON)!!
+        val sender = lsp.connectedSender()
+        val text = "label = '🧪'; name; suffix = 1"
+        lsp.didOpen(file, "python", 0, text)
+        val caret = text.indexOf("; suffix")
+        sender.clear()
+        lsp.completionTry(file, 0, caret, 'e'.code)
+        var message = JSONObject(String(sender.remove(), Charsets.UTF_8)).getJSONObject("params")
+        assertEquals(caret - 1, message.getJSONObject("position").getInt("character"))
+        val positions = cn.rbc.codeeditor.util.TextPositions(text)
+        assertEquals(caret, lsp.offset(positions, 0, caret - 1))
+        lsp.setCapabilities(JSONObject().put("positionEncoding", "utf-16").put("completionProvider", JSONObject()))
+        lsp.completionTry(file, 0, caret, 'e'.code)
+        message = JSONObject(String(sender.remove(), Charsets.UTF_8)).getJSONObject("params")
+        assertEquals(caret, message.getJSONObject("position").getInt("character"))
+    }
+
+    @Test fun reopeningADocumentKeepsVersionsIncreasingAndRangeChangesKeepTheSnapshotCurrent() {
+        val file = File("/workspace/main.py")
+        val lsp = servers.session(file, EditFragment.TYPE_PYTHON)!!
+        lsp.connectedSender()
+        lsp.didOpen(file, "python", 0, "a🧪b")
+        assertEquals(1, lsp.documentVersion(file))
+        val change = cn.rbc.codeeditor.util.Range().apply { stl = 0; stc = 1; enl = 0; enc = 3; msg = "x" }
+        lsp.didChange(file, 2, listOf(change))
+        assertEquals("axb", lsp.text(file))
+        lsp.didClose(file)
+        assertNull(lsp.text(file))
+        assertTrue(lsp.didOpen(file, "python", 0, "reopened"))
+        assertEquals(3, lsp.documentVersion(file))
+    }
+
+    @Test fun shutdownDropsObsoleteQueuedRequestsBeforeSendingExit() {
+        val file = File("/workspace/main.c")
+        val lsp = servers.session(file, EditFragment.TYPE_C)!!
+        val sender = lsp.connectedSender()
+        lsp.didOpen(file, "c", 0, "int value;")
+        lsp.completionTry(file, 0, 3, 't'.code)
+        lsp.end()
+        val methods = sender.filter { it.isNotEmpty() }.map { JSONObject(String(it, Charsets.UTF_8)).getString("method") }
+        assertEquals(listOf("shutdown", "exit"), methods)
+        assertTrue(sender.stopped)
+    }
+
     @Test fun pythonCapabilitiesSuppressUnsupportedNativeRequests() {
         val file = File("/workspace/main.py")
         val python = servers.session(file, EditFragment.TYPE_PYTHON)!!

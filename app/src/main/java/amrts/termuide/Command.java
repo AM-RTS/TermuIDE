@@ -7,6 +7,7 @@ public class Command
     String args;
     org.json.JSONObject edit;
     Lsp.Incoming origin;
+    java.util.Map<String, Long> revisions;
     String path;
     long revision;
     int start, end;

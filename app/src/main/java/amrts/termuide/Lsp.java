@@ -34,7 +34,12 @@ public final class Lsp implements Runnable {
     private volatile int generation;
     private boolean started;
     private volatile boolean failed;
-    private final Set<String> opened = new HashSet<>();
+    private static final class OpenDocument {
+        int version;
+        String text;
+        OpenDocument(int version, String text) { this.version = version; this.text = text; }
+    }
+    private final Map<String, OpenDocument> opened = new HashMap<>();
     private JSONObject capabilities;
     Lsp() { this(LanguageServers.Server.CLANGD, null, Application.lsp_host, Application.lsp_port); }
     Lsp(LanguageServers.Server server, String root, String host, int port) {
@@ -54,19 +59,24 @@ public final class Lsp implements Runnable {
         final String path;
         final long revision;
         final int start, end;
-        Request(int kind, String path, long revision, int[] selection) {
-            this.kind = kind; this.path = path; this.revision = revision; start = selection[0]; end = selection[1];
+        final Map<String, Long> revisions;
+        Request(int kind, String path, long revision, int[] selection, Map<String, Long> revisions) {
+            this.kind = kind; this.path = path; this.revision = revision; start = selection[0]; end = selection[1]; this.revisions = revisions;
         }
     }
     int request(File file, int kind) {
         String path = file.getAbsolutePath();
+        MainHandler handler = Application.getInstance().hand;
+        if (handler != null) handler.synchronize(path);
         long revision = -1;
-        for (DocumentSession session : Application.getInstance().getDocuments().getState().getValue())
-            if (path.equals(session.getPath())) { revision = session.getRevision(); break; }
+        Map<String, Long> revisions = new HashMap<>();
+        for (DocumentSession session : Application.getInstance().getDocuments().getState().getValue()) {
+            revisions.put(LanguageServers.path(new File(session.getPath())), session.getRevision());
+            if (path.equals(session.getPath())) revision = session.getRevision();
+        }
         int id = nextRequest.getAndIncrement();
         requests.entrySet().removeIf(entry -> entry.getValue().kind == kind && entry.getValue().path.equals(path));
-        MainHandler handler = Application.getInstance().hand;
-        requests.put(id, new Request(kind, path, revision, handler == null ? new int[]{-1, -1} : handler.selection(path)));
+        requests.put(id, new Request(kind, path, revision, handler == null ? new int[]{-1, -1} : handler.selection(path), revisions));
         return id;
     }
     Request takeRequest(int id) { return requests.remove(id); }
@@ -110,11 +120,16 @@ public final class Lsp implements Runnable {
         opened.clear();
         requests.clear();
         Sender sender = mSndr;
-        // Drain shutdown/exit before the sentinel closes the socket, including an in-flight connection.
+        sender.stopped = true;
+        sender.clear();
+        // Pending edits/requests are obsolete; allow a short graceful exit, then force socket release.
+        Socket connection = sender.socket;
+        if (connection != null && mRead != null) mRead.postDelayed(() -> {
+            try { connection.close(); } catch (IOException ignored) { }
+        }, 1000);
         sender.offer(wrap("shutdown", "{}", 99).getBytes(StandardCharsets.UTF_8));
         sender.offer(wrap("exit", "{}", -1).getBytes(StandardCharsets.UTF_8));
         sender.offer(TERM);
-        sender.stopped = true;
         started = false;
     }
 
@@ -129,6 +144,7 @@ public final class Lsp implements Runnable {
     private void run(Sender sender, Handler reader, int epoch) {
 		int i = 0;
 		Socket connection = null;
+        Runnable initializationDeadline = null;
 		try{
 			do {
                 if (sender.stopped || sender != mSndr) return;
@@ -144,35 +160,26 @@ public final class Lsp implements Runnable {
 			if (connection == null || !connection.isConnected())
 				throw new IOException("Connection failed");
             if (sender.stopped || sender != mSndr) return;
+            final Socket transport = connection;
+            initializationDeadline = () -> {
+                if (!ready && epoch == generation && sender == mSndr) {
+                    try { transport.close(); } catch (IOException ignored) { }
+                }
+            };
+            reader.postDelayed(initializationDeadline, 30000);
             sk = connection;
             sender.socket = connection;
             new Thread(sender).start();
             BufferedInputStream br = new BufferedInputStream(connection.getInputStream());
-            final int ctlen = CONTENTLEN.length;
-            final byte[] lnbf = new byte[128];
-            while (true) {
-                int len = 0;
-                while ((i = Utils.readLine(br, lnbf)) > 0) {
-                    if (i > ctlen && Utils.arrNEquals(lnbf, CONTENTLEN, ctlen)) {
-                        len = Integer.parseInt(new String(lnbf, ctlen, i - ctlen));
-                    }
-                }
-                if (i < 0)
-                    break;
-                Message msg = new Message();
-                msg.what = tp;
-                byte[] strb = new byte[len];
-                for (i = 0; i < len;) {
-                    int count = br.read(strb, i, len - i);
-                    if (count < 0) throw new EOFException("Incomplete language-server message");
-                    i += count;
-                }
-                msg.obj = new Incoming(this, epoch, new String(strb, StandardCharsets.UTF_8));
+            for (String payload; (payload = readPayload(br)) != null;) {
+                Message msg = Message.obtain();
+                msg.obj = new Incoming(this, epoch, payload);
                 if (sender == mSndr && !sender.stopped) reader.sendMessage(msg);
             }
 		} catch (Exception ioe) {
 			Log.e(TAG, "Language-server connection ended", ioe);
 		} finally {
+            if (initializationDeadline != null) reader.removeCallbacks(initializationDeadline);
             sender.offer(TERM);
             try { if (connection != null) connection.close(); } catch (IOException ignored) { }
             if (sender == mSndr) {
@@ -185,6 +192,47 @@ public final class Lsp implements Runnable {
             }
         }
 	}
+
+    static String readPayload(InputStream input) throws IOException {
+        int length = -1, headerBytes = 0;
+        for (;;) {
+            ByteArrayOutputStream line = new ByteArrayOutputStream();
+            for (;;) {
+                int value = input.read();
+                if (value < 0) {
+                    if (headerBytes == 0) return null;
+                    throw new EOFException("Incomplete language-server header");
+                }
+                if (++headerBytes > 8192) throw new IOException("Language-server header is too large");
+                if (value == '\r') {
+                    if (input.read() != '\n') throw new IOException("Malformed language-server header");
+                    if (++headerBytes > 8192) throw new IOException("Language-server header is too large");
+                    break;
+                }
+                if (value == '\n' || value > 127) throw new IOException("Malformed language-server header");
+                line.write(value);
+            }
+            String header = line.toString(StandardCharsets.US_ASCII.name());
+            if (header.isEmpty()) break;
+            int colon = header.indexOf(':');
+            if (colon < 1) throw new IOException("Malformed language-server header");
+            if ("Content-Length".equalsIgnoreCase(header.substring(0, colon))) {
+                if (length >= 0) throw new IOException("Duplicate Content-Length");
+                try { length = Integer.parseInt(header.substring(colon + 1).trim()); }
+                catch (NumberFormatException error) { throw new IOException("Invalid Content-Length", error); }
+                // Bound server-controlled allocations; large/malformed replies must not kill recovery.
+                if (length <= 0 || length > 64 * 1024 * 1024) throw new IOException("Invalid Content-Length");
+            }
+        }
+        if (length < 0) throw new IOException("Missing Content-Length");
+        byte[] payload = new byte[length];
+        for (int offset = 0; offset < length;) {
+            int count = input.read(payload, offset, length - offset);
+            if (count < 0) throw new EOFException("Incomplete language-server message");
+            offset += count;
+        }
+        return StandardCharsets.UTF_8.newDecoder().decode(java.nio.ByteBuffer.wrap(payload)).toString();
+    }
 
 	protected static String wrap(String m, Object p, int id) {
 		StringBuilder s = new StringBuilder("{\"jsonrpc\":\"2.0\"");
@@ -201,7 +249,7 @@ public final class Lsp implements Runnable {
 		tp = INITIALIZE;
 		StringBuilder sb = new StringBuilder("{\"processId\":");
 		sb.append("null"); // Termux cannot use this app's PID to monitor its parent.
-		sb.append(",\"capabilities\":{\"workspace\":{\"applyEdit\":true,\"workspaceFolders\":true},\"textDocument\":{\"completion\":{\"completionItem\":{\"snippetSupport\":false}},\"publishDiagnostics\":{\"versionSupport\":true}}}");
+		sb.append(",\"capabilities\":{\"general\":{\"positionEncodings\":[\"utf-16\",\"utf-32\"]},\"workspace\":{\"applyEdit\":true,\"workspaceFolders\":true},\"textDocument\":{\"completion\":{\"completionItem\":{\"snippetSupport\":false}},\"publishDiagnostics\":{\"versionSupport\":true}}}");
 		if (root!=null) {
 			sb.append(",\"rootUri\":");
 			sb.append(JSONObject.quote(new File(root).toURI().toString()));
@@ -216,7 +264,7 @@ public final class Lsp implements Runnable {
 		compTrigs = c;
 	}
 
-	public byte isCompTrig(char c) {
+	public byte isCompTrig(int c) {
 		if (Character.isJavaIdentifierPart(c))
 			return 1;
 		for (int i=0,l=compTrigs.length; i<l; i++)
@@ -271,6 +319,7 @@ public final class Lsp implements Runnable {
     }
 
 	public void initialized() {
+        if (isEnded()) return;
 		tp = INITIALIZED;
 		mSndr.send("initialized", new HashMap<>(), -1);
         requests.clear();
@@ -278,7 +327,9 @@ public final class Lsp implements Runnable {
 	}
 
 	public void didClose(File f) {
-        if (!opened.remove(LanguageServers.path(f))) return;
+        OpenDocument document = opened.get(LanguageServers.path(f));
+        if (document == null || document.text == null) return;
+        document.text = null;
         requests.entrySet().removeIf(entry -> entry.getValue().path.equals(f.getAbsolutePath()));
 		HashMap<String,String> m = new HashMap<>();
 		m.put("uri", Uri.fromFile(f).toString());
@@ -289,7 +340,11 @@ public final class Lsp implements Runnable {
 	}
 
     public boolean didOpen(File f, String lang, int version, String ct) {
-        if (!ready || isEnded() || !opened.add(LanguageServers.path(f))) return false;
+        if (!ready || isEnded()) return false;
+        OpenDocument previous = opened.get(LanguageServers.path(f));
+        if (previous != null && previous.text != null) return false;
+        version = Math.max(version, previous == null ? (server == LanguageServers.Server.PYTHON ? 1 : 0) : previous.version + 1);
+        opened.put(LanguageServers.path(f), new OpenDocument(version, ct));
 		StringBuilder m = new StringBuilder("{\"textDocument\":{\"uri\":");
 		m.append(JSONObject.quote(Uri.fromFile(f).toString()));
 		m.append(",\"languageId\":\"");m.append(lang);
@@ -302,7 +357,7 @@ public final class Lsp implements Runnable {
 	}
 
 	public void didSave(File f) {
-        if (!opened.contains(LanguageServers.path(f))) return;
+        if (text(f) == null) return;
 		StringBuilder s = new StringBuilder("{\"textDocument\":{\"uri\":");
 		s.append(JSONObject.quote(Uri.fromFile(f).toString()));
 		s.append("}}");
@@ -311,7 +366,8 @@ public final class Lsp implements Runnable {
 	}
 
 	public void didChange(File f, int version, String text) {
-        if (!opened.contains(LanguageServers.path(f))) return;
+        if (text(f) == null || !ready || isEnded()) return;
+        opened.put(LanguageServers.path(f), new OpenDocument(version, text));
 		StringBuilder sb = new StringBuilder("{\"textDocument\":{\"uri\":");
 		sb.append(JSONObject.quote(Uri.fromFile(f).toString()));
 		sb.append(",\"version\":");
@@ -323,35 +379,43 @@ public final class Lsp implements Runnable {
 		mSndr.send("textDocument/didChange", sb.toString(), -1);
 	}
 
-	public void didChange(File f, int version, List<Range> chs) {
-        if (!opened.contains(LanguageServers.path(f))) return;
-		StringBuilder sb = new StringBuilder("{\"textDocument\":{\"uri\":");
-		sb.append(JSONObject.quote(Uri.fromFile(f).toString()));
-		sb.append(",\"version\":");
-		sb.append(version);
-		sb.append("},\"contentChanges\":[");
-		for (int i=0,j=chs.size(); i<j; i++) {
-			Range c = chs.get(i);
-			sb.append("{\"range\":{\"start\":{\"line\":");
-			sb.append(c.stl);
-			sb.append(",\"character\":");
-			sb.append(c.stc);
-			sb.append("},\"end\":{\"line\":");
-			sb.append(c.enl);
-			sb.append(",\"character\":");
-			sb.append(c.enc);
-			sb.append("}},\"text\":");
-			sb.append(JSONObject.quote(c.msg));
-			sb.append("},");
-		}
-		if (!chs.isEmpty()) sb.setLength(sb.length() - 1);
-        sb.append(']');
-		sb.append('}');
-		tp = CHANGE;
-		mSndr.send("textDocument/didChange", sb.toString(), -1);
-	}
+    public void didChange(File file, int version, List<Range> changes) {
+        String original = text(file);
+        if (original == null) return;
+        StringBuilder updated = new StringBuilder(original);
+        for (Range change : changes) {
+            TextPositions positions = new TextPositions(updated.toString());
+            int start = positions.offset(change.stl, change.stc), end = positions.offset(change.enl, change.enc);
+            if (end < start) throw new IllegalArgumentException("Reversed change range");
+            updated.replace(start, end, change.msg);
+        }
+        didChange(file, version, updated.toString());
+    }
 
-	public boolean completionTry(File f, int l, int c, char tgc) {
+    String text(File file) {
+        OpenDocument document = opened.get(LanguageServers.path(file));
+        return document == null ? null : document.text;
+    }
+    int documentVersion(File file) {
+        OpenDocument document = opened.get(LanguageServers.path(file));
+        return document == null ? -1 : document.version;
+    }
+    boolean codePointPositions() {
+        String encoding = capabilities == null ? "" : capabilities.optString("positionEncoding");
+        // pylsp/Jedi currently counts Python code points without advertising positionEncoding.
+        return "utf-32".equals(encoding) || (encoding.isEmpty() && server == LanguageServers.Server.PYTHON);
+    }
+    int column(File file, int line, int utf16Column) {
+        MainHandler handler = Application.getInstance().hand;
+        if (handler != null) handler.synchronize(file.getAbsolutePath());
+        String text = text(file);
+        return !codePointPositions() || text == null ? utf16Column : new TextPositions(text).codePointColumn(line, utf16Column);
+    }
+    int offset(TextPositions positions, int line, int column) {
+        return codePointPositions() ? positions.codePointOffset(line, column) : positions.offset(line, column);
+    }
+
+	public boolean completionTry(File f, int l, int c, int tgc) {
         if (!supports("completionProvider")) return false;
 		byte b = isCompTrig(tgc);
 		if (b==0)
@@ -361,13 +425,12 @@ public final class Lsp implements Runnable {
 		sb.append("},\"position\":{\"line\":");
 		sb.append(l);
 		sb.append(",\"character\":");
-		sb.append(c);
+		sb.append(column(f, l, c));
 		sb.append("},\"context\":{\"triggerKind\":");
 		sb.append(b);
 		if (b==2) {
-			sb.append(",\"triggerCharacter\":\"");
-			sb.append(tgc);
-			sb.append('"');
+			sb.append(",\"triggerCharacter\":");
+            sb.append(JSONObject.quote(new String(Character.toChars(tgc))));
 		}
 		sb.append("}}");
 		tp = COMPLETION;
@@ -384,10 +447,10 @@ public final class Lsp implements Runnable {
         sb.append("},\"position\":{\"line\":");
         sb.append(l);
         sb.append(",\"character\":");
-        sb.append(c);
-        sb.append("},\"context\":{\"triggerKind\":2,\"triggerCharacter\":\"");
-        sb.append(tgc);
-        sb.append("\",\"isRetrigger\":");
+        sb.append(column(f, l, c));
+        sb.append("},\"context\":{\"triggerKind\":2,\"triggerCharacter\":");
+        sb.append(JSONObject.quote(Character.toString(tgc)));
+        sb.append(",\"isRetrigger\":");
         sb.append(retrig);
         sb.append("}}");
         tp = SIGN_HELP;
@@ -416,11 +479,11 @@ public final class Lsp implements Runnable {
 		sb.append("},\"range\":{\"start\":{\"line\":");
 		sb.append(range.stl);
 		sb.append(",\"character\":");
-		sb.append(range.stc);
+		sb.append(column(fl, range.stl, range.stc));
 		sb.append("},\"end\":{\"line\":");
 		sb.append(range.enl);
 		sb.append(",\"character\":");
-		sb.append(range.enc);
+		sb.append(column(fl, range.enl, range.enc));
 		sb.append("}},\"options\":{\"tabSize\":");
 		sb.append(tabSize);
 		sb.append(",\"insertSpaces\":");
@@ -437,7 +500,7 @@ public final class Lsp implements Runnable {
 		sb.append("},\"position\":{\"line\":");
 		sb.append(l);
 		sb.append(",\"character\":");
-		sb.append(c);
+		sb.append(column(fl, l, c));
 		sb.append("}}");
         tp = HIGHLIGHT;
 		mSndr.send("textDocument/documentHighlight", sb.toString(), request(fl, HIGHLIGHT));
@@ -450,21 +513,21 @@ public final class Lsp implements Runnable {
         sb.append("},\"range\":{\"start\":{\"line\":");
         sb.append(range.stl);
         sb.append(",\"character\":");
-        sb.append(range.stc);
+        sb.append(column(fl, range.stl, range.stc));
         sb.append("},\"end\":{\"line\":");
         sb.append(range.enl);
         sb.append(",\"character\":");
-		sb.append(range.enc);
+		sb.append(column(fl, range.enl, range.enc));
         sb.append("}},\"context\":{\"diagnostics\":[");
         for (ErrSpan er : diags) {
             sb.append("{\"range\":{\"start\":{\"line\":");
             sb.append(er.stl-1);
             sb.append(",\"character\":");
-            sb.append(er.stc);
+            sb.append(column(fl, er.stl-1, er.stc));
             sb.append("},\"end\":{\"line\":");
             sb.append(er.enl-1);
             sb.append(",\"character\":");
-            sb.append(er.enc);
+            sb.append(column(fl, er.enl-1, er.enc));
             sb.append("}},\"message\":");
             sb.append(JSONObject.quote(er.msg));
             sb.append(",\"severity\":");
@@ -531,7 +594,7 @@ public final class Lsp implements Runnable {
         sb.append("},\"position\":{\"line\":");
         sb.append(l);
         sb.append(",\"character\":");
-        sb.append(c);
+        sb.append(column(f, l, c));
         sb.append("}}");
         tp = DEFIN;
         mSndr.send("textDocument/definition", sb.toString(), request(f, DEFIN));
@@ -544,7 +607,7 @@ public final class Lsp implements Runnable {
         sb.append("},\"position\":{\"line\":");
         sb.append(l);
         sb.append(",\"character\":");
-        sb.append(c);
+        sb.append(column(f, l, c));
         sb.append("},\"newName\":");
         sb.append(JSONObject.quote(newName));
         sb.append('}');

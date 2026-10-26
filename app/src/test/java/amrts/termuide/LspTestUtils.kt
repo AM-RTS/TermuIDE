@@ -4,6 +4,7 @@ package amrts.termuide
 internal fun Lsp.connectedSender(): Lsp.Sender {
     val connected = object : java.net.Socket() { override fun isConnected() = true }
     Lsp::class.java.getDeclaredField("sk").apply { isAccessible = true }.set(this, connected)
+    Lsp::class.java.getDeclaredField("started").apply { isAccessible = true }.setBoolean(this, true)
     Lsp::class.java.getDeclaredField("ready").apply { isAccessible = true }.setBoolean(this, true)
     return Lsp::class.java.getDeclaredField("mSndr").apply { isAccessible = true }.get(this) as Lsp.Sender
 }

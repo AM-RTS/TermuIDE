@@ -26,6 +26,18 @@ public final class TextPositions {
         if (column > end - starts[line]) throw new IllegalArgumentException("Column outside line");
         return starts[line] + column;
     }
+    public int codePointColumn(int line, int utf16Column) {
+        return text.codePointCount(offset(line, 0), offset(line, utf16Column));
+    }
+    public int codePointOffset(int line, int column) {
+        if (column < 0) throw new IllegalArgumentException("Negative code-point column");
+        int start = offset(line, 0);
+        int result;
+        try { result = text.offsetByCodePoints(start, column); }
+        catch (IndexOutOfBoundsException error) { throw new IllegalArgumentException("Column outside document", error); }
+        offset(line, result - start);
+        return result;
+    }
     public int[] position(int index) {
         if (index < 0 || index > text.length()) throw new IllegalArgumentException("Offset outside document");
         int line = Arrays.binarySearch(starts, index);

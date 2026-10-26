@@ -74,7 +74,7 @@ In TermuIDE, select **Settings → Analysis → Completion → Language Server**
 
 Completion, definitions and signature help reuse the existing editor controls. Diagnostics and formatting depend on installed pylsp providers; the base installation does not promise linting, formatting or refactoring plugins. Unsupported requests, including clangd semantic tokens for pylsp, are suppressed. Custom virtual environments/interpreter selection are not configured by this delivery.
 
-Unsaved and recovered text is sent directly to the server without saving the source. Completion edits remain undoable and participate in the same durable recovery as typing. Missing/disconnected servers leave files editable and recoverable. The prerelease workflow installs a pinned pylsp in a temporary host environment and exercises real sibling-module completion through the app's LSP client; this does not verify Termux/phone transport.
+Unsaved and recovered text is sent directly to the server without saving the source. Completion edits remain undoable and participate in the same durable recovery as typing. Python positions are translated between Jedi code points and the editor's UTF-16 offsets, including supplementary Unicode characters; filename completions replace the full filename component. Stale workspace edits cannot overwrite another changed/recovered tab. Missing/disconnected servers leave files editable and recoverable. The prerelease workflow installs a pinned pylsp in a temporary host environment and exercises real sibling-module completion through the app's LSP client; this does not verify Termux/phone transport.
 
 ## Features
 

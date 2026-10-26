@@ -64,7 +64,11 @@ public final class EditorCompletionPanel {
         version = editor.getText().getCurrentVersion();
         selectionStart = editor.getSelectionStart(); selectionEnd = editor.getSelectionEnd();
         int caret = editor.getCaretPosition(), start = caret;
-        while (start > 0 && Character.isUnicodeIdentifierPart(editor.getText().charAt(start - 1))) start--;
+        while (start > 0) {
+            int codePoint = Character.codePointBefore(editor.getText(), start);
+            if (!Character.isUnicodeIdentifierPart(codePoint)) break;
+            start -= Character.charCount(codePoint);
+        }
         _off = caret - start;
         adapter.clear();
         for (ListItem item : items) adapter.add(item.label);

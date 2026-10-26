@@ -91,6 +91,8 @@ ActionMode.Callback, TextEditor.OnEditedListener {
         Integer knownType = Languages.fileType(fl.getName());
         if (knownType != null) type = knownType;
         invalidateType(editor);
+        Lsp retainedServer = Application.getInstance().languageServers.find(fl);
+        if (retainedServer != null) mVer = Math.max(mVer, retainedServer.documentVersion(fl));
         DocumentSessions sessions = Application.getInstance().getDocuments();
         String recovery = sessions.recoveryText(fl.getAbsolutePath());
         boolean recoveredSourceLoaded = sessions.isSourceLoaded(fl.getAbsolutePath())
@@ -221,7 +223,8 @@ ActionMode.Callback, TextEditor.OnEditedListener {
     int getVersion() { return mVer; }
 
 	public void onChanged(String c, int start, boolean ins, boolean typ) {
-        ++mVer;
+        Lsp currentServer = Application.getInstance().languageServers.find(fl);
+        mVer = Math.max(mVer + 1, currentServer == null ? 0 : currentServer.documentVersion(fl) + 1);
         Application.getInstance().getDocuments().changed(fl.getAbsolutePath());
         queueAutoSave();
         if ("s" != Application.completion || !hasLsp())
@@ -238,10 +241,10 @@ ActionMode.Callback, TextEditor.OnEditedListener {
                 Lsp lsp = Application.getInstance().languageServers.find(fl);
                 if (lsp == null) return;
                 if (!onOpen(editor.getText())) lsp.didChange(fl, mVer, editor.getText().toString());
-                if (ins && typ && c.length() == 1) {
+                if (ins && typ && c.codePointCount(0, c.length()) == 1) {
                     int[] position = new TextPositions(editor.getText().toString()).position(editor.getCaretPosition());
-                    lsp.signatureHelpTry(fl, position[0], position[1], c.charAt(0), editor.getSigHelpPanel().isShowing());
-                    lsp.completionTry(fl, position[0], position[1], c.charAt(0));
+                    if (c.length() == 1) lsp.signatureHelpTry(fl, position[0], position[1], c.charAt(0), editor.getSigHelpPanel().isShowing());
+                    lsp.completionTry(fl, position[0], position[1], c.codePointAt(0));
                 }
                 lsp.semanticTokensFull(fl);
             } catch (RuntimeException error) { Log.e("LSP", "Unable to synchronize document", error); }
@@ -249,7 +252,7 @@ ActionMode.Callback, TextEditor.OnEditedListener {
         editor.post(languageChange);
 	}
 
-    private void flushLanguageChange() {
+    final void flushLanguageChange() {
         Runnable pending = languageChange;
         if (pending != null && getView() != null) {
             getView().removeCallbacks(pending);
@@ -315,6 +318,7 @@ ActionMode.Callback, TextEditor.OnEditedListener {
         if (hasLsp() && sourceLoaded) {
             Lsp lsp = languageServer();
             if (!lsp.didOpen(fl, Languages.forType(type).getId(), mVer, doc.toString())) return false;
+            mVer = lsp.documentVersion(fl);
             doc.setDiag(null); doc.setHighlights(null);
             if (getView() != null) {
                 getView().getAutoCompletePanel().dismiss(); getView().getSigHelpPanel().hide();
