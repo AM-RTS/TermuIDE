@@ -69,9 +69,9 @@ public final class Lsp implements Runnable {
         MainHandler handler = Application.getInstance().hand;
         if (handler != null) handler.synchronize(path);
         long revision = -1;
-        Map<String, Long> revisions = new HashMap<>();
+        Map<String, Long> revisions = kind == RENAM || kind == CODEACTION ? new HashMap<>() : Collections.emptyMap();
         for (DocumentSession session : Application.getInstance().getDocuments().getState().getValue()) {
-            revisions.put(LanguageServers.path(new File(session.getPath())), session.getRevision());
+            if (kind == RENAM || kind == CODEACTION) revisions.put(LanguageServers.path(new File(session.getPath())), session.getRevision());
             if (path.equals(session.getPath())) revision = session.getRevision();
         }
         int id = nextRequest.getAndIncrement();
@@ -264,6 +264,7 @@ public final class Lsp implements Runnable {
 		compTrigs = c;
 	}
 
+    public byte isCompTrig(char c) { return isCompTrig((int)c); }
 	public byte isCompTrig(int c) {
 		if (Character.isJavaIdentifierPart(c))
 			return 1;
@@ -415,6 +416,7 @@ public final class Lsp implements Runnable {
         return codePointPositions() ? positions.codePointOffset(line, column) : positions.offset(line, column);
     }
 
+    public boolean completionTry(File f, int line, int column, char trigger) { return completionTry(f, line, column, (int)trigger); }
 	public boolean completionTry(File f, int l, int c, int tgc) {
         if (!supports("completionProvider")) return false;
 		byte b = isCompTrig(tgc);

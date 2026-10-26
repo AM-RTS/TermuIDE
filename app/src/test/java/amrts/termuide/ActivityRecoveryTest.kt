@@ -290,7 +290,7 @@ class ActivityRecoveryTest {
             assertTrue("Missing greeting completion: $items", index >= 0)
             activity.editor.autoCompletePanel.select(index)
             assertEquals("import sibling\nlabel = '🧪'; sibling.greeting; suffix = 1", activity.editor.text.toString())
-            activity.editor.setSelection(0, activity.editor.text.length() - 1)
+            activity.editor.setSelection(0, activity.editor.text.length - 1)
             activity.editor.paste("open('data-fi")
             org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
             assertTrue(lsp.completionTry(file, 0, activity.editor.caretPosition, 'i'.code))

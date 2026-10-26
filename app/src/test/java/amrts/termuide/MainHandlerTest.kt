@@ -218,6 +218,8 @@ class MainHandlerTest {
         assertEquals(0, MainHandler.completionStart(identifier, identifier.length, 6))
         val path = "open('sub/data-file"
         assertEquals(path.indexOf("data-file"), MainHandler.completionStart(path, path.length, 17))
+        val include = "#include <dir-name"
+        assertEquals(include.indexOf("dir-name"), MainHandler.completionStart(include, include.length, 19))
     }
 
     @Test fun workspaceEditCannotOverwriteAnotherServerSession() {
@@ -242,6 +244,30 @@ class MainHandlerTest {
         try { handler.applyWorkspaceEdit(lsp, request.revisions, JSONObject().put("changes", changes)); fail("Closed tab accepted") }
         catch (_: java.io.IOException) {}
         assertEquals("original", file.readText())
+    }
+
+    @Test fun deferredCodeActionCommandRequiresThePostEditRevisionToRemainCurrent() {
+        val path = directory.resolve("first.c").path
+        open(path)
+        activity.field.paste("original")
+        val sender = lsp.connectedSender()
+        for (newTyping in listOf(false, true)) {
+            val waiting = java.util.concurrent.CompletableFuture<Void>()
+            val deferred = object : MainHandler(activity) {
+                override fun applyWorkspaceEdit(server: Lsp?, revisions: MutableMap<String, Long>?, workspace: JSONObject): java.util.concurrent.CompletableFuture<Void> = waiting
+            }
+            val action = Command().apply {
+                this.path = path; origin = lsp.incoming("{}")
+                revision = app.documents.state.value.single { it.path == path }.revision
+                start = activity.field.selectionStart; end = activity.field.selectionEnd
+                edit = JSONObject(); command = "test-command"; args = "[]"
+            }
+            sender.clear()
+            deferred.executeCodeAction(action)
+            if (newTyping) activity.field.paste(" newer")
+            waiting.complete(null)
+            assertEquals(if (newTyping) 0 else 1, sender.size)
+        }
     }
 
     @Test fun positionsPreserveCrLfAndLoneCrLineBoundaries() {

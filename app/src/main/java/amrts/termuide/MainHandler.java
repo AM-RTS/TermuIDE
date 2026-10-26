@@ -180,10 +180,12 @@ public class MainHandler extends Handler {
         return sameRevision(path, revision);
     }
 
-    private boolean sameRevision(String path, long revision) {
+    private boolean sameRevision(String path, long revision) { return revision(path) == revision; }
+    private long revision(String path) {
+        String normalized = LanguageServers.path(new File(path));
         for (DocumentSession session : Application.getInstance().getDocuments().getState().getValue())
-            if (LanguageServers.path(new File(path)).equals(LanguageServers.path(new File(session.getPath())))) return session.getRevision() == revision;
-        return revision == -1;
+            if (normalized.equals(LanguageServers.path(new File(session.getPath())))) return session.getRevision();
+        return -1;
     }
 
     private void initialize(Lsp lsp, JSONObject capabilities) throws JSONException {
@@ -251,8 +253,8 @@ public class MainHandler extends Handler {
         int start = end;
         while (start > 0) {
             int codePoint = text.codePointBefore(start);
-            if (kind == 17) {
-                if (codePoint == '/' || codePoint == '\\' || codePoint == '\'' || codePoint == '"' || codePoint == '\n' || codePoint == '\r') break;
+            if (kind == 17 || kind == 19) {
+                if (codePoint == '/' || codePoint == '\\' || codePoint == '<' || codePoint == '>' || codePoint == '\'' || codePoint == '"' || codePoint == '\n' || codePoint == '\r') break;
             } else if (!Character.isUnicodeIdentifierPart(codePoint)) break;
             start -= Character.charCount(codePoint);
         }
@@ -348,8 +350,11 @@ public class MainHandler extends Handler {
         if (current[0] != action.start || current[1] != action.end) return;
         try {
             CompletableFuture<Void> applied = action.edit == null ? CompletableFuture.completedFuture(null) : applyWorkspaceEdit(action.origin.source, action.revisions, action.edit);
+            long appliedRevision = revision(action.path);
+            int[] appliedSelection = selection(action.path);
             reportWorkspaceResult(applied.thenRun(() -> {
-                if (action.command != null && action.origin.isCurrent()) action.origin.source.executeCommand(action);
+                if (action.command != null && action.origin.isCurrent() && isCurrent(action.path, appliedRevision)
+                    && Arrays.equals(appliedSelection, selection(action.path))) action.origin.source.executeCommand(action);
             }));
         } catch (Exception error) { Log.e("LSP", "Code action failed", error); ma.toast(error.toString()); }
     }
