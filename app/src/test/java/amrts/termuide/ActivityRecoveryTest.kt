@@ -297,10 +297,10 @@ class ActivityRecoveryTest {
             await("pylsp did not provide filename completion") { activity.editor.autoCompletePanel.isShow }
             val files = EditorCompletionPanel::class.java.getDeclaredField("items").apply { isAccessible = true }
                 .get(activity.editor.autoCompletePanel) as List<*>
-            val fileIndex = files.indexOfFirst { (it as cn.rbc.codeeditor.view.autocomplete.ListItem).label == "data-file.txt" }
+            val fileIndex = files.indexOfFirst { (it as cn.rbc.codeeditor.view.autocomplete.ListItem).label == "data-file.txt'" }
             assertTrue("Missing data-file.txt completion", fileIndex >= 0)
             activity.editor.autoCompletePanel.select(fileIndex)
-            assertEquals("open('data-file.txt", activity.editor.text.toString())
+            assertEquals("open('data-file.txt'", activity.editor.text.toString())
             app.documents.flush()
             assertEquals(activity.editor.text.toString(), app.documents.recoveryText(file.path))
             assertEquals("# original source\n", file.readText())
