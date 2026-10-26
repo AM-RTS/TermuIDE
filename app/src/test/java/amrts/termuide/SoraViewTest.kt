@@ -53,6 +53,25 @@ class SoraViewTest {
         } finally { first.release(); second.release(); host.pause().stop().destroy() }
     }
 
+    @Test fun programmaticReplacementWhileLayoutIsBusyPreservesModelUndoAndDirtyState() {
+        editor.paste("original")
+        editor.text.markVersion()
+        editor.setEdited(false)
+        editor.setSelection(0, 5)
+        editor.soraEditor.setLayoutBusy(true)
+        editor.paste("replacement")
+        assertEquals("replacementnal", editor.text.toString())
+        assertEquals(editor.text.toString(), editor.soraEditor.text.toString())
+        assertTrue(editor.isEdited)
+        assertEquals("replacement".length, editor.caretPosition)
+        editor.undo()
+        assertEquals("original", editor.text.toString())
+        assertFalse(editor.isEdited)
+        editor.redo()
+        assertEquals("replacementnal", editor.text.toString())
+        assertTrue(editor.isEdited)
+    }
+
     @Test fun nativeInputUndoAndSaveBoundaryMatchTheRecoveryDocument() {
         editor.soraEditor.commitText("original", false, false)
         editor.text.markVersion()

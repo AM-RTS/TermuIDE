@@ -193,7 +193,7 @@ class AdaptiveUiTest {
 
     @Test @Config(qualifiers = "w360dp-h640dp-port")
     fun oldDiagnosticsAreHiddenAfterEditsAndOldVersionRepliesCannotRestoreThem() {
-        val source = temporary.root.resolve("first.txt")
+        val source = temporary.newFile("diagnostics.c").apply { writeText("original") }
         val warning = JSONObject().put("message", "old diagnostic").put("severity", 2)
             .put("range", JSONObject()
                 .put("start", JSONObject().put("line", 0).put("character", 0))

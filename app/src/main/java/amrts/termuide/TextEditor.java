@@ -407,7 +407,15 @@ public class TextEditor extends FrameLayout implements Document.TextFieldMetrics
     public void cut() { sora.cutText(); }
     public void copy() { sora.copyText(); }
     public void paste() { sora.pasteText(); }
-    public void paste(String text) { sora.commitText(text, false, false); }
+    public void paste(String text) {
+        if (released) return;
+        if (sora.isEditable()) { sora.commitText(text, false, false); return; }
+        // Sora's initial line measurements may still be pending when a programmatic edit arrives.
+        cn.rbc.codeeditor.view.autocomplete.Edit edit = new cn.rbc.codeeditor.view.autocomplete.Edit();
+        edit.start = getSelectionStart(); edit.len = getSelectionEnd() - edit.start; edit.text = text;
+        int caret = EditorTextEdits.apply(document, Collections.singletonList(edit), getSelectionEnd());
+        refreshDocument(); setSelection(caret);
+    }
     public void delete() { sora.deleteText(); }
     public void sendPrintableChar(char value) { if (value == '\t') sora.indentOrCommitTab(); else sora.commitText(String.valueOf(value)); }
     public void replaceText(int start, int length, CharSequence text) { setSelection(start, length); paste(text.toString()); }
