@@ -70,6 +70,11 @@ public class TextEditor extends FrameLayout implements Document.TextFieldMetrics
         document = new Document(this);
         document.clearSpans();
         sora = new SoraView(context);
+        // Sora's move animator queries uninitialized renderer rows for multiline selections.
+        sora.setCursorAnimator(new io.github.rosemoe.sora.widget.style.builtin.MoveCursorAnimator(sora) {
+            @Override public void markStartPos() { if (!sora.isTextSelected()) super.markStartPos(); }
+            @Override public void markEndPos() { if (!sora.isTextSelected()) super.markEndPos(); }
+        });
         sora.setTypefaceText(Typeface.MONOSPACE);
         sora.setLineNumberEnabled(true);
         float density = getResources().getDisplayMetrics().density;

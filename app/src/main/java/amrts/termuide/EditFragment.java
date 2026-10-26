@@ -130,7 +130,7 @@ ActionMode.Callback, TextEditor.OnEditedListener {
         sessions.open(fl.getAbsolutePath(), documentText, sourceLoaded);
         if (sourceLoaded && hasLsp() && "s".equals(Application.completion)) {
             Application.getInstance().languageServers.ensure(ma, fl, type);
-            onOpen(currentDocument);
+            if (!onOpen(currentDocument)) languageServer().semanticTokensFull(fl);
         }
         currentDocument.setOnTextChangeListener(this);
         editor.setEdited(sessions.isDirty(fl.getAbsolutePath()));
@@ -187,6 +187,7 @@ ActionMode.Callback, TextEditor.OnEditedListener {
         if ("s" != Application.completion || !hasLsp()) return;
         // in lsp
         TextEditor ed = getView();
+        if (ed == null || ed.getSoraEditor().isReleased()) return;
 		Document text = ed.getText();
 		if (ed.isSelectText2()
             || !(Character.isUnicodeIdentifierPart(text.charAt(caretIndex))

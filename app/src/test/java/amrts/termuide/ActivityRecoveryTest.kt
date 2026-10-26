@@ -347,6 +347,34 @@ class ActivityRecoveryTest {
         } finally { Application.completion = "n" }
     }
 
+    @Test fun recreationRequestsNativeSemanticTokensForTheNewView() {
+        val file = directory.resolve("main.c").apply { writeText("Foo value;") }
+        val activity = launch()
+        activity.openFile(file)
+        activity.fragmentManager.executePendingTransactions()
+        val fragment = activity.fragmentManager.findFragmentByTag(file.path) as EditFragment
+        val lsp = fragment.languageServer()
+        val sender = lsp.connectedSender()
+        lsp.setSemToks(arrayOf(Lsp.SemToken.TYPE))
+        Application.completion = "s"
+        try {
+            fragment.onOpen(activity.editor.text)
+            val state = Bundle()
+            controller!!.saveInstanceState(state).pause().stop().destroy()
+            controller = null
+            sender.clear()
+            val restored = launch(state)
+            restored.fragmentManager.executePendingTransactions()
+            val request = sender.map { org.json.JSONObject(String(it, Charsets.UTF_8)) }
+                .last { it.getString("method") == "textDocument/semanticTokens/full" }
+            val result = org.json.JSONObject().put("id", request.getInt("id")).put("result",
+                org.json.JSONObject().put("data", org.json.JSONArray("[0,0,3,0,0]")))
+            app.hand.handleMessage(android.os.Message.obtain().apply { obj = lsp.incoming(result.toString()) })
+            val tokens = TextEditor::class.java.getDeclaredField("semanticTokens").apply { isAccessible = true }
+            assertEquals(1, (tokens.get(restored.editor) as List<*>).size)
+        } finally { Application.completion = "n" }
+    }
+
     @Test fun pythonDiagnosticsConvertCodePointColumnsAndRejectUnsynchronizedBuffers() {
         val text = "label = '🧪'; missing"
         val file = directory.resolve("main.py").apply { writeText(text) }

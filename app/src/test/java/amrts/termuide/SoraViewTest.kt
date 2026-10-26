@@ -72,6 +72,17 @@ class SoraViewTest {
         assertTrue(editor.isEdited)
     }
 
+    @Test fun multilineSelectionCanBeReplacedBeforeTheFirstDrawWithoutLosingUndo() {
+        editor.paste("first\nsecond")
+        editor.setSelection(0, editor.text.length - 1)
+        editor.paste("replacement")
+        assertEquals("replacement", editor.text.toString())
+        assertEquals(editor.text.toString(), editor.soraEditor.text.toString())
+        assertTrue(editor.soraEditor.isCursorAnimationEnabled)
+        editor.undo()
+        assertEquals("first\nsecond", editor.text.toString())
+    }
+
     @Test fun nativeInputUndoAndSaveBoundaryMatchTheRecoveryDocument() {
         editor.soraEditor.commitText("original", false, false)
         editor.text.markVersion()
