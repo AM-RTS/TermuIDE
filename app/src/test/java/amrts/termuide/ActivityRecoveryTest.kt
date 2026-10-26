@@ -309,12 +309,13 @@ class ActivityRecoveryTest {
         val nativeFragment = activity.fragmentManager.findFragmentByTag(native.path) as EditFragment
         app.languageServers.session(native, EditFragment.TYPE_C)
         val diagnostics = listOf(Diagnostic().apply { msg = "native warning"; stl = 1; enl = 1; enc = 1 })
-        nativeFragment.view.text.setDiag(diagnostics)
+        val nativeEditor = requireNotNull(nativeFragment.view)
+        nativeEditor.text.setDiag(diagnostics)
         activity.openFile(python)
         activity.fragmentManager.executePendingTransactions()
         val lsp = app.languageServers.session(python, EditFragment.TYPE_PYTHON)!!
         app.hand.handleMessage(android.os.Message.obtain().apply { what = Lsp.ERROR; obj = lsp.incoming(null) })
-        assertSame(diagnostics, nativeFragment.view.text.diag)
+        assertSame(diagnostics, nativeEditor.text.diag)
         assertNull(activity.editor.text.diag)
     }
 
