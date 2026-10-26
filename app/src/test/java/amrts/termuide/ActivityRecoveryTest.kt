@@ -38,6 +38,7 @@ class ActivityRecoveryTest {
     }
     @After fun clean() {
         controller?.pause()?.stop()?.destroy()
+        app.languageServers.end()
         if (::directory.isInitialized) directory.deleteRecursively()
     }
 
@@ -137,13 +138,12 @@ class ActivityRecoveryTest {
         controller!!.visible()
         activity.openFile(file)
         activity.fragmentManager.executePendingTransactions()
-        app.lsp = Lsp()
-        val connected = object : java.net.Socket() { override fun isConnected() = true }
-        Lsp::class.java.getDeclaredField("sk").apply { isAccessible = true }.set(app.lsp, connected)
-        Lsp::class.java.getDeclaredField("ready").apply { isAccessible = true }.setBoolean(app.lsp, true)
-        val sender = Lsp::class.java.getDeclaredField("mSndr").apply { isAccessible = true }.get(app.lsp) as Lsp.Sender
+        val lsp = app.languageServers.session(file, EditFragment.TYPE_C)!!
+        val sender = lsp.connectedSender()
         Application.completion = "s"
         val fragment = activity.fragmentManager.findFragmentByTag(file.path) as EditFragment
+        fragment.onOpen(activity.editor.text)
+        sender.clear()
         val oldVersion = fragment.version
         activity.editor.setSelection(4)
         activity.editor.soraEditor.commitText("a", false, false)
@@ -158,7 +158,7 @@ class ActivityRecoveryTest {
         val change = messages.single { it.getString("method") == "textDocument/didChange" }
         assertEquals("int avalue;", change.getJSONObject("params").getJSONArray("contentChanges").getJSONObject(0).getString("text"))
         val completion = messages.single { it.getString("method") == "textDocument/completion" }
-        val request = app.lsp.takeRequest(completion.getInt("id"))
+        val request = lsp.takeRequest(completion.getInt("id"))
         assertEquals(activity.editor.selectionStart, request.start)
         assertEquals(activity.editor.selectionEnd, request.end)
         assertEquals(5, completion.getJSONObject("params").getJSONObject("position").getInt("character"))
@@ -171,19 +171,151 @@ class ActivityRecoveryTest {
         val activity = launch()
         activity.openFile(first)
         activity.fragmentManager.executePendingTransactions()
-        app.lsp = Lsp()
-        app.lsp.setSemToks(arrayOf(Lsp.SemToken.TYPE))
-        val id = app.lsp.request(first, Lsp.SEMTOK)
+        val lsp = app.languageServers.session(first, EditFragment.TYPE_C)!!
+        lsp.setSemToks(arrayOf(Lsp.SemToken.TYPE))
+        val id = lsp.request(first, Lsp.SEMTOK)
         activity.openFile(second)
         activity.fragmentManager.executePendingTransactions()
         val result = org.json.JSONObject().put("id", id).put("result",
             org.json.JSONObject().put("data", org.json.JSONArray("[0,0,3,0,0]")))
-        app.hand.handleMessage(android.os.Message.obtain().apply { obj = result.toString() })
+        app.hand.handleMessage(android.os.Message.obtain().apply { obj = lsp.incoming(result.toString()) })
         assertEquals(setOf("Foo"), app.hand.cacheData[first.path])
         val tokens = TextEditor::class.java.getDeclaredField("semanticTokens").apply { isAccessible = true }
         val original = activity.fragmentManager.findFragmentByTag(first.path) as EditFragment
         assertEquals(1, (tokens.get(original.view) as List<*>).size)
         assertTrue((tokens.get(activity.editor) as List<*>).isEmpty())
+    }
+
+    @Test fun pythonCompletionUsesRecoveredTextAndKeepsAcceptedEditsRecoverable() {
+        val file = directory.resolve("main.py").apply { writeText("# disk source\n") }
+        val draft = "import os\nos.pa"
+        app.documents.open(file.path) { draft }
+        app.documents.changed(file.path)
+        app.documents.flush()
+        val activity = launch()
+        controller!!.visible()
+        activity.fragmentManager.executePendingTransactions()
+        val fragment = activity.fragmentManager.findFragmentByTag(file.path) as EditFragment
+        val lsp = fragment.languageServer()
+        val sender = lsp.connectedSender()
+        Application.completion = "s"
+        try {
+            assertTrue(fragment.onOpen(activity.editor.text))
+            assertFalse(fragment.onOpen(activity.editor.text))
+            val opened = sender.map { org.json.JSONObject(String(it, Charsets.UTF_8)) }
+                .single { it.getString("method") == "textDocument/didOpen" }.getJSONObject("params").getJSONObject("textDocument")
+            assertEquals("python", opened.getString("languageId"))
+            assertEquals(draft, opened.getString("text"))
+            assertEquals(fragment.version, opened.getInt("version"))
+            activity.editor.setSelection(draft.length)
+            val id = lsp.request(file, Lsp.COMPLETION)
+            val completion = org.json.JSONObject().put("label", "path").put("insertText", "path")
+            val reply = org.json.JSONObject().put("id", id).put("result", org.json.JSONObject()
+                .put("items", org.json.JSONArray().put(completion)))
+            app.hand.handleMessage(android.os.Message.obtain().apply { obj = lsp.incoming(reply.toString()) })
+            assertTrue(activity.editor.autoCompletePanel.isShow)
+            activity.editor.autoCompletePanel.select(0)
+            assertEquals("import os\nos.path", activity.editor.text.toString())
+            app.documents.flush()
+            assertEquals("import os\nos.path", app.documents.recoveryText(file.path))
+            assertEquals("# disk source\n", file.readText())
+            assertTrue(app.documents.isDirty(file.path))
+            activity.editor.undo()
+            assertEquals(draft, activity.editor.text.toString())
+        } finally { Application.completion = "n" }
+    }
+
+    @Test fun completionFromAnEndedSessionCannotBeAccepted() {
+        val file = directory.resolve("main.py").apply { writeText("word") }
+        val activity = launch()
+        controller!!.visible()
+        activity.openFile(file)
+        activity.fragmentManager.executePendingTransactions()
+        activity.editor.setSelection(4)
+        val lsp = app.languageServers.session(file, EditFragment.TYPE_PYTHON)!!
+        val item = cn.rbc.codeeditor.view.autocomplete.ListItem().apply { label = "wording" }
+        activity.editor.autoCompletePanel.update(arrayListOf(item), lsp.incoming("{}"))
+        assertTrue(activity.editor.autoCompletePanel.isShow)
+        lsp.end()
+        activity.editor.autoCompletePanel.select(0)
+        assertEquals("word", activity.editor.text.toString())
+        assertFalse(app.documents.isDirty(file.path))
+    }
+
+    @Test fun realPylspCompletesSiblingImportsFromAnUnsavedRecoveredBuffer() {
+        org.junit.Assume.assumeTrue("Enabled by the GitHub prerelease workflow", System.getenv("TERMUIDE_PYLSP_INTEGRATION") == "1")
+        val file = directory.resolve("main.py").apply { writeText("# original source\n") }
+        directory.resolve("sibling.py").writeText("greeting = 'hello'\n")
+        val draft = "import sibling\nsibling.gre"
+        app.documents.open(file.path) { draft }
+        app.documents.changed(file.path)
+        app.documents.flush()
+        val activity = launch()
+        controller!!.visible()
+        activity.fragmentManager.executePendingTransactions()
+        val fragment = activity.fragmentManager.findFragmentByTag(file.path) as EditFragment
+        val lsp = fragment.languageServer()
+        Lsp::class.java.getDeclaredField("mRead").apply { isAccessible = true }.set(lsp, app.hand)
+        // Host-only transport smoke: Termux uses the same JSON framing through the existing nc stdio bridge.
+        val process = ProcessBuilder("pylsp", "--tcp", "--host", lsp.host, "--port", lsp.port.toString())
+            .directory(directory).redirectError(ProcessBuilder.Redirect.INHERIT).start()
+        val reader = Thread { lsp.run() }
+        fun await(description: String, condition: () -> Boolean) {
+            val deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(25)
+            while (System.nanoTime() < deadline) {
+                org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+                if (condition()) return
+                Thread.sleep(20)
+            }
+            fail(description)
+        }
+        Application.completion = "s"
+        try {
+            lsp.initialize(lsp.root)
+            reader.start()
+            await("pylsp initialization did not finish") {
+                Lsp::class.java.getDeclaredField("ready").apply { isAccessible = true }.getBoolean(lsp)
+            }
+            assertTrue(lsp.supports("completionProvider"))
+            assertFalse(lsp.supports("semanticTokensProvider"))
+            activity.editor.setSelection(draft.length)
+            assertTrue(lsp.completionTry(file, 1, "sibling.gre".length, 'e'))
+            await("pylsp did not provide sibling-module completion") { activity.editor.autoCompletePanel.isShow }
+            val items = EditorCompletionPanel::class.java.getDeclaredField("items").apply { isAccessible = true }
+                .get(activity.editor.autoCompletePanel) as List<*>
+            val index = items.indexOfFirst { (it as cn.rbc.codeeditor.view.autocomplete.ListItem).label == "greeting" }
+            assertTrue("Missing greeting completion: $items", index >= 0)
+            activity.editor.autoCompletePanel.select(index)
+            assertEquals("import sibling\nsibling.greeting", activity.editor.text.toString())
+            app.documents.flush()
+            assertEquals(activity.editor.text.toString(), app.documents.recoveryText(file.path))
+            assertEquals("# original source\n", file.readText())
+            assertTrue(app.documents.isDirty(file.path))
+        } finally {
+            Application.completion = "n"
+            lsp.end()
+            process.destroyForcibly()
+            reader.join(3000)
+            assertFalse("LSP reader did not terminate", reader.isAlive)
+        }
+    }
+
+    @Test fun pythonDisconnectCannotClearNativeDiagnostics() {
+        val native = directory.resolve("main.c").apply { writeText("int main() {}") }
+        val python = directory.resolve("main.py").apply { writeText("pass") }
+        val activity = launch()
+        activity.openFile(native)
+        activity.fragmentManager.executePendingTransactions()
+        val nativeFragment = activity.fragmentManager.findFragmentByTag(native.path) as EditFragment
+        app.languageServers.session(native, EditFragment.TYPE_C)
+        val diagnostics = listOf(Diagnostic().apply { msg = "native warning"; stl = 1; enl = 1; enc = 1 })
+        nativeFragment.view.text.setDiag(diagnostics)
+        activity.openFile(python)
+        activity.fragmentManager.executePendingTransactions()
+        val lsp = app.languageServers.session(python, EditFragment.TYPE_PYTHON)!!
+        app.hand.handleMessage(android.os.Message.obtain().apply { what = Lsp.ERROR; obj = lsp.incoming(null) })
+        assertSame(diagnostics, nativeFragment.view.text.diag)
+        assertNull(activity.editor.text.diag)
     }
 
     @Test fun recreatedClosePromptCanCancelOrDiscardTheOriginalTarget() {

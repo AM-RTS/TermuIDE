@@ -20,6 +20,8 @@ Full GPL v3, LGPL v2.1 and Apache 2.0 texts are bundled in `app/src/main/assets/
 
 Thanks to the Termux community and the maintainers of clang/clangd, GDB, Python and OpenJDK. Termux and these tools are installed separately; their own licenses apply. They are not bundled with the TermuIDE APK. Termux source: https://github.com/termux/termux-app .
 
+Python autocomplete uses the separately installed **Python LSP Server (pylsp)**, maintained by Python Language Server Contributors and distributed under the MIT license. Source and license: https://github.com/python-lsp/python-lsp-server . It and its providers are not bundled in the APK.
+
 ## Fork changes and source
 
 The changes are described in [README.md](README.md#what-is-different-in-this-fork) and [the architecture notes](docs/architecture/multilanguage-runtime.md). Source for this fork remains at https://github.com/AM-RTS/TermuIDE ; the repository name does not determine the Android app name. Preserve these notices and the applicable license texts when redistributing. Publish the corresponding source and build instructions for the exact binary release, including any modifications; a link to a different upstream revision is not a substitute.

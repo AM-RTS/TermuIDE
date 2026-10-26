@@ -48,8 +48,16 @@ jobs:
         run: |
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-34" "build-tools;34.0.0" >/dev/null
 
+      - name: Install pylsp for host integration checks
+        run: |
+          python3 -m venv "$RUNNER_TEMP/pylsp"
+          "$RUNNER_TEMP/pylsp/bin/python" -m pip install --disable-pip-version-check 'python-lsp-server==1.15.0'
+          printf '%s\n' "$RUNNER_TEMP/pylsp/bin" >> "$GITHUB_PATH"
+
       - name: Run host regression suite
         id: regressions
+        env:
+          TERMUIDE_PYLSP_INTEGRATION: '1'
         run: bash ./gradlew :app:testDebugUnitTest --no-daemon --stacktrace
 
       - name: Upload regression reports

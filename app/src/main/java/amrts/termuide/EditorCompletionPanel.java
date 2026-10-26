@@ -12,7 +12,7 @@ import cn.rbc.codeeditor.view.autocomplete.Edit;
 import cn.rbc.codeeditor.view.autocomplete.ListItem;
 import java.util.*;
 
-/** Retains clangd's edit ranges and local keyword completion with Sora as its anchor. */
+/** Retains language-server edit ranges and local keyword completion with Sora as its anchor. */
 public final class EditorCompletionPanel {
     public int _off;
     private final TextEditor editor;
@@ -23,6 +23,7 @@ public final class EditorCompletionPanel {
     private int version;
     private int selectionStart, selectionEnd;
     private int selected;
+    private Lsp.Incoming origin;
     private final Typeface icons;
 
     EditorCompletionPanel(TextEditor editor) {
@@ -53,8 +54,11 @@ public final class EditorCompletionPanel {
         popup.setInputMethodMode(PopupWindow.INPUT_METHOD_NEEDED);
     }
 
-    public void update(ArrayList<ListItem> values) {
+    public void update(ArrayList<ListItem> values) { update(values, null); }
+
+    void update(ArrayList<ListItem> values, Lsp.Incoming origin) {
         dismiss();
+        this.origin = origin;
         if (values == null || values.isEmpty() || !editor.isAttachedToWindow() || !editor.isShown()) return;
         items = new ArrayList<>(values);
         version = editor.getText().getCurrentVersion();
@@ -100,7 +104,7 @@ public final class EditorCompletionPanel {
     public void select(int position) {
         if (position < 0 || position >= items.size()) return;
         Document doc = editor.getText();
-        if (version != doc.getCurrentVersion() || selectionStart != editor.getSelectionStart() ||
+        if ((origin != null && !origin.isCurrent()) || version != doc.getCurrentVersion() || selectionStart != editor.getSelectionStart() ||
             selectionEnd != editor.getSelectionEnd()) { dismiss(); return; }
         ListItem item = items.get(position);
         if (item.edits.isEmpty()) {

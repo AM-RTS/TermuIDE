@@ -1,6 +1,16 @@
 # Multi-language runtime architecture
 
-Status: TermuIDE (`amrts.termuide`); shared runtime foundation and basic Python/Java execution implemented; advanced integrations remain planned. Updated 2026-10-26.
+Status: TermuIDE (`amrts.termuide`); shared runtime foundation, basic Python/Java execution, generalized LSP sessions and Python pylsp integration implemented; Java server selection and advanced integrations remain planned. Updated 2026-10-26.
+
+## Shared language-server foundation
+
+`LanguageServers` owns lazy sessions keyed by server and normalized project/folder root. C/C++ share clangd; Python uses pylsp; Java is deliberately unconfigured. Every session keeps its own socket port, initialize capabilities, request IDs and open-document set. The configured port is the starting port; allocation avoids immediately reusing a bridge still shutting down. The existing Termux `nc` stdio bridge launches both tools with literal argument arrays. No app dependency, additional module or recovery-format change is needed.
+
+The existing `MainHandler` remains the Activity/save bridge and parses messages carrying their source LSP and generation. Replies, diagnostics, semantic tokens, commands and completion selections use that identity. Shutdown invalidates queued events and displayed completions. Unsupported capabilities are not requested; only clangd receives fallback compiler flags. `Languages.canDebug()` separately restricts GDB to native languages.
+
+`didOpen` uses the language registry and current document version, and sends the actual editor buffer, including recovered unsaved text. Opening the same document twice in one session is suppressed. Subsequent changes retain version/revision guards. Settings changes and project transitions restart sessions; closing the last associated tab stops its server. A disconnected server never changes draft/source ownership. Installation/retry instructions are in the README; interpreter/virtual-environment configuration and Java integration are deferred.
+
+CI regression coverage includes session isolation, port allocation, capabilities, stale responses, recovery-preserving Python completion and C/C++ debugger gating. The signed prerelease workflow installs `python-lsp-server==1.15.0` in a temporary virtual environment and enables a host integration check using the actual app LSP client against real pylsp, including a sibling import from an unsaved recovered buffer. Local Gradle/build/test execution, phone and emulator checks remain skipped. CI results for this change must be checked before claiming verification; previous physical-device evidence below predates this implementation.
 
 ## Fork identity and provenance
 

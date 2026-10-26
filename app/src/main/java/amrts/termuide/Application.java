@@ -41,7 +41,7 @@ public class Application extends android.app.Application {
 	public static int lsp_port, textsize, tabsize;
 
     MainHandler hand;
-    Lsp lsp;
+    final LanguageServers languageServers = new LanguageServers();
     Uri treeUri;
     private Map<String,Document> ls;
     private static Application app;
@@ -79,7 +79,7 @@ public class Application extends android.app.Application {
     public void onTerminate() {
         runs.shutdown();
         saver.shutdown();
-        if (lsp != null) lsp.end();
+        languageServers.end();
         try { documents.close(); } catch (IOException error) { Log.e("Recovery", "Unable to flush drafts", error); }
         ls.clear();
         super.onTerminate();

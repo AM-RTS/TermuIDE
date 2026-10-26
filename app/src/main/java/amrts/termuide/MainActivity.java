@@ -57,10 +57,9 @@ public class MainActivity extends androidx.activity.ComponentActivity implements
 				break;
 			}
 		}
-		if (app.lsp == null) {
-            app.lsp = new Lsp();
-			app.hand = new MainHandler(this);
-		} else
+		if (app.hand == null) {
+            app.hand = new MainHandler(this);
+        } else
 			app.hand.updateActivity(this);
 	}
 
@@ -442,19 +441,19 @@ public class MainActivity extends androidx.activity.ComponentActivity implements
     private void finishProjectClose() {
         FragmentManager fm = getFragmentManager();
         FragmentTransaction transaction = fm.beginTransaction();
-        Lsp lsp = Application.getInstance().lsp;
+        LanguageServers servers = Application.getInstance().languageServers;
         for (int i = 0; i < workspace.getCount(); i++) {
             String path = workspace.getItem(i);
             closeDocumentSession(path);
             transaction.remove(fm.findFragmentByTag(path));
-            lsp.didClose(new File(path));
+            servers.close(new File(path));
         }
         workspace.clearProject();
         transaction.commit();
         lastFrag = null;
         codeEditor = null;
         runVisible = false;
-        lsp.end();
+        servers.end();
         notifyUiChanged();
     }
 
@@ -495,7 +494,6 @@ public class MainActivity extends androidx.activity.ComponentActivity implements
                 int type = EditFragment.fileType(file, app.getDocuments().isDirty(path));
                 if (type < 0) return false;
                 fragment = new EditFragment(file, type);
-                if (fragment.hasLsp()) ensureLanguageServer();
                 FragmentTransaction transaction = manager.beginTransaction();
                 transaction.add(R.id.editFrag, fragment, path);
                 if (lastFrag != null) transaction.hide(lastFrag);
@@ -537,23 +535,24 @@ public class MainActivity extends androidx.activity.ComponentActivity implements
     private void openProjFiles(List<String> opens, String retainedPath) {
         FragmentManager manager = getFragmentManager();
         FragmentTransaction transaction = manager.beginTransaction();
-        Lsp lsp = Application.getInstance().lsp;
+        LanguageServers servers = Application.getInstance().languageServers;
         for (String path : new ArrayList<>(workspace)) {
             if (path.equals(retainedPath)) continue;
             closeDocumentSession(path);
             workspace.remove(path);
             Fragment fragment = manager.findFragmentByTag(path);
             if (fragment != null) transaction.remove(fragment);
-            lsp.didClose(new File(path));
+            servers.close(new File(path));
         }
         lastFrag = (EditFragment)manager.findFragmentByTag(workspace.getSelectedPath());
         codeEditor = lastFrag == null ? null : lastFrag.getView();
         transaction.commit();
         manager.executePendingTransactions();
-        ensureLanguageServer();
-        if (opens.contains(retainedPath) && "s" == Application.completion
-                && lastFrag != null && lastFrag.getView() != null)
-            lastFrag.onOpen(lastFrag.getView().getText());
+        servers.end();
+        if (lastFrag != null && lastFrag.getView() != null) {
+            servers.ensure(this, lastFrag.getFile(), lastFrag.type);
+            if ("s".equals(Application.completion)) lastFrag.onOpen(lastFrag.getView().getText());
+        }
         for (String path : opens) {
             if (workspace.contains(path)) continue;
             File file = new File(path);
@@ -564,17 +563,6 @@ public class MainActivity extends androidx.activity.ComponentActivity implements
         notifyUiChanged();
     }
 
-    private void ensureLanguageServer() {
-        Lsp lsp = Application.getInstance().lsp;
-        if ("s" != Application.completion || !lsp.isEnded()) return;
-        lsp.end();
-        try {
-            lsp.start(this, Application.getInstance().hand);
-            lsp.initialize(Project.rootPath);
-        } catch (SecurityException | IllegalStateException | IllegalArgumentException error) {
-            Log.w("LSP", "Language server unavailable; the document remains editable", error);
-        }
-    }
 
     @Override
     public boolean onOptionsItemSelected(MenuItem menuItem) {
@@ -599,7 +587,7 @@ public class MainActivity extends androidx.activity.ComponentActivity implements
         }
         tran.commit();
         Application app = Application.getInstance();
-        if (frg != null) app.lsp.didClose(frg.getFile());
+        app.languageServers.close(new File(file));
         app.hand.cacheData.remove(file);
         app.load(file);
         if (workspace.getCount() == 0) {
@@ -722,7 +710,7 @@ public class MainActivity extends androidx.activity.ComponentActivity implements
         try {
             String entry = getRunConfiguration().entryPath(getRunConfigurationScope(), getSelectedFilePath());
             EditFragment target = entry == null ? null : (EditFragment)getFragmentManager().findFragmentByTag(entry);
-            return target != null && target.hasLsp() && (hasProject() || EditFragment.isExecutable(target.type))
+            return target != null && Languages.canDebug(target.type) && (hasProject() || EditFragment.isExecutable(target.type))
                 && target.getView() != null && target.getView().getText().getMarksCount() > 0;
         } catch (IllegalArgumentException error) { return false; }
     }
@@ -853,28 +841,14 @@ public class MainActivity extends androidx.activity.ComponentActivity implements
 				if (resultCode == RESULT_OK) {
 					boolean s = "s" == Application.completion;
                     Application app = Application.getInstance();
-                    Lsp lsp = app.lsp;
-					boolean chg = s==lsp.isEnded();
-					if (chg) {
-						lsp.end();
-						if (s) {
-                            try {
-                                lsp.start(this, app.hand);
-                                lsp.initialize(Project.rootPath);
-                            } catch (RuntimeException error) {
-                                android.util.Log.e("LSP", "Unable to start language server", error);
-                                toast(error.toString());
-                            }
-						}
-						chg = s;
-					}
+                    app.languageServers.end();
 					FragmentManager fm = getFragmentManager();
 					Typeface tf = Application.typeface();
 					for (int i=workspace.getCount() - 1;i >= 0;i--) {
 						EditFragment f = (EditFragment)fm.findFragmentByTag(workspace.getItem(i));
 						TextEditor ed = f.getView();
                         ed.setPureMode(Application.pure_mode);
-						ed.setFormatter(s ? f : null);
+						ed.setFormatter(s && f.hasLsp() ? f : null);
 						ed.setAutoComplete("l" == Application.completion);
 						ed.setTypeface(tf);
 						ed.setWordWrap(Application.wordwrap);
@@ -883,7 +857,16 @@ public class MainActivity extends androidx.activity.ComponentActivity implements
 						ed.setTabSpaces(Application.tabsize);
                         ed.setSuggestion(Application.suggestion);
                         ed.setAutoCaps(Application.auto_caps);
-                        if (chg) f.onOpen(ed.getText());
+                        if (s && f.hasLsp()) {
+                            app.languageServers.ensure(this, f.getFile(), f.type);
+                            f.onOpen(ed.getText());
+                        } else {
+                            ed.getAutoCompletePanel().dismiss(); ed.getSigHelpPanel().hide();
+                            app.hand.cacheData.remove(f.getFile().getAbsolutePath());
+                            ed.getLanguage().setTypes(EditFragment.DEFTYPES);
+                            ed.getText().setDiag(null); ed.getText().setHighlights(null);
+                            ed.setSemanticTokens(Collections.emptyList());
+                        }
 					}
 					notifyUiChanged();
 				} else if (resultCode == RESULT_FIRST_USER) {
@@ -943,6 +926,7 @@ public class MainActivity extends androidx.activity.ComponentActivity implements
         searchUi = null;
         Application.getInstance().hand.updateActivity(null);
         super.onDestroy();
+        if (isFinishing()) Application.getInstance().languageServers.end();
     }
 
     final void toast(CharSequence charSequence) {

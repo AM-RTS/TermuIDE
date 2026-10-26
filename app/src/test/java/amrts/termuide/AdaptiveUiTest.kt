@@ -289,7 +289,8 @@ class AdaptiveUiTest {
         val params = JSONObject().put("uri", source.toURI().toString()).put("diagnostics", values)
         if (version != null) params.put("version", version)
         app.hand.handleMessage(Message.obtain().apply {
-            obj = JSONObject().put("method", "textDocument/publishDiagnostics").put("params", params).toString()
+            obj = app.languageServers.session(source, EditFragment.fileType(source))!!.incoming(
+                JSONObject().put("method", "textDocument/publishDiagnostics").put("params", params).toString())
         })
     }
 

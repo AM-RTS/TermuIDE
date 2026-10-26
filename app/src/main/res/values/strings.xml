@@ -265,4 +265,5 @@
     <string name="license_lgpl">GNU LGPL v2.1 — Sora license</string>
     <string name="license_apache">Apache 2.0 — library license</string>
     <string name="no_browser">No browser is available. The source URL is listed in acknowledgements.</string>
+    <string name="python_lsp_unavailable">Python language server disconnected. Install python-lsp-server in Termux with pip, then close and reopen the Python file to retry.</string>
 </resources>

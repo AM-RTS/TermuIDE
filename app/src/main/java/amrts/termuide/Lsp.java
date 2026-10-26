@@ -28,6 +28,25 @@ public final class Lsp implements Runnable {
 	private final static byte[] CONTENTLEN = "Content-Length: ".getBytes();
 	private int tp;
     private final java.util.concurrent.atomic.AtomicInteger nextRequest = new java.util.concurrent.atomic.AtomicInteger(100);
+    final LanguageServers.Server server;
+    final String root, host;
+    final int port;
+    private volatile int generation;
+    private boolean started;
+    private final Set<String> opened = new HashSet<>();
+    private JSONObject capabilities;
+    Lsp() { this(LanguageServers.Server.CLANGD, null, Application.lsp_host, Application.lsp_port); }
+    Lsp(LanguageServers.Server server, String root, String host, int port) {
+        this.server = server; this.root = root; this.host = host; this.port = port;
+    }
+    static final class Incoming {
+        final Lsp source;
+        final int generation;
+        final String json;
+        Incoming(Lsp source, int generation, String json) { this.source = source; this.generation = generation; this.json = json; }
+        boolean isCurrent() { return generation == source.generation; }
+    }
+    Incoming incoming(String json) { return new Incoming(this, generation, json); }
     private final ConcurrentHashMap<Integer, Request> requests = new ConcurrentHashMap<>();
     static final class Request {
         final int kind;
@@ -59,37 +78,52 @@ public final class Lsp implements Runnable {
 	private Handler mRead;
     private volatile boolean ready;
 
-	// In main thread
-	public void start(Context mC, Handler read) {
+    // The existing Termux stdio bridge works for both servers and exits when its socket closes.
+    String[] launchArguments() {
+        ArrayList<String> args = new ArrayList<>(Arrays.asList("nc", "-l", "-s", host, "-p", Integer.toString(port), "-w", "6"));
+        if (server == LanguageServers.Server.CLANGD) args.addAll(Arrays.asList("nice", "-n", "-20"));
+        args.addAll(Arrays.asList(server.command));
+        return args.toArray(new String[0]);
+    }
+
+    boolean isStarted() { return started; }
+    public void start(Context context, Handler read) {
+        end();
+        started = true;
         ready = false;
-		Utils.run(mC, "/system/bin/toybox", new String[]{"nc", "-l", "-s", Application.lsp_host, "-p", Integer.toString(Application.lsp_port), "-w", "6", "nice", "-n", "-20", "clangd", "--header-insertion-decorators=0"}, Utils.ROOT.getAbsolutePath(), true);
-		mRead = read;
-        mSndr.stopped = true;
-        mSndr.offer(TERM);
+        capabilities = null;
+        compTrigs = new char[0]; sigTrigs = new char[0]; semToks = new SemToken[0];
+        mRead = read;
         Sender sender = new Sender();
         mSndr = sender;
-        requests.clear();
-        new Thread(() -> run(sender, read)).start();
-	}
+        Utils.run(context, "/system/bin/toybox", launchArguments(), root == null ? Utils.ROOT.getAbsolutePath() : root, true);
+        int epoch = generation;
+        new Thread(() -> run(sender, read, epoch), "LSP-" + server.id).start();
+    }
 
-	public void end() {
-		shutdown();
-		exit();
-        mSndr.offer(TERM);
-        mSndr.stopped = true;
+    public void end() {
+        ++generation;
         ready = false;
+        opened.clear();
         requests.clear();
-	}
+        Sender sender = mSndr;
+        // Drain shutdown/exit before the sentinel closes the socket, including an in-flight connection.
+        sender.offer(wrap("shutdown", "{}", 99).getBytes(StandardCharsets.UTF_8));
+        sender.offer(wrap("exit", "{}", -1).getBytes(StandardCharsets.UTF_8));
+        sender.offer(TERM);
+        sender.stopped = true;
+        started = false;
+    }
 
 	public boolean isEnded() {
 		return mSndr.stopped || sk.isClosed() || !sk.isConnected();
 	}
 
 	public void run() {
-		run(mSndr, mRead);
+		run(mSndr, mRead, generation);
     }
 
-    private void run(Sender sender, Handler reader) {
+    private void run(Sender sender, Handler reader, int epoch) {
 		int i = 0;
 		Socket connection = null;
 		try{
@@ -97,7 +131,7 @@ public final class Lsp implements Runnable {
                 if (sender.stopped || sender != mSndr) return;
 				try {
                     connection = new Socket();
-                    connection.connect(new InetSocketAddress(Application.lsp_host, Application.lsp_port), 500);
+                    connection.connect(new InetSocketAddress(host, port), 500);
 				} catch (IOException s) {
                     if (connection != null) connection.close();
 					Thread.sleep(250L);
@@ -130,7 +164,7 @@ public final class Lsp implements Runnable {
                     if (count < 0) throw new EOFException("Incomplete language-server message");
                     i += count;
                 }
-                msg.obj = new String(strb, StandardCharsets.UTF_8);
+                msg.obj = new Incoming(this, epoch, new String(strb, StandardCharsets.UTF_8));
                 if (sender == mSndr && !sender.stopped) reader.sendMessage(msg);
             }
 		} catch (Exception ioe) {
@@ -141,7 +175,9 @@ public final class Lsp implements Runnable {
             if (sender == mSndr) {
                 ready = false;
                 requests.clear();
-                reader.sendEmptyMessage(ERROR);
+                Message message = Message.obtain();
+                message.what = ERROR; message.obj = new Incoming(this, epoch, null);
+                reader.sendMessage(message);
             }
         }
 	}
@@ -160,13 +196,15 @@ public final class Lsp implements Runnable {
 	public void initialize(String root) {
 		tp = INITIALIZE;
 		StringBuilder sb = new StringBuilder("{\"processId\":");
-		sb.append(android.os.Process.myPid());
-		sb.append(",\"capabilities\":{\"workspace\":{\"applyEdit\":true,\"workspaceFolders\":true},\"textDocument\":{\"publishDiagnostics\":{\"versionSupport\":true}}}");
+		sb.append("null"); // Termux cannot use this app's PID to monitor its parent.
+		sb.append(",\"capabilities\":{\"workspace\":{\"applyEdit\":true,\"workspaceFolders\":true},\"textDocument\":{\"completion\":{\"completionItem\":{\"snippetSupport\":false}},\"publishDiagnostics\":{\"versionSupport\":true}}}");
 		if (root!=null) {
 			sb.append(",\"rootUri\":");
 			sb.append(JSONObject.quote(new File(root).toURI().toString()));
 		}
-		sb.append(",\"initializationOptions\":{\"fallbackFlags\":[\"-Wall\"]}}");
+		if (server == LanguageServers.Server.CLANGD)
+            sb.append(",\"initializationOptions\":{\"fallbackFlags\":[\"-Wall\"]}");
+        sb.append('}');
 		mSndr.send("initialize", sb.toString(), 0);
 	}
 
@@ -199,6 +237,13 @@ public final class Lsp implements Runnable {
         semToks = toks;
     }
 
+    void setCapabilities(JSONObject capabilities) { this.capabilities = capabilities == null ? new JSONObject() : capabilities; }
+    boolean supports(String capability) {
+        if (capabilities == null) return true;
+        Object value = capabilities.opt(capability);
+        return value != null && value != JSONObject.NULL && !Boolean.FALSE.equals(value);
+    }
+
     public int nativeToken(int semTok) {
         if (semTok < 0 || semTok >= semToks.length) return Tokenizer.UNKNOWN;
         switch (semToks[semTok]) {
@@ -229,6 +274,7 @@ public final class Lsp implements Runnable {
 	}
 
 	public void didClose(File f) {
+        if (!opened.remove(LanguageServers.path(f))) return;
         requests.entrySet().removeIf(entry -> entry.getValue().path.equals(f.getAbsolutePath()));
 		HashMap<String,String> m = new HashMap<>();
 		m.put("uri", Uri.fromFile(f).toString());
@@ -238,18 +284,21 @@ public final class Lsp implements Runnable {
 		mSndr.send("textDocument/didClose", k, -1);
 	}
 
-	public void didOpen(File f, String lang, String ct) {
+    public boolean didOpen(File f, String lang, int version, String ct) {
+        if (!ready || isEnded() || !opened.add(LanguageServers.path(f))) return false;
 		StringBuilder m = new StringBuilder("{\"textDocument\":{\"uri\":");
 		m.append(JSONObject.quote(Uri.fromFile(f).toString()));
 		m.append(",\"languageId\":\"");m.append(lang);
-		m.append("\",\"version\":0,\"text\":");
+		m.append("\",\"version\":"); m.append(version); m.append(",\"text\":");
 		m.append(JSONObject.quote(ct));
 		m.append("}}");
 		tp = OPEN;
 		mSndr.send("textDocument/didOpen", m.toString(), -1);
+        return true;
 	}
 
 	public void didSave(File f) {
+        if (!opened.contains(LanguageServers.path(f))) return;
 		StringBuilder s = new StringBuilder("{\"textDocument\":{\"uri\":");
 		s.append(JSONObject.quote(Uri.fromFile(f).toString()));
 		s.append("}}");
@@ -258,6 +307,7 @@ public final class Lsp implements Runnable {
 	}
 
 	public void didChange(File f, int version, String text) {
+        if (!opened.contains(LanguageServers.path(f))) return;
 		StringBuilder sb = new StringBuilder("{\"textDocument\":{\"uri\":");
 		sb.append(JSONObject.quote(Uri.fromFile(f).toString()));
 		sb.append(",\"version\":");
@@ -270,6 +320,7 @@ public final class Lsp implements Runnable {
 	}
 
 	public void didChange(File f, int version, List<Range> chs) {
+        if (!opened.contains(LanguageServers.path(f))) return;
 		StringBuilder sb = new StringBuilder("{\"textDocument\":{\"uri\":");
 		sb.append(JSONObject.quote(Uri.fromFile(f).toString()));
 		sb.append(",\"version\":");
@@ -297,6 +348,7 @@ public final class Lsp implements Runnable {
 	}
 
 	public boolean completionTry(File f, int l, int c, char tgc) {
+        if (!supports("completionProvider")) return false;
 		byte b = isCompTrig(tgc);
 		if (b==0)
 			return false;
@@ -321,6 +373,7 @@ public final class Lsp implements Runnable {
 	}
 
     public boolean signatureHelpTry(File f, int l, int c, char tgc, boolean retrig) {
+        if (!supports("signatureHelpProvider")) return false;
         if (!isSigTrig(tgc)) return false;
         StringBuilder sb = new StringBuilder("{\"textDocument\":{\"uri\":");
         sb.append(JSONObject.quote(Uri.fromFile(f).toString()));
@@ -339,6 +392,7 @@ public final class Lsp implements Runnable {
     }
 
 	public void formatting(File fl, int tabSize, boolean useSpace) {
+        if (!supports("documentFormattingProvider")) return;
 		StringBuilder sb = new StringBuilder("{\"textDocument\":{\"uri\":");
 		sb.append(JSONObject.quote(Uri.fromFile(fl).toString()));
 		sb.append("},\"options\":{\"tabSize\":");
@@ -352,6 +406,7 @@ public final class Lsp implements Runnable {
 	}
 
 	public void rangeFormatting(File fl, Range range, int tabSize, boolean useSpace) {
+        if (!supports("documentRangeFormattingProvider")) return;
 		StringBuilder sb = new StringBuilder("{\"textDocument\":{\"uri\":");
 		sb.append(JSONObject.quote(Uri.fromFile(fl).toString()));
 		sb.append("},\"range\":{\"start\":{\"line\":");
@@ -372,6 +427,7 @@ public final class Lsp implements Runnable {
 	}
 
 	public void documentHighlight(File fl, int l, int c) {
+        if (!supports("documentHighlightProvider")) return;
 		StringBuilder sb = new StringBuilder("{\"textDocument\":{\"uri\":");
 		sb.append(JSONObject.quote(Uri.fromFile(fl).toString()));
 		sb.append("},\"position\":{\"line\":");
@@ -384,6 +440,7 @@ public final class Lsp implements Runnable {
 	}
 
     public void codeAction(File fl, Range range, List<ErrSpan> diags) {
+        if (!supports("codeActionProvider")) return;
         StringBuilder sb = new StringBuilder("{\"textDocument\":{\"uri\":");
         sb.append(JSONObject.quote(Uri.fromFile(fl).toString()));
         sb.append("},\"range\":{\"start\":{\"line\":");
@@ -444,7 +501,18 @@ public final class Lsp implements Runnable {
         mSndr.offer(sb.toString().getBytes(StandardCharsets.UTF_8));
     }
 
+    void replyError(Object id, int code, String message) throws JSONException {
+        JSONObject response = new JSONObject().put("jsonrpc", "2.0").put("id", id)
+            .put("error", new JSONObject().put("code", code).put("message", message));
+        mSndr.offer(response.toString().getBytes(StandardCharsets.UTF_8));
+    }
+
     public void semanticTokensFull(File f) {
+        if (!supports("semanticTokensProvider")) return;
+        if (capabilities != null) {
+            JSONObject provider = capabilities.optJSONObject("semanticTokensProvider");
+            if (provider == null || !provider.has("full") || Boolean.FALSE.equals(provider.opt("full"))) return;
+        }
         StringBuilder sb = new StringBuilder("{\"textDocument\":{\"uri\":");
         sb.append(JSONObject.quote(Uri.fromFile(f).toString()));
         sb.append("}}");
@@ -453,6 +521,7 @@ public final class Lsp implements Runnable {
     }
 
     public void definition(File f, int l, int c) {
+        if (!supports("definitionProvider")) return;
         StringBuilder sb = new StringBuilder("{\"textDocument\":{\"uri\":");
         sb.append(JSONObject.quote(Uri.fromFile(f).toString()));
         sb.append("},\"position\":{\"line\":");
@@ -465,6 +534,7 @@ public final class Lsp implements Runnable {
     }
 
     public void rename(File f, int l, int c, String newName) {
+        if (!supports("renameProvider")) return;
         StringBuilder sb = new StringBuilder("{\"textDocument\":{\"uri\":");
         sb.append(JSONObject.quote(Uri.fromFile(f).toString()));
         sb.append("},\"position\":{\"line\":");

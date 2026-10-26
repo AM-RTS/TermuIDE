@@ -123,7 +123,7 @@ public class TextEditor extends FrameLayout implements Document.TextFieldMetrics
                 java.io.File file = openedFile();
                 Integer type = file == null ? null : Languages.fileType(file.getName());
                 if (type != null && Languages.forType(type).getHasLsp())
-                    Application.getInstance().lsp.definition(file, event.getLine(), event.getColumn());
+                    Application.getInstance().languageServers.session(file, type).definition(file, event.getLine(), event.getColumn());
                 event.intercept();
             }
         });

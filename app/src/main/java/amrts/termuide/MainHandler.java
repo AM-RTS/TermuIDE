@@ -43,26 +43,33 @@ public class MainHandler extends Handler {
     }
 
     @Override public void handleMessage(Message message) {
-        Lsp lsp = Application.getInstance().lsp;
+        if (!(message.obj instanceof Lsp.Incoming)) return;
+        Lsp.Incoming incoming = (Lsp.Incoming)message.obj;
+        if (!incoming.isCurrent()) return;
+        Lsp lsp = incoming.source;
         if (message.what == Lsp.ERROR) {
-            cacheData.clear();
             if (ma != null) for (String path : ma.getOpenFilePaths()) {
                 EditFragment fragment = fragment(path);
-                if (fragment == null || fragment.getView() == null) continue;
+                if (fragment == null || fragment.getView() == null || !Application.getInstance().languageServers.owns(lsp, fragment.getFile())) continue;
+                cacheData.remove(path);
                 TextEditor editor = fragment.getView();
                 editor.getLanguage().setTypes(EditFragment.DEFTYPES);
+                editor.getAutoCompletePanel().dismiss(); editor.getSigHelpPanel().hide();
                 editor.getText().setDiag(null); editor.getText().setHighlights(null);
                 editor.setSemanticTokens(Collections.emptyList());
             }
-            if (ma != null) ma.notifyUiChanged();
+            if (ma != null) {
+                ma.notifyUiChanged();
+                if (lsp.server == LanguageServers.Server.PYTHON) ma.toast(ma.getString(R.string.python_lsp_unavailable));
+            }
             return;
         }
-        if (!(message.obj instanceof String)) return;
+        if (incoming.json == null) return;
         try {
-            JSONObject json = new JSONObject((String)message.obj);
+            JSONObject json = new JSONObject(incoming.json);
             String method = json.optString("method");
             if ("textDocument/publishDiagnostics".equals(method)) {
-                if (ma != null) diagnostics(json.getJSONObject("params"));
+                if (ma != null) diagnostics(lsp, json.getJSONObject("params"));
                 return;
             }
             if ("workspace/applyEdit".equals(method)) {
@@ -70,6 +77,7 @@ public class MainHandler extends Handler {
                     if (ma == null) throw new IOException("Editor unavailable");
                     Object requestId = json.get("id");
                     applyWorkspaceEdit(json.getJSONObject("params").getJSONObject("edit")).whenComplete((ignored, error) -> {
+                        if (!incoming.isCurrent()) return;
                         try {
                             JSONObject reply = new JSONObject().put("applied", error == null);
                             if (error != null) reply.put("failureReason", error.toString());
@@ -81,8 +89,23 @@ public class MainHandler extends Handler {
                 }
                 return;
             }
+            if (!method.isEmpty()) {
+                if (json.has("id")) {
+                    if ("workspace/configuration".equals(method)) {
+                        JSONArray items = json.getJSONObject("params").optJSONArray("items"), values = new JSONArray();
+                        if (items != null) for (int i = 0; i < items.length(); i++) values.put(new JSONObject());
+                        lsp.reply(json.get("id"), values.toString());
+                    } else if ("workspace/workspaceFolders".equals(method)) {
+                        JSONArray folders = new JSONArray();
+                        if (lsp.root != null) folders.put(new JSONObject().put("uri", new File(lsp.root).toURI().toString()).put("name", new File(lsp.root).getName()));
+                        lsp.reply(json.get("id"), folders.toString());
+                    } else lsp.replyError(json.get("id"), -32601, "Unsupported client method: " + method);
+                }
+                return;
+            }
             int id = json.optInt("id", -1);
             Lsp.Request request = lsp.takeRequest(id);
+            if (request != null && !Application.getInstance().languageServers.owns(lsp, new File(request.path))) return;
             if (id >= 100 && request == null) return; // Superseded request or a previous server session.
             if (request != null && !(request.kind == Lsp.SEMTOK ? sameRevision(request.path, request.revision)
                 : isCurrent(request.path, request.revision))) return;
@@ -97,11 +120,11 @@ public class MainHandler extends Handler {
             }
             Object result = json.opt("result");
             if (id == Lsp.INITIALIZE && result instanceof JSONObject) {
-                initialize(((JSONObject)result).optJSONObject("capabilities"));
+                initialize(lsp, ((JSONObject)result).optJSONObject("capabilities"));
                 lsp.initialized();
                 if (ma != null) for (String path : ma.getOpenFilePaths()) {
                     EditFragment fragment = fragment(path);
-                    if (fragment != null && fragment.getView() != null && fragment.hasLsp()) fragment.onOpen(fragment.getView().getText());
+                    if (fragment != null && fragment.getView() != null && Application.getInstance().languageServers.owns(lsp, fragment.getFile())) fragment.onOpen(fragment.getView().getText());
                 }
                 return;
             }
@@ -113,7 +136,7 @@ public class MainHandler extends Handler {
                 editor = target.getView();
             }
             switch (request.kind) {
-                case Lsp.COMPLETION: completion(editor, result); break;
+                case Lsp.COMPLETION: completion(incoming, editor, result); break;
                 case Lsp.SIGN_HELP: {
                     JSONObject help = result instanceof JSONObject ? (JSONObject)result : null;
                     List<String> labels = new ArrayList<>();
@@ -135,12 +158,12 @@ public class MainHandler extends Handler {
                     editor.getText().setHighlights(highlights); editor.postInvalidateOnAnimation();
                     break;
                 }
-                case Lsp.SEMTOK: semanticTokens(editor, result, request.path); break;
+                case Lsp.SEMTOK: semanticTokens(lsp, editor, result, request.path); break;
                 case Lsp.DEFIN: definition(result); break;
                 case Lsp.RENAM:
                     if (result instanceof JSONObject) reportWorkspaceResult(applyWorkspaceEdit((JSONObject)result));
                     break;
-                case Lsp.CODEACTION: codeActions(result, request); break;
+                case Lsp.CODEACTION: codeActions(incoming, result, request); break;
             }
         } catch (Exception error) {
             Log.e("LSP", "Unable to handle language-server response", error);
@@ -159,9 +182,9 @@ public class MainHandler extends Handler {
         return revision == -1;
     }
 
-    private void initialize(JSONObject capabilities) throws JSONException {
+    private void initialize(Lsp lsp, JSONObject capabilities) throws JSONException {
+        lsp.setCapabilities(capabilities);
         if (capabilities == null) return;
-        Lsp lsp = Application.getInstance().lsp;
         lsp.setCompTrigs(triggers(capabilities.optJSONObject("completionProvider")));
         lsp.setSigTrigs(triggers(capabilities.optJSONObject("signatureHelpProvider")));
         JSONObject semantic = capabilities.optJSONObject("semanticTokensProvider");
@@ -179,7 +202,7 @@ public class MainHandler extends Handler {
         return text.toString().toCharArray();
     }
 
-    private void completion(TextEditor editor, Object result) throws JSONException {
+    private void completion(Lsp.Incoming incoming, TextEditor editor, Object result) throws JSONException {
         JSONArray values = result instanceof JSONArray ? (JSONArray)result
             : result instanceof JSONObject ? ((JSONObject)result).optJSONArray("items") : null;
         ArrayList<ListItem> items = new ArrayList<>();
@@ -211,13 +234,13 @@ public class MainHandler extends Handler {
             }
             items.add(item);
         }
-        editor.getAutoCompletePanel().update(items);
+        editor.getAutoCompletePanel().update(items, incoming);
         if (editor.getAutoCompletePanel().isShow()) editor.getSigHelpPanel().hide();
     }
 
-    private void diagnostics(JSONObject params) throws JSONException {
+    private void diagnostics(Lsp lsp, JSONObject params) throws JSONException {
         EditFragment fragment = fragment(file(params.getString("uri")).getPath());
-        if (fragment == null || fragment.getView() == null) return;
+        if (fragment == null || fragment.getView() == null || !Application.getInstance().languageServers.owns(lsp, fragment.getFile())) return;
         if (params.has("version") && !params.isNull("version") && params.getInt("version") != fragment.getVersion()) return;
         JSONArray values = params.getJSONArray("diagnostics");
         List<ErrSpan> diagnostics = new ArrayList<>();
@@ -237,7 +260,7 @@ public class MainHandler extends Handler {
         ma.notifyUiChanged();
     }
 
-    private void semanticTokens(TextEditor editor, Object result, String path) throws JSONException {
+    private void semanticTokens(Lsp lsp, TextEditor editor, Object result, String path) throws JSONException {
         JSONArray values = result instanceof JSONObject ? ((JSONObject)result).optJSONArray("data") : null;
         List<TextEditor.SemanticToken> tokens = new ArrayList<>();
         Set<String> types = new HashSet<>();
@@ -247,7 +270,7 @@ public class MainHandler extends Handler {
         if (values != null) for (int i = 0; i + 4 < values.length(); i += 5) {
             int delta = values.getInt(i); line += delta; if (delta != 0) column = 0;
             column += values.getInt(i + 1);
-            int kind = Application.getInstance().lsp.nativeToken(values.getInt(i + 3));
+            int kind = lsp.nativeToken(values.getInt(i + 3));
             if (kind == Tokenizer.UNKNOWN) continue;
             int start = positions.offset(line, column);
             int end = positions.offset(line, column + values.getInt(i + 2));
@@ -275,7 +298,7 @@ public class MainHandler extends Handler {
         editor.requestFocus();
     }
 
-    private void codeActions(Object result, Lsp.Request request) throws JSONException {
+    private void codeActions(Lsp.Incoming incoming, Object result, Lsp.Request request) throws JSONException {
         List<Command> actions = new ArrayList<>();
         if (result instanceof JSONArray) for (int i = 0; i < ((JSONArray)result).length(); i++) {
             JSONObject value = ((JSONArray)result).getJSONObject(i);
@@ -284,6 +307,7 @@ public class MainHandler extends Handler {
             JSONObject command = value.optJSONObject("command");
             if (command == null && value.opt("command") instanceof String) command = value;
             if (command != null) { action.command = command.getString("command"); action.args = command.optJSONArray("arguments") == null ? "[]" : command.getJSONArray("arguments").toString(); }
+            action.origin = incoming;
             action.path = request.path; action.revision = request.revision;
             action.start = request.start; action.end = request.end;
             if (action.edit != null || action.command != null) actions.add(action);
@@ -293,13 +317,14 @@ public class MainHandler extends Handler {
     }
 
     void executeCodeAction(Command action) {
-        if (!isCurrent(action.path, action.revision)) return;
+        if (!isCurrent(action.path, action.revision) || action.origin == null || !action.origin.isCurrent()
+            || !Application.getInstance().languageServers.owns(action.origin.source, new File(action.path))) return;
         int[] current = selection(action.path);
         if (current[0] != action.start || current[1] != action.end) return;
         try {
             CompletableFuture<Void> applied = action.edit == null ? CompletableFuture.completedFuture(null) : applyWorkspaceEdit(action.edit);
             reportWorkspaceResult(applied.thenRun(() -> {
-                if (action.command != null) Application.getInstance().lsp.executeCommand(action);
+                if (action.command != null && action.origin.isCurrent()) action.origin.source.executeCommand(action);
             }));
         } catch (Exception error) { Log.e("LSP", "Code action failed", error); ma.toast(error.toString()); }
     }

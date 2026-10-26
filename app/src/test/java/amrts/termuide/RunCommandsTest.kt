@@ -34,7 +34,9 @@ class RunCommandsTest {
         assertFalse(Languages.forType(EditFragment.TYPE_JAVA).hasLsp)
         assertEquals(EditFragment.TYPE_PYTHON, Languages.fileType("main.py"))
         assertTrue(Languages.canRun(Languages.fileType("main.py")!!))
-        assertFalse(Languages.forType(EditFragment.TYPE_PYTHON).hasLsp)
+        assertTrue(Languages.forType(EditFragment.TYPE_PYTHON).hasLsp)
+        assertFalse(Languages.canDebug(EditFragment.TYPE_PYTHON))
+        assertFalse(Languages.canDebug(EditFragment.TYPE_JAVA))
         assertFalse(Languages.canRun(Languages.fileType("config.json")!!))
         assertFalse(Languages.canRun(Languages.fileType("main.js")!!))
         assertFalse(Languages.canRun(EditFragment.TYPE_TXT))
@@ -169,7 +171,7 @@ class RunCommandsTest {
             assertEquals(arguments, plan.arguments.takeLast(arguments.size))
             assertFalse(plan.arguments[1].contains("UNWANTED"))
             assertEquals(run.directoryPath(req.directory), RunCommands.workingDirectory(req))
-            if (language.hasLsp) {
+            if (Languages.canDebug(type)) {
                 assertEquals(req.directory, plan.directory)
                 assertTrue(plan.arguments[1].contains("cd -- "))
                 assertTrue(plan.arguments[1].contains("\"\${x[@]}\" \"\${termuide_program_args[@]}\""))

@@ -32,7 +32,7 @@ object RunCommands {
             add(requireNotNull(Languages.forType(request.type).runtime))
         }
         if (request.action == Action.DEBUG) {
-            require(Languages.forType(request.type).hasLsp) { "Debugging requires C/C++ source" }
+            require(Languages.canDebug(request.type)) { "Debugging requires C/C++ source" }
             add("gdb")
         }
     }

@@ -126,6 +126,10 @@ ActionMode.Callback, TextEditor.OnEditedListener {
             synchronized (currentDocument) { return currentDocument.toString(); }
         };
         sessions.open(fl.getAbsolutePath(), documentText, sourceLoaded);
+        if (sourceLoaded && hasLsp() && "s".equals(Application.completion)) {
+            Application.getInstance().languageServers.ensure(ma, fl, type);
+            onOpen(currentDocument);
+        }
         currentDocument.setOnTextChangeListener(this);
         editor.setEdited(sessions.isDirty(fl.getAbsolutePath()));
         if (savedInstanceState != null) {
@@ -163,6 +167,8 @@ ActionMode.Callback, TextEditor.OnEditedListener {
         return Languages.forType(type).getHasLsp();
     }
 
+    final Lsp languageServer() { return Application.getInstance().languageServers.session(fl, type); }
+
     private void invalidateType(TextEditor editor) {
         Languages.Definition language = Languages.forType(type);
         C = language.getCompiler();
@@ -186,7 +192,7 @@ ActionMode.Callback, TextEditor.OnEditedListener {
 			text.setHighlights(null);
 			return;
 		}
-		Lsp ls = Application.getInstance().lsp;
+		Lsp ls = languageServer();
         int stl = ed.getSoraEditor().getCursor().getRightLine();
         int stc = ed.getSoraEditor().getCursor().getRightColumn();
 		ls.documentHighlight(fl, stl, stc);
@@ -198,7 +204,7 @@ ActionMode.Callback, TextEditor.OnEditedListener {
         flushLanguageChange();
         TextEditor ed = getView();
 		int start = ed.getSelectionStart(), end = ed.getSelectionEnd();
-		Lsp lsp = Application.getInstance().lsp;
+		Lsp lsp = languageServer();
         if (start == end)
 			lsp.formatting(fl, width, ed.isUseSpace());
 		else {
@@ -229,8 +235,9 @@ ActionMode.Callback, TextEditor.OnEditedListener {
             languageChange = null;
             if (getView() != editor || editor.getSoraEditor().isReleased() || "s" != Application.completion) return;
             try {
-                Lsp lsp = Application.getInstance().lsp;
-                lsp.didChange(fl, mVer, editor.getText().toString());
+                Lsp lsp = Application.getInstance().languageServers.find(fl);
+                if (lsp == null) return;
+                if (!onOpen(editor.getText())) lsp.didChange(fl, mVer, editor.getText().toString());
                 if (ins && typ && c.length() == 1) {
                     int[] position = new TextPositions(editor.getText().toString()).position(editor.getCaretPosition());
                     lsp.signatureHelpTry(fl, position[0], position[1], c.charAt(0), editor.getSigHelpPanel().isShowing());
@@ -304,17 +311,22 @@ ActionMode.Callback, TextEditor.OnEditedListener {
         }
 	}
 
-    public void onOpen(Document doc) {
-        if (hasLsp()) {
-            mVer = 0;
-            doc.setDiag(null);
-            if (getView() != null) getView().postInvalidateOnAnimation();
+    public boolean onOpen(Document doc) {
+        if (hasLsp() && sourceLoaded) {
+            Lsp lsp = languageServer();
+            if (!lsp.didOpen(fl, Languages.forType(type).getId(), mVer, doc.toString())) return false;
+            doc.setDiag(null); doc.setHighlights(null);
+            if (getView() != null) {
+                getView().getAutoCompletePanel().dismiss(); getView().getSigHelpPanel().hide();
+                getView().setSemanticTokens(Collections.emptyList());
+                getView().postInvalidateOnAnimation();
+            }
             MainActivity activity = (MainActivity)getActivity();
             if (activity != null) activity.notifyUiChanged();
-            Lsp lsp = Application.getInstance().lsp;
-            lsp.didOpen(fl, (type & TYPE_C) != 0 ? "c" : "cpp", doc.toString());
             lsp.semanticTokensFull(fl);
+            return true;
         }
+        return false;
     }
 
 	public void reloadFromDisk() {
@@ -328,7 +340,7 @@ ActionMode.Callback, TextEditor.OnEditedListener {
             ed.setEdited(false);
             ed.refreshDocument();
             if ("s" == Application.completion && hasLsp()) {
-			    Lsp lsp = Application.getInstance().lsp;
+			    Lsp lsp = languageServer();
                 lsp.didChange(fl, ++mVer, cs.toString());
                 lsp.semanticTokensFull(fl);
             }
@@ -343,7 +355,7 @@ ActionMode.Callback, TextEditor.OnEditedListener {
         int pos = ed.getSelectionStart();
         Document doc = ed.getText();
         int[] position = new TextPositions(doc.toString()).position(pos);
-        Application.getInstance().lsp.rename(fl, position[0], position[1], name);
+        languageServer().rename(fl, position[0], position[1], name);
     }
 
 	@Override
@@ -420,7 +432,10 @@ ActionMode.Callback, TextEditor.OnEditedListener {
             app.sourceSaved(path, doc, timestamp);
             autoSaveWarningShown = false;
             if ("s" == Application.completion && hasLsp()) {
-                try { app.lsp.didSave(fl); } catch (RuntimeException error) { Log.e("LSP", "Unable to report saved source", error); }
+                try {
+                    Lsp server = app.languageServers.find(fl);
+                    if (server != null) server.didSave(fl);
+                } catch (RuntimeException error) { Log.e("LSP", "Unable to report saved source", error); }
             }
         }).whenComplete((clean, error) -> {
             if (error != null) {
@@ -478,15 +493,7 @@ ActionMode.Callback, TextEditor.OnEditedListener {
             return TYPE_BLOB;
         return TYPE_TXT | TYPE_HEADER;
 	}
-/*
-    private void semTokensSend() {
-        Application app = Application.getInstance();
-        Set<String> tk = app.hand.cacheData.getOrDefault(fl.toString(), null);
-        if (tk != null) { // delta
-            //app.lsp.semanticTokensDelta(fl);
-        }
-        app.lsp.semanticTokensFull(fl);
-    }*/
+
 
     @Override
     public boolean onCreateActionMode(ActionMode mode, Menu menu)
@@ -549,7 +556,7 @@ ActionMode.Callback, TextEditor.OnEditedListener {
                         positions.offset(diagnostic.enl - 1, diagnostic.enc) >= start) overlapping.add(diagnostic);
                 } catch (IllegalArgumentException staleDiagnostic) { /* Diagnostics may precede the latest edit. */ }
             }
-            if (!overlapping.isEmpty()) Application.getInstance().lsp.codeAction(fl, rng, overlapping);
+            if (!overlapping.isEmpty()) languageServer().codeAction(fl, rng, overlapping);
         }
         return true;
     }
@@ -562,7 +569,7 @@ ActionMode.Callback, TextEditor.OnEditedListener {
         switch (id) {
             case R.id.goto_:
                 if ("s" == Application.completion && hasLsp()) {
-                    Application.getInstance().lsp.definition(fl, ed.getSoraEditor().getCursor().getRightLine(),
+                    languageServer().definition(fl, ed.getSoraEditor().getCursor().getRightLine(),
                         ed.getSoraEditor().getCursor().getRightColumn());
                 }
                 p1.finish();

@@ -14,14 +14,14 @@ TermuIDE is an independent fork of [TermuC](https://github.com/RainbowC0/TermuC)
 | Area | Changes from the inherited TermuC app |
 | --- | --- |
 | Interface | Material 3 Compose screens, settings and dialogs; adaptive browser/editor layout; labeled accessibility controls and saved form/dialog state. |
-| Editor | Sora rendering/input integrated with the inherited document, undo, lexer, completion and clangd utilities. Unused legacy rendering/input code was removed. |
+| Editor | Sora rendering/input integrated with the inherited document, undo, lexer and completion utilities; shared LSP sessions for clangd and Python pylsp. Unused legacy rendering/input code was removed. |
 | Saving and recovery | Private durable drafts, background revision-aware saves, atomic/journaled publication, source-read failure protection, and optional auto-save. |
 | Execution | Shared preparation and save checks for C/C++, basic Python 3 and Java source execution, literal program arguments, entry file and working-directory overrides. |
 | Projects and tabs | `termuide.json` project files; retained workspace coordination and path-based tab selection reuse existing save/document components. |
 | Debugger | Separate GDB transport/parser state and Compose presentation; fixes for overlay layout/reconnection, stale inspection data and breakpoint controls. |
 | Attribution | In-app About, offline license texts, source links, and explicit upstream/component acknowledgements. |
 
-Python/Java execution is basic console support; their language servers, debuggers, dependency managers and build-tool integration remain future work. C/C++ retains clangd and GDB integration.
+Python/Java execution is basic console support. Python autocomplete uses the separately installed `pylsp` language server; Java server selection remains open. Python/Java debugging, dependency management and build-tool integration remain future work. C/C++ retains clangd and GDB integration.
 
 ## Installation and project identity
 
@@ -58,7 +58,23 @@ The repository is **AM-RTS/TermuIDE**. The workflow uses GitHub's current reposi
 
 ## Technology
 
-This app uses `com.termux.RUN_COMMAND` to call Termux to run command, and run `clangd` language server with `netcat`, which builds an insistent I/O channel, offering functions as diagnosing and compilation.
+TermuIDE uses `com.termux.RUN_COMMAND` to run installed tools in Termux. The shared LSP client launches clangd for C/C++ and pylsp for Python through the existing netcat stdio bridge. Each language/folder or project has its own connection, port, capabilities and request tracking; tabs in the same scope share a server. Closing its last tab stops that session. No Java server is configured.
+
+### Python autocomplete setup
+
+Install Python and the server in Termux:
+
+```sh
+pkg install python
+python -m pip install python-lsp-server
+pylsp --help
+```
+
+In TermuIDE, select **Settings → Analysis → Completion → Language Server**, then open a `.py` file. The app launches `pylsp` from Termux's command environment; Python alone is insufficient. After installing a missing server, close its Python tabs and reopen a file, or reselect Language Server in settings to restart sessions. The configured server port is the starting port; additional sessions use distinct ports.
+
+Completion, definitions and signature help reuse the existing editor controls. Diagnostics and formatting depend on installed pylsp providers; the base installation does not promise linting, formatting or refactoring plugins. Unsupported requests, including clangd semantic tokens for pylsp, are suppressed. Custom virtual environments/interpreter selection are not configured by this delivery.
+
+Unsaved and recovered text is sent directly to the server without saving the source. Completion edits remain undoable and participate in the same durable recovery as typing. Missing/disconnected servers leave files editable and recoverable. The prerelease workflow installs a pinned pylsp in a temporary host environment and exercises real sibling-module completion through the app's LSP client; this does not verify Termux/phone transport.
 
 ## Features
 
@@ -115,7 +131,7 @@ Run and Debug open the configured entry and save it through the existing recover
 
 Relative project executables such as `./build/app` retain their project location when a runtime directory is selected. Configured arguments are appended once, after expansion of the existing project command; an empty project command reports an error. A failed configuration save keeps the previous configuration active.
 
-An active `termuide.json` project continues to use its configured commands. Run-configuration arguments are appended to the existing program arguments; selecting a Python/Java entry does not replace the project's command. Additional run settings are stored privately on this installation, so changing them cannot overwrite an unsaved `termuide.json`. Python/Java highlighting and execution do not enable clangd or GDB for those languages. Language servers, debuggers, dependency environments and Maven/Gradle project integration remain separate future work.
+An active `termuide.json` project continues to use its configured commands. Run-configuration arguments are appended to the existing program arguments; selecting a Python/Java entry does not replace the project's command. Additional run settings are stored privately on this installation, so changing them cannot overwrite an unsaved `termuide.json`. Python uses pylsp rather than clangd; Java has no configured language server. Neither enables GDB for Python/Java. Their debuggers, dependency environments and Maven/Gradle project integration remain separate future work.
 
 Runtime preparation can be cancelled without affecting editor drafts. Programs use the existing Termux terminal; its controls handle running processes. Execution status distinguishes dispatch from confirmed completion, preserves nonzero exit codes, and reports unknown previous status after an app restart. Runtime checks need a Termux version supporting RUN_COMMAND results (0.109+), its RUN_COMMAND permission and external-app access. A missing result produces a bounded preparation timeout; no emulator validation is claimed.
 

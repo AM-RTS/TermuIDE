@@ -28,6 +28,7 @@ class MainHandlerTest {
     }
     private lateinit var activity: TestActivity
     private lateinit var handler: MainHandler
+    private lateinit var lsp: Lsp
     private lateinit var directory: File
     private val app get() = Application.getInstance()
 
@@ -35,17 +36,19 @@ class MainHandlerTest {
         Application.completion = "n"
         activity = Robolectric.buildActivity(TestActivity::class.java).get()
         activity.field = TextEditor(activity)
-        app.lsp = Lsp()
         handler = MainHandler(activity)
         app.hand = handler
         directory = Files.createTempDirectory("handler-review").toFile()
+        lsp = app.languageServers.session(directory.resolve("first.c"), EditFragment.TYPE_C)!!
     }
     @After fun clean() {
+        app.languageServers.end()
         if (::activity.isInitialized) activity.field.release()
         if (::directory.isInitialized) directory.deleteRecursively()
     }
     private fun open(path: String) {
         activity.paths.add(path)
+        app.languageServers.session(File(path), Languages.fileType(File(path).name) ?: EditFragment.TYPE_C)
         app.documents.open(path) { activity.field.text.toString() }
         activity.field.text.setOnTextChangeListener { _, _, _, _ -> app.documents.changed(path) }
     }
@@ -54,7 +57,7 @@ class MainHandlerTest {
             .put("end", JSONObject().put("line", line).put("character", end)))
         .put("newText", text)
     private fun response(id: Int, result: Any) {
-        handler.handleMessage(Message.obtain().apply { obj = JSONObject().put("id", id).put("result", result).toString() })
+        handler.handleMessage(Message.obtain().apply { obj = lsp.incoming(JSONObject().put("id", id).put("result", result).toString()) })
     }
 
     @Test fun delayedFormattingCannotModifyAnotherTab() {
@@ -62,7 +65,7 @@ class MainHandlerTest {
         val second = directory.resolve("second.c").path
         open(first)
         activity.field.paste("first")
-        val id = app.lsp.request(File(first), Lsp.FORMAT)
+        val id = lsp.request(File(first), Lsp.FORMAT)
         activity.paths.add(second)
         activity.selected = 1
         response(id, JSONArray().put(edit(0, 0, 5, "wrong")))
@@ -73,7 +76,7 @@ class MainHandlerTest {
         val path = directory.resolve("first.c").path
         open(path)
         activity.field.paste("first")
-        val id = app.lsp.request(File(path), Lsp.FORMAT)
+        val id = lsp.request(File(path), Lsp.FORMAT)
         activity.field.paste(" new")
         response(id, JSONArray().put(edit(0, 0, 5, "wrong")))
         assertEquals("first new", activity.field.text.toString())
@@ -84,7 +87,7 @@ class MainHandlerTest {
         open(path)
         activity.field.paste("first")
         app.documents.saved(path)
-        val id = app.lsp.request(File(path), Lsp.FORMAT)
+        val id = lsp.request(File(path), Lsp.FORMAT)
         activity.field.text.setText("new disk contents")
         activity.field.text.clearSpans()
         activity.field.text.analyzeWordWrap()
@@ -100,7 +103,7 @@ class MainHandlerTest {
         activity.field.paste("first")
         activity.field.text.markVersion()
         activity.field.setEdited(false)
-        response(app.lsp.request(File(path), Lsp.FORMAT), JSONArray().put(edit(0, 0, 5, "formatted")))
+        response(lsp.request(File(path), Lsp.FORMAT), JSONArray().put(edit(0, 0, 5, "formatted")))
         assertEquals("formatted", activity.field.soraEditor.text.toString())
         assertTrue(activity.field.isEdited)
         app.documents.flush()
@@ -115,8 +118,8 @@ class MainHandlerTest {
             .put("signatureHelpProvider", JSONObject().put("triggerCharacters", JSONArray().put("(")))
             .put("semanticTokensProvider", JSONObject().put("legend", JSONObject().put("tokenTypes", JSONArray().put("type"))))
         response(0, JSONObject().put("capabilities", capabilities))
-        assertTrue(app.lsp.isSigTrig('('))
-        assertEquals(cn.rbc.codeeditor.util.Tokenizer.TYPE, app.lsp.nativeToken(0))
+        assertTrue(lsp.isSigTrig('('))
+        assertEquals(cn.rbc.codeeditor.util.Tokenizer.TYPE, lsp.nativeToken(0))
     }
 
     @Test fun codeActionCannotRunAfterSelectionMoves() {
@@ -126,6 +129,7 @@ class MainHandlerTest {
         val target = directory.resolve("other.c").apply { writeText("original") }
         val action = Command().apply {
             this.path = path
+            origin = lsp.incoming("{}")
             revision = app.documents.state.value.single { it.path == path }.revision
             start = activity.field.selectionStart; end = activity.field.selectionEnd
             edit = JSONObject().put("changes", JSONObject().put(target.toURI().toString(), JSONArray().put(edit(0, 0, 8, "wrong"))))
@@ -166,6 +170,35 @@ class MainHandlerTest {
         catch (_: java.io.IOException) {}
         assertEquals("disk", file.readText())
         assertEquals("unsaved", app.documents.recoveryText(file.path))
+    }
+
+    @Test fun identicalRequestIdsAreRoutedThroughTheirOriginatingServer() {
+        val native = directory.resolve("first.c")
+        val python = directory.resolve("main.py")
+        open(native.path)
+        activity.field.paste("original")
+        val nativeRequest = lsp.request(native, Lsp.FORMAT)
+        open(python.path)
+        activity.selected = 1
+        val pythonServer = app.languageServers.session(python, EditFragment.TYPE_PYTHON)!!
+        val pythonRequest = pythonServer.request(python, Lsp.FORMAT)
+        assertEquals(nativeRequest, pythonRequest)
+        response(nativeRequest, JSONArray().put(edit(0, 0, 8, "wrong")))
+        assertEquals("original", activity.field.text.toString())
+        val result = JSONObject().put("id", pythonRequest).put("result", JSONArray().put(edit(0, 0, 8, "python")))
+        handler.handleMessage(Message.obtain().apply { obj = pythonServer.incoming(result.toString()) })
+        assertEquals("python", activity.field.text.toString())
+    }
+
+    @Test fun queuedResponseFromAnEndedServerCannotModifyTheDocument() {
+        val path = directory.resolve("first.c").path
+        open(path)
+        activity.field.paste("original")
+        val id = lsp.request(File(path), Lsp.FORMAT)
+        val incoming = lsp.incoming(JSONObject().put("id", id).put("result", JSONArray().put(edit(0, 0, 8, "wrong"))).toString())
+        lsp.end()
+        handler.handleMessage(Message.obtain().apply { obj = incoming })
+        assertEquals("original", activity.field.text.toString())
     }
 
     @Test fun positionsPreserveCrLfAndLoneCrLineBoundaries() {

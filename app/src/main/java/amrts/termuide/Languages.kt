@@ -27,7 +27,7 @@ object Languages {
     private val definitions = listOf(
         Definition("c", EditFragment.TYPE_C, "clang", true),
         Definition("cpp", EditFragment.TYPE_CPP, "clang++", true),
-        Definition("python", EditFragment.TYPE_PYTHON, null, false),
+        Definition("python", EditFragment.TYPE_PYTHON, null, true),
         Definition("java", EditFragment.TYPE_JAVA, "javac", false),
         Definition("javascript", EditFragment.TYPE_JAVASCRIPT, "node", false),
         Definition("json", EditFragment.TYPE_JSON, null, false),
@@ -49,6 +49,7 @@ object Languages {
 
     @JvmStatic fun fileType(name: String): Int? = extensions[name.substringAfterLast('.', "")]
     @JvmStatic fun isCodeFile(name: String): Boolean = fileType(name) != null
+    @JvmStatic fun canDebug(type: Int): Boolean = forType(type).id in listOf("c", "cpp")
     @JvmStatic fun canRun(type: Int): Boolean =
         type == EditFragment.TYPE_C || type == EditFragment.TYPE_CPP || forType(type).id in listOf("python", "java")
 }
