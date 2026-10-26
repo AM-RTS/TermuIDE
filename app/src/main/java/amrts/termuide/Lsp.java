@@ -33,6 +33,7 @@ public final class Lsp implements Runnable {
     final int port;
     private volatile int generation;
     private boolean started;
+    private volatile boolean failed;
     private final Set<String> opened = new HashSet<>();
     private JSONObject capabilities;
     Lsp() { this(LanguageServers.Server.CLANGD, null, Application.lsp_host, Application.lsp_port); }
@@ -87,9 +88,11 @@ public final class Lsp implements Runnable {
     }
 
     boolean isStarted() { return started; }
+    boolean hasFailed() { return failed; }
     public void start(Context context, Handler read) {
         end();
         started = true;
+        failed = false;
         ready = false;
         capabilities = null;
         compTrigs = new char[0]; sigTrigs = new char[0]; semToks = new SemToken[0];
@@ -173,6 +176,7 @@ public final class Lsp implements Runnable {
             sender.offer(TERM);
             try { if (connection != null) connection.close(); } catch (IOException ignored) { }
             if (sender == mSndr) {
+                if (epoch == generation) failed = true;
                 ready = false;
                 requests.clear();
                 Message message = Message.obtain();

@@ -68,6 +68,33 @@ class LanguageServersTest {
         assertEquals(1024, python.port)
     }
 
+    @Test fun openingAnotherTabRetriesAFailedServerAndRebindsItsExistingDocuments() {
+        Application.completion = "s"
+        val first = File("/workspace/main.c")
+        val other = File("/workspace/other.c")
+        val failed = servers.session(first, EditFragment.TYPE_C)!!
+        servers.session(other, EditFragment.TYPE_C)
+        val python = servers.session(File("/workspace/main.py"), EditFragment.TYPE_PYTHON)!!
+        val stale = failed.incoming("{}")
+        Lsp::class.java.getDeclaredField("started").apply { isAccessible = true }.setBoolean(failed, true)
+        Lsp::class.java.getDeclaredField("failed").apply { isAccessible = true }.setBoolean(failed, true)
+        val unavailable = object : android.content.ContextWrapper(Application.getInstance()) {
+            override fun startForegroundService(service: android.content.Intent): android.content.ComponentName {
+                throw SecurityException("No Termux service in this host fixture")
+            }
+        }
+        try {
+            servers.ensure(unavailable, other, EditFragment.TYPE_C)
+            val replacement = servers.find(first)!!
+            assertNotSame(failed, replacement)
+            assertSame(replacement, servers.find(other))
+            assertFalse(stale.isCurrent)
+            assertNotEquals(failed.port, replacement.port)
+            assertFalse(replacement.isStarted)
+            assertSame(python, servers.find(File("/workspace/main.py")))
+        } finally { Application.completion = "n" }
+    }
+
     @Test fun stoppedSessionPortsAreNotImmediatelyReused() {
         val file = File("/workspace/main.py")
         val original = servers.session(file, EditFragment.TYPE_PYTHON)!!

@@ -65,11 +65,20 @@ final class LanguageServers {
     void ensure(Context context, File file, int type) {
         if (!"s".equals(Application.completion)) return;
         Lsp session = session(file, type);
-        if (session == null || session.isStarted()) return;
+        if (session == null || (session.isStarted() && !session.hasFailed())) return;
+        if (session.hasFailed()) {
+            Lsp previous = session;
+            previous.end();
+            Lsp replacement = new Lsp(previous.server, previous.root, Application.lsp_host, allocatePort());
+            sessions.replaceAll((key, value) -> value == previous ? replacement : value);
+            documents.replaceAll((key, value) -> value == previous ? replacement : value);
+            session = replacement;
+        }
         try {
             session.start(context, Application.getInstance().hand);
             session.initialize(session.root);
         } catch (SecurityException | IllegalStateException | IllegalArgumentException error) {
+            session.end();
             Log.w("LSP", "Language server unavailable; the document remains editable", error);
         }
     }
