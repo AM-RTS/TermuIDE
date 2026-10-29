@@ -458,6 +458,57 @@ class ActivityRecoveryTest {
         }
     }
 
+    @Test fun browserRenameAndDeleteRestartOnlyAffectedJavaSessionsAndKeepDirtyRecovery() {
+        val original = "package demo; class Main {}"
+        val main = directory.resolve("Main.java").apply { writeText(original) }
+        val helper = directory.resolve("Helper.java").apply { writeText("package demo; class Helper {}") }
+        val draft = original + " // recovered draft"
+        app.documents.open(main.path) { draft }
+        app.documents.changed(main.path)
+        app.documents.flush()
+        val activity = launch()
+        activity.fragmentManager.executePendingTransactions()
+        val servers = app.languageServers
+        val java = servers.session(main, EditFragment.TYPE_JAVA)!!
+        java.connectedSender()
+        val nativeFile = directory.resolve("main.c")
+        val pythonFile = directory.resolve("main.py")
+        val otherFile = directory.resolve("other/Other.java")
+        val native = servers.session(nativeFile, EditFragment.TYPE_C)!!
+        val python = servers.session(pythonFile, EditFragment.TYPE_PYTHON)!!
+        val other = servers.session(otherFile, EditFragment.TYPE_JAVA)!!
+        val stale = java.incoming("{}")
+        Application.completion = "s"
+        try {
+            activity.renameFile(helper.path, "Renamed.java")
+            val renamed = directory.resolve("Renamed.java")
+            assertTrue(renamed.isFile)
+            val replacement = servers.find(main)!!
+            assertNotSame(java, replacement)
+            assertFalse(stale.isCurrent)
+            assertSame(native, servers.find(nativeFile))
+            assertSame(python, servers.find(pythonFile))
+            assertSame(other, servers.find(otherFile))
+            activity.deleteBrowserEntry(renamed.path)
+            val deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5)
+            while (activity.isDeleting && System.nanoTime() < deadline) {
+                org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+                Thread.sleep(20)
+            }
+            assertFalse(activity.isDeleting)
+            assertFalse(renamed.exists())
+            assertNotSame(replacement, servers.find(main))
+            assertSame(native, servers.find(nativeFile))
+            assertSame(python, servers.find(pythonFile))
+            assertSame(other, servers.find(otherFile))
+            app.documents.flush()
+            assertEquals(draft, activity.editor.text.toString())
+            assertEquals(draft, app.documents.recoveryText(main.path))
+            assertTrue(app.documents.isDirty(main.path))
+            assertEquals(original, main.readText())
+        } finally { Application.completion = "n" }
+    }
+
     @Test fun rotationAfterStateCaptureKeepsServerVersionsAndPendingDraftsCurrent() {
         val file = directory.resolve("main.py").apply { writeText("value = 1") }
         val activity = launch()
