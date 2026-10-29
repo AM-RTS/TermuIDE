@@ -106,7 +106,7 @@ class LanguageServersTest {
         val c = servers.session(File("/workspace/main.c"), EditFragment.TYPE_C)!!
         val python = servers.session(File("/workspace/main.py"), EditFragment.TYPE_PYTHON)!!
         assertEquals(listOf("nice", "-n", "-20", "clangd", "--header-insertion-decorators=0"), c.launchArguments().takeLast(5))
-        assertEquals("pylsp", python.launchArguments().last())
+        assertEquals(listOf("python") + RunCommands.pythonLanguageServerArguments(), python.launchArguments().drop(8))
         assertFalse(python.launchArguments().contains("nice"))
         val sender = python.connectedSender()
         python.initialize(python.root)
@@ -249,7 +249,7 @@ class LanguageServersTest {
             assertSame(c, servers.find(native))
             assertEquals("$scope/.venv", replacement.environment)
             replacement.configureRuntime("$scope/.venv/bin/python")
-            assertEquals(listOf("$scope/.venv/bin/python", "-m", "pylsp"), replacement.launchArguments().takeLast(3))
+            assertEquals(listOf("$scope/.venv/bin/python") + RunCommands.pythonLanguageServerArguments(), replacement.launchArguments().takeLast(5))
             val sender = replacement.connectedSender()
             replacement.initialize(scope)
             val options = JSONObject(String(sender.single(), Charsets.UTF_8)).getJSONObject("params").getJSONObject("initializationOptions")

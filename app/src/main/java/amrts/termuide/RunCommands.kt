@@ -113,13 +113,19 @@ object RunCommands {
         return probeTools(workingDirectory(request), source, tools, cached - "python", checks, pinned, request.pythonEnvironment)
     }
 
+    // Remove workspace imports before site hooks run; retain installed venv and user-site packages.
+    private const val PYTHON_TOOL_SETUP = "import sys;sys.path.pop(0);import os;os.environ.pop('PYTHONPATH',None);os.environ.pop('PYTHONHOME',None);import site;site.main();"
+
+    @JvmStatic fun pythonLanguageServerArguments(): List<String> = listOf("-E", "-S", "-c",
+        PYTHON_TOOL_SETUP + "import runpy;runpy.run_module('pylsp',run_name='__main__',alter_sys=True)")
+
     @JvmStatic fun languageServerProbe(server: String, root: String, environment: String): Plan {
         require(server in listOf("pylsp", "clangd")) { "No language server configured" }
         require(environment.isEmpty() || (File(environment).isAbsolute && environment.none { it.isISOControl() })) { "Invalid Python environment" }
         val python = server == "pylsp"
         val tool = if (python) "python" else "clangd"
         val checks = if (python) mapOf("python" to (PYTHON_CHECK +
-            "\"\$resolved\" -c 'import pylsp' >/dev/null 2>&1 || { printf '%s\\n' 'Install python-lsp-server in the selected Python environment.' >&2; exit 127; }; ")) else emptyMap()
+            "\"\$resolved\" -E -S -c ${quote(PYTHON_TOOL_SETUP + "import pylsp")} >/dev/null 2>&1 || { printf '%s\\n' 'Install python-lsp-server in the selected Python environment.' >&2; exit 127; }; ")) else emptyMap()
         val pinned = if (python && environment.isNotEmpty()) mapOf("python" to environment + "/bin/python") else emptyMap()
         return probeTools(root, "", listOf(tool), emptyMap(), checks, pinned, if (python) environment else "")
     }

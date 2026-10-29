@@ -121,9 +121,9 @@ public final class Lsp implements Runnable {
         if (executable == null) args.addAll(Arrays.asList(server.command));
         else {
             args.add(executable);
-            if (server == LanguageServers.Server.PYTHON) args.addAll(Arrays.asList("-m", "pylsp"));
-            else args.add("--header-insertion-decorators=0");
+            if (server == LanguageServers.Server.CLANGD) args.add("--header-insertion-decorators=0");
         }
+        if (server == LanguageServers.Server.PYTHON) args.addAll(RunCommands.pythonLanguageServerArguments());
         return args.toArray(new String[0]);
     }
 

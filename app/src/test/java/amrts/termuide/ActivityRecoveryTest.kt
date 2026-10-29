@@ -247,6 +247,9 @@ class ActivityRecoveryTest {
         val environment = requireNotNull(System.getenv("TERMUIDE_TEST_PYTHON_ENV"))
         RunConfiguration.save(app, directory.path, RunConfiguration(pythonEnvironment = environment))
         val file = directory.resolve("main.py").apply { writeText("# original source\n") }
+        val unwantedImport = directory.resolve("tooling-imported-workspace")
+        for (module in listOf("pylsp.py", "sitecustomize.py", "usercustomize.py", "runpy.py"))
+            directory.resolve(module).writeText("open('tooling-imported-workspace', 'w').write('unsafe')\nraise RuntimeError('Workspace module imported by tooling')\n")
         directory.resolve("sibling.py").writeText("greeting = 'hello'\n")
         directory.resolve("data-file.txt").writeText("example")
         val draft = "import sibling\nlabel = '🧪'; sibling.gre; suffix = 1"
@@ -262,8 +265,12 @@ class ActivityRecoveryTest {
         // Host-only transport smoke: Termux uses the same JSON framing through the existing nc stdio bridge.
         assertEquals(environment, lsp.environment)
         lsp.configureRuntime("$environment/bin/python")
-        val process = ProcessBuilder("$environment/bin/python", "-m", "pylsp", "--tcp", "--host", lsp.host, "--port", lsp.port.toString())
-            .directory(directory).redirectError(ProcessBuilder.Redirect.INHERIT).start()
+        val launch = lsp.launchArguments().toList()
+        val interpreter = launch.indexOf("$environment/bin/python")
+        assertTrue(interpreter >= 0)
+        val process = ProcessBuilder(launch.drop(interpreter) + listOf("--tcp", "--host", lsp.host, "--port", lsp.port.toString()))
+            .directory(directory).redirectError(ProcessBuilder.Redirect.INHERIT)
+            .apply { environment()["PYTHONPATH"] = directory.path; environment()["PYTHONHOME"] = "/invalid-python-home" }.start()
         val reader = Thread { lsp.run() }
         fun await(description: String, condition: () -> Boolean) {
             val deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(25)
@@ -320,6 +327,7 @@ class ActivityRecoveryTest {
             assertEquals(activity.editor.text.toString(), app.documents.recoveryText(file.path))
             assertEquals("# original source\n", file.readText())
             assertTrue(app.documents.isDirty(file.path))
+            assertFalse("Tooling must never import workspace modules", unwantedImport.exists())
         } finally {
             Application.completion = "n"
             app.getSharedPreferences("run_configurations", 0).edit().remove(directory.path).commit()

@@ -13,7 +13,7 @@ import java.util.*;
 final class LanguageServers {
     enum Server {
         CLANGD("clangd", "clangd", "--header-insertion-decorators=0"),
-        PYTHON("pylsp", "python", "-m", "pylsp");
+        PYTHON("pylsp", "python");
 
         final String id;
         final String[] command;

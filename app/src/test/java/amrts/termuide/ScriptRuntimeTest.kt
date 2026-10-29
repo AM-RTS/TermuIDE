@@ -377,4 +377,63 @@ class ScriptRuntimeTest {
         assertTrue(ran.stdout.contains(bashPath(env.resolve("bin/python"))))
     }
 
+    private fun toolCommand(arguments: List<String>) = RunCommands.Plan("unused-by-host-fixture",
+        listOf("-c", "\"\$@\"", "termuide-tool") + arguments, directory.path, true)
+
+    @Test fun pythonToolingIgnoresWorkspaceAndPythonPathBeforeStartupHooksRun() {
+        val env = System.getenv("TERMUIDE_TEST_PYTHON_ENV")
+        org.junit.Assume.assumeNotNull(env)
+        val marker = File(directory, "unsafe-import")
+        val extra = File(directory, "python-path").apply { mkdirs() }
+        for (folder in listOf(directory, extra)) for (module in listOf("pylsp.py", "sitecustomize.py", "usercustomize.py", "runpy.py"))
+            File(folder, module).writeText("open(${org.json.JSONObject.quote(marker.path)}, 'w').write('unsafe')\nraise RuntimeError('Workspace code imported')\n")
+        val poisoned = mapOf("PYTHONPATH" to extra.path + File.pathSeparator + directory.path, "PYTHONHOME" to "/invalid-python-home")
+        for (selection in listOf(env!!, "")) {
+            val probe = execute(RunCommands.languageServerProbe("pylsp", directory.path, selection), environment = poisoned)
+            assertEquals(probe.stderr, 0, probe.exit)
+            val lsp = Lsp(LanguageServers.Server.PYTHON, directory.path, "127.0.0.1", 48455, selection)
+            lsp.configureRuntime(probe.stdout.trim())
+            val launch = lsp.launchArguments().toList()
+            val interpreter = launch.indexOf(probe.stdout.trim())
+            assertTrue(interpreter >= 0)
+            val version = execute(toolCommand(launch.drop(interpreter) + "--version"), environment = poisoned)
+            assertEquals(version.stderr, 0, version.exit)
+            assertTrue(version.stdout.contains("1.15.0"))
+            assertFalse("Opening or restarting must not import workspace modules", marker.exists())
+        }
+        val base = execute(toolCommand(listOf("$env/bin/python", "-E", "-S", "-c", "import sys;print(sys._base_executable)")))
+        assertEquals(base.stderr, 0, base.exit)
+        val empty = File(directory, "empty-environment")
+        val create = execute(toolCommand(listOf(base.stdout.trim(), "-E", "-m", "venv", "--without-pip", empty.path)))
+        assertEquals(create.stderr, 0, create.exit)
+        val missing = execute(RunCommands.languageServerProbe("pylsp", directory.path, empty.path), environment = poisoned)
+        assertEquals(127, missing.exit)
+        assertTrue(missing.stderr.contains("Install python-lsp-server"))
+        assertFalse(marker.exists())
+    }
+
+    @Test fun pythonToolingStillFindsPackagesInstalledInTheNormalUserSite() {
+        val env = System.getenv("TERMUIDE_TEST_PYTHON_ENV")
+        org.junit.Assume.assumeNotNull(env)
+        val home = File(directory, "user-home").apply { mkdirs() }
+        val base = execute(toolCommand(listOf("$env/bin/python", "-E", "-S", "-c", "import sys;print(sys._base_executable)")))
+        assertEquals(base.stderr, 0, base.exit)
+        val userSite = execute(toolCommand(listOf(base.stdout.trim(), "-E", "-S", "-c", "import site;print(site.getusersitepackages())")), environment = mapOf("HOME" to home.path))
+        assertEquals(userSite.stderr, 0, userSite.exit)
+        val installed = File(userSite.stdout.trim(), "pylsp").apply { mkdirs() }
+        installed.resolve("__init__.py").writeText("")
+        installed.resolve("__main__.py").writeText("print('user-site server')\n")
+        val python = File(directory, "bin/python").apply {
+            parentFile.mkdirs()
+            writeText("#!/bin/bash\nexec '${base.stdout.trim().replace("'", "'\\''")}' \"\$@\"\n")
+            setExecutable(true)
+        }
+        val environment = mapOf("HOME" to home.path, "PATH" to python.parent + File.pathSeparator + System.getenv("PATH"))
+        val probe = execute(RunCommands.languageServerProbe("pylsp", directory.path, ""), environment = environment)
+        assertEquals(probe.stderr, 0, probe.exit)
+        val launched = execute(toolCommand(listOf(probe.stdout.trim()) + RunCommands.pythonLanguageServerArguments()), environment = environment)
+        assertEquals(launched.stderr, 0, launched.exit)
+        assertEquals("user-site server\n", launched.stdout)
+    }
+
 }
