@@ -291,7 +291,9 @@ def evaluate(tools, output, server, heap, dependency):
             except queue.Empty:
                 pass
         report['cases']['semantic_diagnostics'] = {'passed': any(item.get('severity') == 1 and 'missingSymbol' in item.get('message', '') for item in diagnostics), 'diagnostics': diagnostics}
-        time.sleep(2)
+        # Keep a common observation window so startup/indexing is not cut short by fast checks.
+        time.sleep(max(2, 30 - (time.perf_counter() - client.started)))
+        report['observation_seconds'] = round(time.perf_counter() - client.started, 2)
         report['end_rss_mib'] = round(client.rss_kib()/1024, 2)
     except Exception as error:
         report['fatal_error'] = repr(error)
@@ -339,7 +341,7 @@ def main():
     preparation = json.loads((tools/'preparation.json').read_text())
     report = {'architecture': platform.machine(), 'platform': platform.platform(), 'cpu_count': os.cpu_count(),
               'preparation': preparation, 'measurements': reports,
-              'limits': 'One process trial per heap/server, five warm requests. No filesystem cache flush. Linux JVM RSS, not Android/Termux measurements. Direct LSP client, not TermuIDE adapter or durable draft-store validation.'}
+              'limits': 'One process trial per heap/server, at least 30 seconds of memory observation, five warm requests. No filesystem cache flush. Functional failures can add retries. Linux JVM RSS, not Android/Termux measurements. Direct LSP client, not TermuIDE adapter or durable draft-store validation.'}
     (output/'comparison.json').write_text(json.dumps(report, indent=2))
     lines = ['| Server | Heap MiB | Checks | Init ms | First completion ms | Warm median ms | Peak RSS MiB |',
              '|---|---:|---|---:|---:|---:|---:|']
