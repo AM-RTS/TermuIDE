@@ -360,6 +360,11 @@ public final class Lsp implements Runnable {
         if (isEnded()) return;
 		tp = INITIALIZED;
 		mSndr.send("initialized", new HashMap<>(), -1);
+        if (server == LanguageServers.Server.JAVA && root != null) {
+            // An explicit classpath keeps this initial integration out of Maven/Bazel auto-import.
+            mSndr.send("workspace/didChangeConfiguration", Collections.singletonMap("settings",
+                Collections.singletonMap("java", Collections.singletonMap("classPath", Collections.singletonList(root)))), -1);
+        }
         requests.clear();
         ready = true;
         setState(LanguageServers.State.READY, null);

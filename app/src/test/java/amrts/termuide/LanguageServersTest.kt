@@ -194,6 +194,11 @@ class LanguageServersTest {
         val initialization = JSONObject(String(sender.remove(), Charsets.UTF_8)).getJSONObject("params")
         assertFalse(initialization.getJSONObject("capabilities").getJSONObject("textDocument")
             .getJSONObject("completion").getJSONObject("completionItem").getBoolean("snippetSupport"))
+        java.initialized()
+        sender.remove() // initialized
+        val configuration = JSONObject(String(sender.remove(), Charsets.UTF_8)).getJSONObject("params")
+        assertEquals(java.root, configuration.getJSONObject("settings").getJSONObject("java")
+            .getJSONArray("classPath").getString(0))
         java.setCapabilities(JSONObject().put("completionProvider", JSONObject()).put("renameProvider", true))
         java.didOpen(file, "java", 0, "/*🧪*/ Helper.gre")
         sender.clear()

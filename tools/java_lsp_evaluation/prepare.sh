@@ -4,6 +4,7 @@ scripts=$(cd -- "$(dirname -- "$0")" && pwd)
 root=$1
 mkdir -p "$root"
 cd "$root"
+root=$PWD
 
 # Pin source and binaries; never run upstream scripts that download desktop JDKs.
 revision=$(tr -d '\r\n' < "$scripts/../java_lsp/revision")
