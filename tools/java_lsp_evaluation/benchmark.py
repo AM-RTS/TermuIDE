@@ -192,16 +192,17 @@ public class Main {
   }
 }
 '''
-HELPER = 'package demo; public class Helper { public static String greeting() { return "hi"; } }'
-PERSON = 'package demo; public record Person(String name) {}'
+HELPER = 'package demo;\npublic class Helper { public static String greeting() { return "hi"; } }\n'
+PERSON = 'package demo;\npublic record Person(String name) {}\n'
+COMPACT = 'package demo; public class Compact { public static String compactGreeting() { return "hi"; } }'
 
 
-def completion(client, file, prefix, expected, absent=None):
+def completion(client, file, prefix, expected, absent=None, timeout=5):
     text = TEMPLATE.replace('CARET', prefix)
     client.document(file, text)
     point = position(text, text.index(prefix, text.index('Object result')) + len(prefix))
     attempts, latencies, labels = 0, [], []
-    deadline = time.perf_counter() + 20
+    deadline = time.perf_counter() + timeout
     while time.perf_counter() < deadline:
         attempts += 1
         start = time.perf_counter()
@@ -223,9 +224,9 @@ def evaluate(tools, output, server, heap, dependency):
     root = (folder / 'workspace').resolve()
     source = root / 'src/demo'
     source.mkdir(parents=True)
-    main, helper, person = [source / name for name in ['Main.java', 'Helper.java', 'Person.java']]
+    main, helper, person, compact = [source / name for name in ['Main.java', 'Helper.java', 'Person.java', 'Compact.java']]
     disk_text = TEMPLATE.replace('CARET', 'text')
-    for path, text in [(main, disk_text), (helper, HELPER), (person, PERSON)]:
+    for path, text in [(main, disk_text), (helper, HELPER), (person, PERSON), (compact, COMPACT)]:
         path.write_text(text)
     settings = {'java': {'classPath': [str(dependency)],
         'project': {'sourcePaths': ['src'], 'referencedLibraries': [str(dependency)]},
@@ -249,19 +250,21 @@ def evaluate(tools, output, server, heap, dependency):
     report = {'server': server, 'heap_mib': heap, 'command': command, 'cases': {}}
     client = None
     try:
+        print(f'Starting {server}, heap {heap} MiB', flush=True)
         client = Client(command, root, settings, folder/'session')
         capabilities = client.initialize()
         report['initialize_reply_ms'] = round((time.perf_counter() - client.started) * 1000, 2)
         report['capabilities'] = capabilities
         client.document(helper, HELPER)
         client.document(person, PERSON)
+        client.document(compact, COMPACT)
         for name, prefix, expected in [('string_and_utf16', 'text.sub', 'substring'),
                 ('generic_type', 'values.get(0).sub', 'substring'),
                 ('cross_file', 'Helper.gre', 'greeting'),
                 ('dependency_jar', 'External.lib', 'libraryGreeting'),
                 ('record_accessor', 'new Person("name").na', 'name')]:
             try:
-                report['cases'][name] = completion(client, main, prefix, expected)
+                report['cases'][name] = completion(client, main, prefix, expected, timeout=20 if name == 'string_and_utf16' else 5)
                 if name == 'string_and_utf16' and report['cases'][name]['passed']:
                     report['first_useful_completion_ms'] = round((time.perf_counter() - client.started) * 1000, 2)
             except Exception as error:
@@ -274,6 +277,7 @@ def evaluate(tools, output, server, heap, dependency):
         report['cases']['warm_completion'] = {'passed': all(item['passed'] for item in warm)}
         samples = [sample for item in warm for sample in item['request_ms']]
         report['warm_request_ms'] = {'samples': len(samples), 'median': statistics.median(samples), 'max': max(samples)}
+        report['cases']['one_line_package_declaration'] = completion(client, main, 'Compact.comp', 'compactGreeting')
         version = client.document(main, TEMPLATE.replace('CARET', 'missingSymbol'))
         deadline = time.perf_counter() + 15
         diagnostics = []
@@ -314,6 +318,7 @@ def evaluate(tools, output, server, heap, dependency):
     report['workspace_cache_file_bytes'] = sum(p.stat().st_size for name in ['metadata', 'configuration']
         for p in (folder/name).rglob('*') if p.is_file())
     (folder/'result.json').write_text(json.dumps(report, indent=2))
+    print(f"Finished {server}, heap {heap}: " + json.dumps({name: case['passed'] for name, case in report['cases'].items()}), flush=True)
     return report
 
 
