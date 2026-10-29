@@ -188,6 +188,19 @@ final class LanguageServers {
         restartMatching(context, value -> value.server == Server.PYTHON && (project || scope.equals(value.root)));
     }
 
+    void javaWorkspaceChanged(Context context, File... changedFiles) {
+        // Reuse restart/reopen to rebuild Java's disk index without touching document recovery.
+        restartMatching(context, session -> {
+            if (session.server != Server.JAVA) return false;
+            java.nio.file.Path root = new File(session.root).toPath();
+            for (File file : changedFiles) {
+                java.nio.file.Path changed = file.getAbsoluteFile().toPath().normalize();
+                if (changed.startsWith(root) || root.startsWith(changed)) return true;
+            }
+            return false;
+        });
+    }
+
     private void restartMatching(Context context, java.util.function.Predicate<Lsp> predicate) {
         Map<String, Server> files = new LinkedHashMap<>();
         for (Map.Entry<String, Lsp> document : documents.entrySet())

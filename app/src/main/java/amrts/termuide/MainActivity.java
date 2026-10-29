@@ -784,7 +784,10 @@ public class MainActivity extends androidx.activity.ComponentActivity implements
         if (Application.getInstance().saver.isSaving()) { toast(getString(R.string.saving)); return; }
         File source = new File(from);
         if (!source.isAbsolute()) source = new File(pwd, from);
-        if (!to.isEmpty() && FileHelper.rename(source, to)) refresh();
+        if (!to.isEmpty() && FileHelper.rename(source, to)) {
+            Application.getInstance().languageServers.javaWorkspaceChanged(this, source, new File(source.getParentFile(), to));
+            refresh();
+        }
         else toast(getString(R.string.rename_failed));
     }
 
@@ -799,6 +802,8 @@ public class MainActivity extends androidx.activity.ComponentActivity implements
                 runOnUiThread(new Runnable() {
                     @Override public void run() {
                         deleting = false;
+                        // A failed directory deletion may still have removed some children.
+                        Application.getInstance().languageServers.javaWorkspaceChanged(MainActivity.this, target);
                         if (removed) {
                             toast(getText(R.string.deleted));
                             refresh();
@@ -815,7 +820,9 @@ public class MainActivity extends androidx.activity.ComponentActivity implements
             return;
         }
         try {
-            FileHelper.createFile(new File(pwd, name), directory);
+            File created = new File(pwd, name);
+            FileHelper.createFile(created, directory);
+            Application.getInstance().languageServers.javaWorkspaceChanged(this, created);
             refresh();
         } catch (IOException e) {
             e.printStackTrace();
