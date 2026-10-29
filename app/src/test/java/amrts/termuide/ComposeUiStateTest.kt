@@ -259,13 +259,14 @@ class ComposeUiStateTest {
         var saved: String? = null
         var succeed = false
         var restarts = 0
+        val configurationError = mutableStateOf<String?>(null)
         val statuses = listOf(
             LanguageServers.Info(LanguageServers.Server.PYTHON, LanguageServers.State.MISSING, "Install pylsp", true),
             LanguageServers.Info(LanguageServers.Server.JAVA, LanguageServers.State.READY, null, true)
         )
         restore.setContent {
             MaterialTheme { LanguageToolsDialog("/project", "", statuses,
-                onSave = { saved = it; succeed }, onRestart = { restarts++ }, onDismiss = {}) }
+                onSave = { saved = it; succeed }, onRestart = { restarts++ }, onDismiss = {}, initialError = configurationError.value) }
         }
         compose.onNodeWithTag("lsp-restart-pylsp").performScrollTo().performClick()
         assertEquals(1, restarts)
@@ -283,6 +284,9 @@ class ComposeUiStateTest {
         compose.onNodeWithTag("python-environment-apply").performClick()
         compose.onNodeWithTag("python-environment-apply").assertIsNotEnabled()
         compose.onNodeWithTag("lsp-restart-pylsp").performScrollTo().assertIsEnabled()
+        compose.runOnIdle { configurationError.value = "Unreadable Python configuration" }
+        compose.onNodeWithTag("lsp-restart-pylsp").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithTag("lsp-restart-java").performScrollTo().assertIsEnabled()
     }
 
 }

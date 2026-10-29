@@ -886,8 +886,8 @@ internal fun LanguageToolsDialog(
                         TextButton(onClick = {
                             try { onRestart(info.server.id); haptics.performHapticFeedback(HapticFeedbackType.LongPress) }
                             catch (changed: IllegalStateException) { error = changed.message }
-                        }, enabled = info.restartable && initialError == null && info.state !in listOf(LanguageServers.State.CHECKING, LanguageServers.State.STARTING, LanguageServers.State.DISABLED)
-                            && (info.server != LanguageServers.Server.PYTHON || environment == savedEnvironment),
+                        }, enabled = info.restartable && info.state !in listOf(LanguageServers.State.CHECKING, LanguageServers.State.STARTING, LanguageServers.State.DISABLED)
+                            && (info.server != LanguageServers.Server.PYTHON || (initialError == null && environment == savedEnvironment)),
                             modifier = Modifier.heightIn(min = 48.dp).testTag("lsp-restart-${info.server.id}").semantics { contentDescription = context.getString(R.string.lsp_restart_description, label) }) {
                             Text(context.getString(R.string.lsp_restart))
                         }
