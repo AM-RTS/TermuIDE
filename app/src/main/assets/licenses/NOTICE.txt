@@ -20,6 +20,8 @@ External tools
 
 Thanks to the Termux community and the maintainers of clang/clangd, GDB, Python and OpenJDK. Termux and these tools are installed separately; their own licenses apply. They are not bundled with the TermuIDE APK. Termux source: https://github.com/termux/termux-app .
 
+Optional Java completion and diagnostics use the separately installed TermuIDE fork of George Fraser's Java language server. Copyright (c) 2016 George Fraser; MIT license, with retained third-party notices including Oracle's GPLv2 with Classpath Exception notice in ReusableCompiler. Upstream: https://github.com/georgewfraser/java-language-server . Fork: https://github.com/AM-RTS/java-language-server . The optional tools archive includes the MIT license, ReusableCompiler notice/source and exact source revision; dependency JARs retain their META-INF notices. Neither this server nor a JDK is bundled in the APK.
+
 Fork changes and source
 
 The changes are described in README.md and docs/architecture/multilanguage-runtime.md. Source for this fork remains at https://github.com/AM-RTS/TermuIDE ; the repository name does not determine the Android app name. Preserve these notices and the applicable license texts when redistributing. Publish the corresponding source and build instructions for the exact binary release, including any modifications; a link to a different upstream revision is not a substitute.

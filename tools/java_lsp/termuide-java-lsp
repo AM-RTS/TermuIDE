@@ -2,19 +2,24 @@
 set -euo pipefail
 
 # Resolve symlinks so the command can live on PATH while its JARs stay in user storage.
-home=$(cd -- "$(dirname -- "$(readlink -f -- "$0")")/.." && pwd)
+bundle=$(cd -- "$(dirname -- "$(readlink -f -- "$0")")/.." && pwd)
 unset CLASSPATH JAVA_TOOL_OPTIONS JDK_JAVA_OPTIONS _JAVA_OPTIONS
-java=$(command -v java) || { printf '%s\n' 'Java autocomplete requires JDK 25 in Termux.' >&2; exit 127; }
+if [ -n "${PREFIX-}" ] && [ -x "$PREFIX/lib/jvm/java-25-openjdk/bin/java" ]; then
+  java="$PREFIX/lib/jvm/java-25-openjdk/bin/java"
+else
+  java=$(command -v java) || { printf '%s\n' 'Java autocomplete requires JDK 25 in Termux.' >&2; exit 127; }
+fi
 properties=$("$java" -XshowSettings:properties -version 2>&1) || exit 127
 if ! printf '%s\n' "$properties" | grep -Eq '^[[:space:]]*java.specification.version = 25[[:space:]]*$'; then
   printf '%s\n' 'Java autocomplete requires exactly JDK 25; Java execution has a separate runtime requirement.' >&2
   exit 127
 fi
 "$java" --describe-module jdk.compiler >/dev/null 2>&1 || { printf '%s\n' 'Java autocomplete requires the full JDK 25 compiler module.' >&2; exit 127; }
-[ -r "$home/lib/java-language-server.jar" ] || { printf '%s\n' 'Java language-server JARs are missing; reinstall the TermuIDE Java tools bundle.' >&2; exit 127; }
+[ -r "$bundle/lib/java-language-server.jar" ] || { printf '%s\n' 'Java language-server JARs are missing; reinstall the TermuIDE Java tools bundle.' >&2; exit 127; }
 if [ "${1-}" = --check ] && [ "$#" -eq 1 ]; then exit 0; fi
 [ "$#" -eq 0 ] || { printf '%s\n' 'Usage: termuide-java-lsp [--check]' >&2; exit 64; }
-exec "$java" -Xms64m -Xmx256m -XX:+UseG1GC -XX:ActiveProcessorCount=2 \
+# Use the VM's default GC: Termux disables G1 in its 32-bit ARM JDK build.
+exec "$java" -Xms64m -Xmx256m -XX:ActiveProcessorCount=2 \
   --add-exports jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED \
   --add-exports jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED \
   --add-exports jdk.compiler/com.sun.tools.javac.comp=ALL-UNNAMED \
@@ -23,4 +28,4 @@ exec "$java" -Xms64m -Xmx256m -XX:+UseG1GC -XX:ActiveProcessorCount=2 \
   --add-exports jdk.compiler/com.sun.tools.javac.model=ALL-UNNAMED \
   --add-exports jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED \
   --add-opens jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED \
-  -cp "$home/lib/*" org.javacs.Main
+  -cp "$bundle/lib/*" org.javacs.Main

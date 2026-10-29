@@ -22,6 +22,8 @@ Thanks to the Termux community and the maintainers of clang/clangd, GDB, Python 
 
 Python autocomplete uses the separately installed **Python LSP Server (pylsp)**, maintained by Python Language Server Contributors and distributed under the MIT license. Source and license: https://github.com/python-lsp/python-lsp-server . It and its providers are not bundled in the APK.
 
+Optional Java completion and diagnostics use the separately installed [TermuIDE fork](https://github.com/AM-RTS/java-language-server/tree/codex/termuide-fixes) of [George Fraser's Java language server](https://github.com/georgewfraser/java-language-server). Copyright (c) 2016 George Fraser; MIT license, with retained third-party notices including Oracle's GPLv2 with Classpath Exception notice in `ReusableCompiler`. The server archive includes its MIT license, that source/notice, and exact source provenance; dependency JARs retain their `META-INF` notices. Neither the server nor its JDK is bundled in the APK.
+
 ## Fork changes and source
 
 The changes are described in [README.md](README.md#what-is-different-in-this-fork) and [the architecture notes](docs/architecture/multilanguage-runtime.md). Source for this fork remains at https://github.com/AM-RTS/TermuIDE ; the repository name does not determine the Android app name. Preserve these notices and the applicable license texts when redistributing. Publish the corresponding source and build instructions for the exact binary release, including any modifications; a link to a different upstream revision is not a substitute.

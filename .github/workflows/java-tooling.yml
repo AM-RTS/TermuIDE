@@ -2,6 +2,15 @@ name: Java tooling integration
 on:
   push:
     branches: [codex/java-lsp-integration]
+    paths:
+      - app/**
+      - codeeditor/**
+      - tools/java_lsp/**
+      - .github/workflows/java-tooling.yml
+      - .github/workflows/release.yml
+      - '**/*.gradle*'
+      - gradle/**
+      - gradle.properties
   workflow_dispatch:
 permissions:
   contents: read

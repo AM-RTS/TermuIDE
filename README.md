@@ -14,14 +14,14 @@ TermuIDE is an independent fork of [TermuC](https://github.com/RainbowC0/TermuC)
 | Area | Changes from the inherited TermuC app |
 | --- | --- |
 | Interface | Material 3 Compose screens, settings and dialogs; adaptive browser/editor layout; labeled accessibility controls and saved form/dialog state. |
-| Editor | Sora rendering/input integrated with the inherited document, undo, lexer and completion utilities; shared LSP sessions for clangd and Python pylsp. Unused legacy rendering/input code was removed. |
+| Editor | Sora rendering/input integrated with the inherited document, undo, lexer and completion utilities; shared LSP sessions for clangd, Python pylsp, and optional Java completion/diagnostics. Unused legacy rendering/input code was removed. |
 | Saving and recovery | Private durable drafts, background revision-aware saves, atomic/journaled publication, source-read failure protection, and optional auto-save. |
 | Execution | Shared preparation and save checks for C/C++, basic Python 3 and Java source execution, literal program arguments, entry file and working-directory overrides. |
 | Projects and tabs | `termuide.json` project files; retained workspace coordination and path-based tab selection reuse existing save/document components. |
 | Debugger | Separate GDB transport/parser state and Compose presentation; fixes for overlay layout/reconnection, stale inspection data and breakpoint controls. |
 | Attribution | In-app About, offline license texts, source links, and explicit upstream/component acknowledgements. |
 
-Python/Java execution is basic console support. Python autocomplete uses the separately installed `pylsp` language server; Java server selection remains open. Python/Java debugging, dependency management and build-tool integration remain future work. C/C++ retains clangd and GDB integration.
+Python/Java execution is basic console support. Python autocomplete uses the separately installed `pylsp` language server; Java completion and diagnostics use an optional, separately installed TermuIDE Java server bundle with JDK 25. Python/Java debugging, dependency management and build-tool integration remain future work. C/C++ retains clangd and GDB integration.
 
 ## Installation and project identity
 
@@ -75,6 +75,26 @@ In TermuIDE, select **Settings → Analysis → Completion → Language Server**
 Completion, definitions and signature help reuse the existing editor controls. Diagnostics and formatting depend on installed pylsp providers; the base installation does not promise linting, formatting or refactoring plugins. Unsupported requests, including clangd semantic tokens for pylsp, are suppressed. In **Language tools**, set **Python environment** to an existing virtual-environment folder (for example `.venv`) or an absolute Termux path; leave it blank for default Termux Python. Relative paths use the displayed project root or source folder, independently of the browser's run-argument scope. **Apply** saves the selection and restarts affected Python sessions. Install `python-lsp-server` inside that environment too, for example `.venv/bin/python -m pip install python-lsp-server`. Execution and pylsp use the same `<environment>/bin/python`; Jedi receives that interpreter for package discovery. A missing environment or server reports a setup error instead of silently using global Python. Existing project commands inherit its `VIRTUAL_ENV` and `PATH`; standalone C/C++ and Java retain their existing runtimes. Environment creation and dependency installation remain manual.
 
 Unsaved and recovered text is sent directly to the server without saving the source. Completion edits remain undoable and participate in the same durable recovery as typing. Python positions are translated between Jedi code points and the editor's UTF-16 offsets, including supplementary Unicode characters; filename completions replace the full filename component. Rename/code-action edits reject tabs changed since their request; recovered drafts and documents owned by another session are protected. Missing/disconnected servers leave files editable and recoverable. The prerelease workflow installs a pinned pylsp in a temporary host environment and exercises real sibling-module and environment-only package completion through the app's LSP client, plus execution with the same selected environment; this does not verify Termux/phone transport.
+
+## Optional Java completion and diagnostics
+
+Install [Termux OpenJDK 25](https://github.com/termux/termux-packages/tree/master/packages/openjdk-25) and the separate **termuide-java-lsp.tar.gz** tools archive from a build containing this integration. Prereleases attach it alongside the APK; the **Java tooling integration** workflow also uploads it as the `termuide-java-lsp` artifact, with an archive checksum. Verify the checksum supplied by the same build before extracting. No server or JDK is bundled in the APK, and the app does not download or install tools automatically.
+
+In Termux, from the folder containing the verified archive:
+
+```sh
+pkg install openjdk-25
+mkdir -p "$HOME/.local/share"
+tar -xzf termuide-java-lsp.tar.gz -C "$HOME/.local/share"
+ln -sf "$HOME/.local/share/termuide-java-lsp/bin/termuide-java-lsp" "$PREFIX/bin/termuide-java-lsp"
+termuide-java-lsp --check
+```
+
+Keep the extracted `bin` and `lib` folders together. Install under Termux's home, not shared `/sdcard` storage. The launcher uses Termux's installed JDK 25 directly when available; otherwise `java` on its PATH must be exactly version 25 with `jdk.compiler`. This requirement belongs to autocomplete: basic Java execution retains its JDK 11+ requirement and its existing runtime selection. The launcher caps the heap at 256 MiB and uses the VM's default garbage collector; Termux's 32-bit ARM JDK does not include G1.
+
+Select **Settings → Analysis → Completion → Language Server**, open a `.java` file, and use **⋮ → Language tools** for Java status or **Restart** after installing tools. Java files in the same project/folder share one session, independently of C/C++ and Python. Recovered and unsaved buffers synchronize directly; completion edits use the existing undo and durable-recovery path. Missing tools leave documents editable and recoverable. This initial integration enables completion and diagnostics only; Java navigation, formatting, rename, build-tool import and debugging remain separate work. Host CI does not establish Termux transport or phone responsiveness.
+
+The server is the [AM-RTS fork of George Fraser's Java language server](https://github.com/AM-RTS/java-language-server/tree/codex/termuide-fixes), pinned by `tools/java_lsp/revision`. The tools archive contains its MIT license, retained ReusableCompiler source/notice, and exact source URL; dependency JARs retain their own notices. See [acknowledgements](NOTICE.md).
 
 ## Features
 
@@ -131,7 +151,7 @@ Run and Debug open the configured entry and save it through the existing recover
 
 Relative project executables such as `./build/app` retain their project location when a runtime directory is selected. Configured arguments are appended once, after expansion of the existing project command; an empty project command reports an error. A failed configuration save keeps the previous configuration active.
 
-An active `termuide.json` project continues to use its configured commands. Run-configuration arguments are appended to the existing program arguments; selecting a Python/Java entry does not replace the project's command. Additional run settings are stored privately on this installation, so changing them cannot overwrite an unsaved `termuide.json`. Python uses pylsp rather than clangd; Java has no configured language server. Neither enables GDB for Python/Java. Their debuggers, automatic dependency management and Maven/Gradle project integration remain separate future work.
+An active `termuide.json` project continues to use its configured commands. Run-configuration arguments are appended to the existing program arguments; selecting a Python/Java entry does not replace the project's command. Additional run settings are stored privately on this installation, so changing them cannot overwrite an unsaved `termuide.json`. Python uses pylsp rather than clangd; Java uses the optional server described above; its navigation, formatting and rename are not enabled yet. Neither enables GDB for Python/Java. Their debuggers, automatic dependency management and Maven/Gradle project integration remain separate future work.
 
 Runtime preparation can be cancelled without affecting editor drafts. Programs use the existing Termux terminal; its controls handle running processes. Execution status distinguishes dispatch from confirmed completion, preserves nonzero exit codes, and reports unknown previous status after an app restart. Runtime checks need a Termux version supporting RUN_COMMAND results (0.109+), its RUN_COMMAND permission and external-app access. A missing result produces a bounded preparation timeout; no emulator validation is claimed.
 

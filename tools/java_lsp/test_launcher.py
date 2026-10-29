@@ -29,12 +29,13 @@ printf '%s\\0' "$@" > "$TEST_ARGUMENTS"
 ''')
         java.chmod(0o755)
 
-    def run_launcher(self, *args, version="25", compiler="0"):
+    def run_launcher(self, *args, version="25", compiler="0", prefix=None):
         environment = dict(os.environ, PATH=str(self.fake) + os.pathsep + os.environ["PATH"],
                            TEST_VERSION=version, TEST_COMPILER_EXIT=compiler,
                            TEST_ARGUMENTS=str(self.root / "arguments"),
                            JAVA_TOOL_OPTIONS="unwanted", JDK_JAVA_OPTIONS="unwanted",
                            _JAVA_OPTIONS="unwanted", CLASSPATH="workspace")
+        environment["PREFIX"] = str(prefix or self.root / "no-termux-prefix")
         return subprocess.run(["bash", str(self.bundle / "bin/termuide-java-lsp"), *args],
                               capture_output=True, text=True, env=environment, timeout=10)
 
@@ -58,6 +59,14 @@ printf '%s\\0' "$@" > "$TEST_ARGUMENTS"
         self.assertEqual(64, self.run_launcher("--unknown").returncode)
         (self.bundle / "lib/java-language-server.jar").unlink()
         self.assertEqual(127, self.run_launcher("--check").returncode)
+
+    def test_installed_termux_jdk25_does_not_require_changing_execution_java(self):
+        prefix = self.root / "termux"
+        installed = prefix / "lib/jvm/java-25-openjdk/bin/java"
+        installed.parent.mkdir(parents=True)
+        installed.write_text('#!/bin/sh\nTEST_VERSION=25 exec "' + str(self.fake / "java") + '" "$@"\n')
+        installed.chmod(0o755)
+        self.assertEqual(0, self.run_launcher("--check", version="21", prefix=prefix).returncode)
 
 
 if __name__ == "__main__":
