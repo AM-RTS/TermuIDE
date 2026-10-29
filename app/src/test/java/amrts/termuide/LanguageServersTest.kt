@@ -325,7 +325,7 @@ class LanguageServersTest {
             val lsp = servers.session(file, EditFragment.TYPE_PYTHON)!!
             servers.ensure(app, file, EditFragment.TYPE_PYTHON)
             assertFalse(lsp.isStarted)
-            assertEquals(LanguageServers.State.FAILED, servers.status(scope).last().state)
+            assertEquals(LanguageServers.State.FAILED, servers.status(scope).single { it.server == LanguageServers.Server.PYTHON }.state)
             assertNotNull(lsp.configurationError)
             prefs.edit().remove(scope).commit()
             val context = object : android.content.ContextWrapper(app) {

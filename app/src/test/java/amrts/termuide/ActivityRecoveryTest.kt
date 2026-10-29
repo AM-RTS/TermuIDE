@@ -368,7 +368,16 @@ class ActivityRecoveryTest {
             try {
                 listener.accept().use { socket ->
                     val input = Thread {
-                        try { socket.getInputStream().copyTo(process.outputStream) }
+                        try {
+                            val inputStream = socket.getInputStream()
+                            val bytes = ByteArray(8192)
+                            while (true) {
+                                val count = inputStream.read(bytes)
+                                if (count < 0) break
+                                process.outputStream.write(bytes, 0, count)
+                                process.outputStream.flush()
+                            }
+                        }
                         catch (_: java.io.IOException) {}
                         finally { process.outputStream.close() }
                     }.apply { isDaemon = true; start() }
