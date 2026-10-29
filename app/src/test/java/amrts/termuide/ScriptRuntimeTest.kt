@@ -65,17 +65,18 @@ class ScriptRuntimeTest {
     }
 
     @Test fun pythonProbeChecksVersionReadabilityAndMissingRuntimeWithoutRunningTheSource() {
-        val req = request("unsafe.py", "raise RuntimeError('Do not run during a probe')")
-        val runtime = fakeRuntime("exit 0")
+        val env = File(directory, "environment with spaces").apply { resolve("bin").mkdirs() }
+        val runtime = env.resolve("bin/python").apply { writeText("#!/bin/bash\nexit 0\n"); setExecutable(true) }.let(::bashPath)
+        val req = request("unsafe.py", "raise RuntimeError('Do not run during a probe')").copy(pythonEnvironment = bashPath(env))
         val probe = RunCommands.probe(req, mapOf("python" to runtime))
         val ready = execute(probe)
         assertEquals(ready.stderr, 0, ready.exit)
         assertEquals("$runtime\n", ready.stdout)
-        fakeRuntime("exit 1")
+        env.resolve("bin/python").writeText("#!/bin/bash\nexit 1\n")
         val oldPython = execute(probe)
         assertEquals(127, oldPython.exit)
         assertTrue(oldPython.stderr.contains("Python 3"))
-        val missing = execute(RunCommands.probe(req), noPath = true)
+        val missing = execute(RunCommands.probe(req.copy(pythonEnvironment = "")), noPath = true)
         assertEquals(127, missing.exit)
         assertTrue(missing.stderr.contains("Missing runtime: python"))
         File(req.path!!).delete()
@@ -338,4 +339,42 @@ class ScriptRuntimeTest {
             }
         }
     }
+    @Test fun selectedPythonEnvironmentNeverFallsBackAndUsesTheSamePackagesAsPylsp() {
+        val missing = request("main.py").copy(pythonEnvironment = "/definitely-missing-termuide-venv")
+        val result = execute(RunCommands.probe(missing))
+        assertEquals(127, result.exit)
+        assertTrue(result.stderr.contains("Selected Python environment"))
+        val defaultProbe = RunCommands.probe(missing.copy(pythonEnvironment = ""), mapOf("python" to "/old-venv/bin/python"))
+        assertEquals("", defaultProbe.arguments.last())
+        val env = System.getenv("TERMUIDE_TEST_PYTHON_ENV")
+        org.junit.Assume.assumeNotNull(env)
+        val req = request("environment.py", "import termuide_env_marker, os; print(termuide_env_marker.env_specific_value); print(os.environ['VIRTUAL_ENV'])")
+            .copy(pythonEnvironment = env!!)
+        val probe = execute(RunCommands.probe(req))
+        assertEquals(probe.stderr, 0, probe.exit)
+        assertEquals("$env/bin/python\n", probe.stdout)
+        val serverProbe = execute(RunCommands.languageServerProbe("pylsp", directory.path, env))
+        assertEquals(serverProbe.stderr, 0, serverProbe.exit)
+        assertEquals(probe.stdout, serverProbe.stdout)
+        val ran = execute(RunCommands.build(req, mapOf("python" to probe.stdout.trim())), "x")
+        assertEquals(ran.stderr, 0, ran.exit)
+        assertTrue(ran.stdout.contains("termuide environment package"))
+        assertTrue(ran.stdout.contains(env))
+    }
+
+    @Test fun projectCommandsInheritTheChosenEnvironmentWithoutChangingTheCommand() {
+        val env = File(directory, "env with ' and $; spaces").apply { resolve("bin").mkdirs() }
+        env.resolve("bin/python").apply { writeText("#!/bin/bash\nexit 0\n"); setExecutable(true) }
+        val project = Project.Config(directory.path, "build", "printf '%s\\n' \"\$VIRTUAL_ENV\";command -v python", "", "", 0, emptyList())
+        val req = request("main.c").copy(project = project, action = RunCommands.Action.BUILD, pythonEnvironment = bashPath(env))
+        assertEquals(listOf("python"), RunCommands.requiredTools(req))
+        val probe = execute(RunCommands.probe(req))
+        assertEquals(probe.stderr, 0, probe.exit)
+        val plan = RunCommands.build(req, mapOf("python" to probe.stdout.trim()))
+        val ran = execute(plan, "x", environment = mapOf("PYTHONHOME" to "/invalid-python-home"))
+        assertEquals(ran.stderr, 0, ran.exit)
+        assertTrue(ran.stdout.contains(bashPath(env)))
+        assertTrue(ran.stdout.contains(bashPath(env.resolve("bin/python"))))
+    }
+
 }

@@ -454,6 +454,7 @@ private fun MainScreen(activity: MainActivity, editorHost: FrameLayout) {
     var newFileOpen by rememberSaveable { mutableStateOf(false) }
     var newProjectOpen by rememberSaveable { mutableStateOf(false) }
     var runConfigurationScope by rememberSaveable { mutableStateOf<String?>(null) }
+    var languageToolsScope by rememberSaveable { mutableStateOf<String?>(null) }
     var renameTarget by rememberSaveable { mutableStateOf<String?>(null) }
     var deleteTarget by rememberSaveable { mutableStateOf<String?>(null) }
     var menuOpen by remember { mutableStateOf(false) }
@@ -550,6 +551,9 @@ private fun MainScreen(activity: MainActivity, editorHost: FrameLayout) {
                                 }
                                 ActionMenuItem(context.getString(R.string.run_configuration), true) {
                                     runConfigurationScope = activity.runConfigurationScope; menuOpen = false
+                                }
+                                ActionMenuItem(context.getString(R.string.language_tools), true) {
+                                    languageToolsScope = activity.languageToolsScope; menuOpen = false
                                 }
                                 HorizontalDivider()
                                 ActionMenuItem(context.getString(R.string.new_f), true) {
@@ -711,6 +715,15 @@ private fun MainScreen(activity: MainActivity, editorHost: FrameLayout) {
             diagnosticsOpen = false
         }
         if (newProjectOpen) NewProjectDialog(activity, onDismiss = { newProjectOpen = false })
+        languageToolsScope?.let { scope ->
+            key(scope) {
+                val loaded = remember(scope) { runCatching { RunConfiguration.load(context, scope) } }
+                LanguageToolsDialog(scope, loaded.getOrDefault(RunConfiguration()).pythonEnvironment, activity.languageServerStatus,
+                    onSave = { activity.savePythonEnvironment(scope, it) },
+                    onRestart = { activity.restartLanguageServer(scope, it) }, onDismiss = { languageToolsScope = null },
+                    initialError = loaded.exceptionOrNull()?.let { context.getString(R.string.run_config_invalid) })
+            }
+        }
         runConfigurationScope?.let { scope ->
             key(scope) {
                 val loaded = remember(scope) { runCatching { RunConfiguration.load(context, scope) } }
@@ -823,7 +836,7 @@ internal fun RunConfigurationDialog(
         confirmButton = {
             TextButton(onClick = {
                 try {
-                    val configuration = RunConfiguration(entry, arguments, directory)
+                    val configuration = RunConfiguration(entry, arguments, directory, initial.pythonEnvironment)
                     if (onSave(configuration)) onDismiss() else error = context.getString(R.string.run_config_save_failed)
                 } catch (_: IllegalArgumentException) { error = context.getString(R.string.run_config_invalid) }
                 catch (changed: IllegalStateException) { error = changed.message ?: context.getString(R.string.run_config_invalid) }
@@ -831,6 +844,71 @@ internal fun RunConfigurationDialog(
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text(context.getString(android.R.string.cancel)) } }
     )
+}
+
+@Composable
+internal fun LanguageToolsDialog(
+    scope: String, initialEnvironment: String, statuses: List<LanguageServers.Info>,
+    onSave: (String) -> Boolean, onRestart: (String) -> Unit, onDismiss: () -> Unit, initialError: String? = null
+) {
+    val context = LocalContext.current
+    val haptics = LocalHapticFeedback.current
+    var environment by rememberSaveable(scope) { mutableStateOf(initialEnvironment) }
+    var savedEnvironment by rememberSaveable(scope) { mutableStateOf(initialEnvironment) }
+    var error by rememberSaveable(scope) { mutableStateOf(initialError) }
+    AlertDialog(onDismissRequest = onDismiss,
+        title = { Text(context.getString(R.string.language_tools)) },
+        text = {
+            Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(context.getString(R.string.python_environment_scope, scope), style = MaterialTheme.typography.bodySmall)
+                statuses.forEach { info ->
+                    val label = context.getString(if (info.server == LanguageServers.Server.PYTHON) R.string.language_tools_python else R.string.language_tools_native)
+                    val status = context.getString(when (info.state) {
+                        LanguageServers.State.CHECKING -> R.string.lsp_checking
+                        LanguageServers.State.STARTING -> R.string.lsp_starting
+                        LanguageServers.State.READY -> R.string.lsp_ready
+                        LanguageServers.State.MISSING -> R.string.lsp_missing
+                        LanguageServers.State.DISCONNECTED -> R.string.lsp_disconnected
+                        LanguageServers.State.FAILED -> R.string.lsp_failed
+                        LanguageServers.State.DISABLED -> R.string.lsp_disabled
+                        else -> R.string.lsp_stopped
+                    })
+                    ListItem(headlineContent = { Text(label) }, supportingContent = {
+                        Column(Modifier.semantics { liveRegion = LiveRegionMode.Polite }) {
+                            Text(status, modifier = Modifier.testTag("lsp-status-${info.server.id}"))
+                            info.detail?.takeIf { it.isNotBlank() }?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                        }
+                    }, trailingContent = {
+                        TextButton(onClick = {
+                            try { onRestart(info.server.id); haptics.performHapticFeedback(HapticFeedbackType.LongPress) }
+                            catch (changed: IllegalStateException) { error = changed.message }
+                        }, enabled = info.restartable && initialError == null && info.state !in listOf(LanguageServers.State.CHECKING, LanguageServers.State.STARTING, LanguageServers.State.DISABLED)
+                            && (info.server != LanguageServers.Server.PYTHON || environment == savedEnvironment),
+                            modifier = Modifier.heightIn(min = 48.dp).testTag("lsp-restart-${info.server.id}").semantics { contentDescription = context.getString(R.string.lsp_restart_description, label) }) {
+                            Text(context.getString(R.string.lsp_restart))
+                        }
+                    })
+                }
+                OutlinedTextField(value = environment, onValueChange = { environment = it }, singleLine = true,
+                    label = { Text(context.getString(R.string.python_environment)) },
+                    supportingText = { Text(context.getString(R.string.python_environment_help)) },
+                    modifier = Modifier.fillMaxWidth().testTag("python-environment"))
+                Text(context.getString(R.string.python_environment_applies), style = MaterialTheme.typography.bodySmall)
+                TextButton(onClick = { environment = "" }, modifier = Modifier.heightIn(min = 48.dp)) { Text(context.getString(R.string.run_use_defaults)) }
+                Text(context.getString(R.string.language_tools_java), style = MaterialTheme.typography.bodySmall)
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }) }
+            }
+        }, confirmButton = {
+            TextButton(onClick = {
+                try {
+                    if (onSave(environment)) {
+                        savedEnvironment = environment; error = null
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    } else error = context.getString(R.string.run_config_save_failed)
+                } catch (invalid: IllegalArgumentException) { error = context.getString(R.string.run_config_invalid) }
+                catch (changed: IllegalStateException) { error = changed.message }
+            }, enabled = initialError == null && environment != savedEnvironment, modifier = Modifier.testTag("python-environment-apply")) { Text(context.getString(R.string.language_tools_apply)) }
+        }, dismissButton = { TextButton(onClick = onDismiss) { Text(context.getString(R.string.close)) } })
 }
 
 @Composable

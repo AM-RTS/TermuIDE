@@ -13,7 +13,8 @@ object RunCommands {
         val project: Project.Config,
         val flags: String,
         val breakpoints: List<Int>,
-        val configuration: RunConfiguration = RunConfiguration()
+        val configuration: RunConfiguration = RunConfiguration(),
+        val pythonEnvironment: String = ""
     )
     data class Plan(val executable: String, val arguments: List<String>, val directory: String, val background: Boolean = false)
 
@@ -26,11 +27,13 @@ object RunCommands {
             else request.directory
 
     @JvmStatic fun requiredTools(request: Request): List<String> = buildList {
+        require(request.pythonEnvironment.isEmpty() || (File(request.pythonEnvironment).isAbsolute && request.pythonEnvironment.none { it.isISOControl() })) { "Invalid Python environment" }
         if (request.project.rootPath == null) {
             require(request.path != null && Languages.canRun(request.type)) { "This source has no runtime integration" }
             require(request.action == Action.RUN || request.action == Action.DEBUG) { "Build requires a project" }
             add(requireNotNull(Languages.forType(request.type).runtime))
         }
+        if (request.pythonEnvironment.isNotEmpty() && "python" !in this) add("python")
         if (request.action == Action.DEBUG) {
             require(Languages.canDebug(request.type)) { "Debugging requires C/C++ source" }
             add("gdb")
@@ -46,6 +49,9 @@ object RunCommands {
         }
     }
 
+    @JvmStatic fun environmentPrefix(environment: String): String = if (environment.isEmpty()) "" else
+        "unset PYTHONHOME;export VIRTUAL_ENV=${quote(environment)};export PATH=${quote(environment + "/bin")}:\"\$PATH\";"
+
     @JvmStatic fun build(request: Request, tools: Map<String, String>): Plan {
         requiredTools(request).forEach { require(tools[it]?.startsWith('/') == true) { "Missing runtime: $it" } }
         val file = request.path?.let(::File)
@@ -58,7 +64,7 @@ object RunCommands {
         if (project.rootPath == null && Languages.forType(request.type).id in listOf("python", "java")) {
             val language = Languages.forType(request.type)
             val runtime = tools.getValue(language.runtime!!)
-            val command = listOf("-c", "\"\$@\"$pause", "termuide-run", runtime) +
+            val command = listOf("-c", environmentPrefix(request.pythonEnvironment) + "\"\$@\"$pause", "termuide-run", runtime) +
                 (if (language.id == "java") listOf("-Dfile.encoding=UTF-8") else emptyList()) + file!!.absolutePath + arguments
             return Plan(Utils.PREF + "/usr/bin/bash", command, workingDirectory(request))
         }
@@ -89,27 +95,46 @@ object RunCommands {
         }
         // Pause after failures too, and keep the program's exit status rather than read's status.
         // Keep program arguments out of compiler flags and legacy project command expansion.
-        val script = (if (arguments.isEmpty()) "" else "termuide_program_args=(\"\$@\");set --;\n") + body + pause
+        val script = environmentPrefix(request.pythonEnvironment) + (if (arguments.isEmpty()) "" else "termuide_program_args=(\"\$@\");set --;\n") + body + pause
         val command = listOf("-c", script) + if (arguments.isEmpty()) emptyList() else listOf(Utils.PREF + "/usr/bin/bash") + arguments
         return Plan(Utils.PREF + "/usr/bin/bash", command, project.rootPath ?: request.directory)
     }
 
+    private const val PYTHON_CHECK = "\"\$resolved\" -E -S -c 'import sys; sys.exit(0 if sys.version_info[0] >= 3 else 1)' >/dev/null 2>&1 || { printf '%s\\n' 'Python 3 is required; install python in Termux.' >&2; exit 127; }; "
+    private const val JAVA_CHECK = "\"\$resolved\" --source 11 --version >/dev/null 2>&1 && \"\$resolved\" --describe-module jdk.compiler >/dev/null 2>&1 || { printf '%s\\n' 'Java source execution requires JDK 11 or newer with jdk.compiler; install a full JDK in Termux.' >&2; exit 127; }; "
+
     @JvmStatic @JvmOverloads fun probe(request: Request, cached: Map<String, String> = emptyMap()): Plan {
         val tools = requiredTools(request)
-        val check = if (request.project.rootPath != null) "" else when (Languages.forType(request.type).id) {
-            "python" -> "\"\$resolved\" -E -S -c 'import sys; sys.exit(0 if sys.version_info[0] >= 3 else 1)' >/dev/null 2>&1 || { printf '%s\\n' 'Python 3 is required; install python in Termux.' >&2; exit 127; }; "
-            // Check launcher support and the compiler module without executing the user's source.
-            "java" -> "\"\$resolved\" --source 11 --version >/dev/null 2>&1 && \"\$resolved\" --describe-module jdk.compiler >/dev/null 2>&1 || { printf '%s\\n' 'Java source execution requires JDK 11 or newer with jdk.compiler; install a full JDK in Termux.' >&2; exit 127; }; "
-            else -> ""
-        }
-        // Positional parameters keep filenames and directories out of generated shell source.
-        val script = "cd -- \"\$1\" || exit 126; " +
+        val checks = mutableMapOf("python" to PYTHON_CHECK)
+        if (request.project.rootPath == null && Languages.forType(request.type).id == "java") checks["java"] = JAVA_CHECK
+        val pinned = if (request.pythonEnvironment.isEmpty()) emptyMap() else mapOf("python" to request.pythonEnvironment + "/bin/python")
+        val source = if (request.project.rootPath == null) request.path.orEmpty() else ""
+        // Python must be rediscovered after leaving an environment, even if its old executable still exists.
+        return probeTools(workingDirectory(request), source, tools, cached - "python", checks, pinned, request.pythonEnvironment)
+    }
+
+    @JvmStatic fun languageServerProbe(server: String, root: String, environment: String): Plan {
+        require(server in listOf("pylsp", "clangd")) { "No language server configured" }
+        require(environment.isEmpty() || (File(environment).isAbsolute && environment.none { it.isISOControl() })) { "Invalid Python environment" }
+        val python = server == "pylsp"
+        val tool = if (python) "python" else "clangd"
+        val checks = if (python) mapOf("python" to (PYTHON_CHECK +
+            "\"\$resolved\" -c 'import pylsp' >/dev/null 2>&1 || { printf '%s\\n' 'Install python-lsp-server in the selected Python environment.' >&2; exit 127; }; ")) else emptyMap()
+        val pinned = if (python && environment.isNotEmpty()) mapOf("python" to environment + "/bin/python") else emptyMap()
+        return probeTools(root, "", listOf(tool), emptyMap(), checks, pinned, if (python) environment else "")
+    }
+
+    private fun probeTools(directory: String, source: String, tools: List<String>, cached: Map<String, String>,
+                           checks: Map<String, String>, pinned: Map<String, String>, environment: String): Plan {
+        val check = if (checks.isEmpty()) "" else "case \"\$tool\" in " + checks.entries.joinToString(" ") { (tool, script) -> "${quote(tool)}) $script ;;" } + " esac;"
+        val strict = if (pinned.isEmpty()) "" else "case \"\$tool\" in " + pinned.keys.joinToString("|") { quote(it) } +
+            ") printf '%s\\n' 'Selected Python environment is missing or not executable.' >&2;exit 127;;esac;"
+        val script = environmentPrefix(environment) + "cd -- \"\$1\" || exit 126; " +
             "if [ -n \"\$2\" ] && [ ! -r \"\$2\" ]; then printf '%s\\n' 'Source is not readable in Termux' >&2; exit 126; fi; " +
             "shift 2;while [ \"\$#\" -gt 0 ]; do tool=\$1;resolved=\$2;shift 2; " +
-            "if [ -z \"\$resolved\" ] || [ ! -x \"\$resolved\" ]; then resolved=\$(command -v -- \"\$tool\") || { printf 'Missing runtime: %s\\n' \"\$tool\" >&2; exit 127; }; fi; " +
+            "if [ -z \"\$resolved\" ] || [ ! -x \"\$resolved\" ]; then " + strict +
+            "resolved=\$(command -v -- \"\$tool\") || { printf 'Missing runtime: %s\\n' \"\$tool\" >&2; exit 127; }; fi; " +
             "case \"\$resolved\" in /*) ;; *) exit 127;; esac;" + check + "printf '%s\\n' \"\$resolved\";done"
-        val source = if (request.project.rootPath == null) request.path.orEmpty() else ""
-        return Plan(Utils.PREF + "/usr/bin/bash", listOf("-c", script, "termuide-probe", workingDirectory(request), source) + tools.flatMap { listOf(it, cached[it].orEmpty()) },
-            Utils.PREF + "/home", true)
+        return Plan(Utils.PREF + "/usr/bin/bash", listOf("-c", script, "termuide-probe", directory, source) + tools.flatMap { listOf(it, pinned[it] ?: cached[it].orEmpty()) }, Utils.PREF + "/home", true)
     }
 }

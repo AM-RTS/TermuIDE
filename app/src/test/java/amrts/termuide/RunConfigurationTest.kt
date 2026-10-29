@@ -73,7 +73,7 @@ class RunConfigurationTest {
             }
         }
         try {
-            val previous = RunConfiguration("original.py", listOf("original"))
+            val previous = RunConfiguration("original.py", listOf("original"), pythonEnvironment = ".venv")
             RunConfiguration.save(app, scope, previous)
             assertFalse(RunConfiguration.save(context, scope, RunConfiguration("rejected.py")))
             assertEquals(previous, RunConfiguration.load(app, scope))
@@ -97,4 +97,22 @@ class RunConfigurationTest {
             assertThrows(IllegalArgumentException::class.java) { RunConfiguration.load(app, scope) }
         } finally { prefs.edit().remove(scope).commit() }
     }
+    @Test fun pythonEnvironmentPersistsWithoutReplacingRunArgumentsAndOldConfigsRemainReadable() {
+        val app = Application.getInstance()
+        val scope = "/python-environment/project"
+        val prefs = app.getSharedPreferences("run_configurations", 0)
+        try {
+            val original = RunConfiguration("main.py", listOf("two words"), "data")
+            val changed = original.withPythonEnvironment("src/../.venv")
+            assertTrue(RunConfiguration.save(app, scope, changed))
+            assertEquals(changed, RunConfiguration.load(app, scope))
+            assertEquals("$scope/.venv", changed.pythonEnvironmentPath(scope))
+            assertEquals(original, changed.withPythonEnvironment(""))
+            prefs.edit().putString(scope, """{"entryFile":"main.py","arguments":["two words"],"workingDirectory":"data"}""").commit()
+            assertEquals(original, RunConfiguration.load(app, scope))
+            for (value in listOf("bad\npath", "bad\u0000path"))
+                assertThrows(IllegalArgumentException::class.java) { original.withPythonEnvironment(value) }
+        } finally { prefs.edit().remove(scope).commit() }
+    }
+
 }

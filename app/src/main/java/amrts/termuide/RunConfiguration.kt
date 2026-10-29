@@ -12,11 +12,13 @@ import org.json.JSONTokener
 class RunConfiguration @JvmOverloads constructor(
     val entryFile: String = "",
     arguments: List<String> = emptyList(),
-    val workingDirectory: String = ""
+    val workingDirectory: String = "",
+    val pythonEnvironment: String = ""
 ) {
     val arguments: List<String> = Collections.unmodifiableList(ArrayList(arguments))
 
     init {
+        require(pythonEnvironment.none { it.isISOControl() }) { "Environment paths cannot contain control characters" }
         require('\u0000' !in entryFile && '\u0000' !in workingDirectory && arguments.none { '\u0000' in it }) {
             "Paths and arguments cannot contain NUL characters"
         }
@@ -25,9 +27,12 @@ class RunConfiguration @JvmOverloads constructor(
     fun entryPath(scope: String, selected: String?): String? = if (entryFile.isEmpty()) selected else resolve(scope, entryFile)
     fun directoryPath(scope: String): String? = workingDirectory.takeIf { it.isNotEmpty() }?.let { resolve(scope, it) }
 
+    fun pythonEnvironmentPath(scope: String): String? = pythonEnvironment.takeIf { it.isNotEmpty() }?.let { resolve(scope, it) }
+    fun withPythonEnvironment(value: String) = RunConfiguration(entryFile, arguments, workingDirectory, value)
+
     override fun equals(other: Any?): Boolean = other is RunConfiguration &&
-        entryFile == other.entryFile && arguments == other.arguments && workingDirectory == other.workingDirectory
-    override fun hashCode(): Int = java.util.Objects.hash(entryFile, arguments, workingDirectory)
+        entryFile == other.entryFile && arguments == other.arguments && workingDirectory == other.workingDirectory && pythonEnvironment == other.pythonEnvironment
+    override fun hashCode(): Int = java.util.Objects.hash(entryFile, arguments, workingDirectory, pythonEnvironment)
 
     companion object {
         private fun resolve(scope: String, value: String): String {
@@ -47,7 +52,7 @@ class RunConfiguration @JvmOverloads constructor(
                 val array = if (json.has("arguments")) json.getJSONArray("arguments") else JSONArray()
                 val arguments = (0 until array.length()).map { array.get(it) as? String
                     ?: throw JSONException("Expected an argument string") }
-                return RunConfiguration(string("entryFile"), arguments, string("workingDirectory"))
+                return RunConfiguration(string("entryFile"), arguments, string("workingDirectory"), string("pythonEnvironment"))
             } catch (error: JSONException) {
                 throw IllegalArgumentException(context.getString(R.string.run_config_invalid), error)
             } catch (error: ClassCastException) {
@@ -61,7 +66,7 @@ class RunConfiguration @JvmOverloads constructor(
             val editor = preferences.edit()
             if (configuration == RunConfiguration()) editor.remove(scope)
             else editor.putString(scope, JSONObject().put("entryFile", configuration.entryFile)
-                .put("arguments", JSONArray(configuration.arguments)).put("workingDirectory", configuration.workingDirectory).toString())
+                .put("arguments", JSONArray(configuration.arguments)).put("workingDirectory", configuration.workingDirectory).put("pythonEnvironment", configuration.pythonEnvironment).toString())
             if (editor.commit()) return true
             // commit updates memory even when its disk write fails; rejected settings must not become active.
             val rollback = preferences.edit()

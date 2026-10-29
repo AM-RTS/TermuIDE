@@ -222,14 +222,14 @@ class ComposeUiStateTest {
         var attempted: RunConfiguration? = null
         compose.setContent {
             MaterialTheme {
-                RunConfigurationDialog("/project", RunConfiguration("main.c", listOf("arg"), "data"), true,
+                RunConfigurationDialog("/project", RunConfiguration("main.c", listOf("arg"), "data", ".venv"), true,
                     onSave = { attempted = it; false }, onDismiss = { dismissed = true })
             }
         }
         compose.onNodeWithText(app.getString(R.string.run_use_defaults)).performScrollTo().performClick()
         assertNull(attempted)
         compose.onNodeWithText(app.getString(R.string.save)).performClick()
-        assertEquals(RunConfiguration(), attempted)
+        assertEquals(RunConfiguration(pythonEnvironment = ".venv"), attempted)
         compose.onNodeWithText(app.getString(R.string.run_config_save_failed)).performScrollTo().assertIsDisplayed()
         assertFalse(dismissed)
     }
@@ -253,4 +253,30 @@ class ComposeUiStateTest {
         compose.onNodeWithText(app.getString(R.string.save)).assertIsDisplayed().performClick()
         assertEquals(List(7) { "value $it" }, saved!!.arguments)
     }
+    @Test fun languageToolsPreservesDraftsAndDisablesRestartUntilEnvironmentIsSaved() {
+        val app = Application.getInstance()
+        val restore = StateRestorationTester(compose)
+        var saved: String? = null
+        var succeed = false
+        var restarts = 0
+        val statuses = listOf(LanguageServers.Info(LanguageServers.Server.PYTHON, LanguageServers.State.MISSING, "Install pylsp", true))
+        restore.setContent {
+            MaterialTheme { LanguageToolsDialog("/project", "", statuses,
+                onSave = { saved = it; succeed }, onRestart = { restarts++ }, onDismiss = {}) }
+        }
+        compose.onNodeWithTag("lsp-restart-pylsp").performScrollTo().performClick()
+        assertEquals(1, restarts)
+        compose.onNodeWithTag("python-environment").performScrollTo().performTextInput(".venv")
+        restore.emulateSavedInstanceStateRestore()
+        compose.onNodeWithTag("python-environment").performScrollTo().assertTextContains(".venv")
+        compose.onNodeWithTag("lsp-restart-pylsp").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithTag("python-environment-apply").performClick()
+        assertEquals(".venv", saved)
+        compose.onNodeWithText(app.getString(R.string.run_config_save_failed)).performScrollTo().assertIsDisplayed()
+        succeed = true
+        compose.onNodeWithTag("python-environment-apply").performClick()
+        compose.onNodeWithTag("python-environment-apply").assertIsNotEnabled()
+        compose.onNodeWithTag("lsp-restart-pylsp").performScrollTo().assertIsEnabled()
+    }
+
 }

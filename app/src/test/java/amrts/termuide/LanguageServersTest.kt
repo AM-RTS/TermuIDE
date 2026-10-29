@@ -192,4 +192,99 @@ class LanguageServersTest {
         assertTrue(python.completionTry(file, 0, 1, 'a'))
         assertEquals("textDocument/completion", JSONObject(String(sender.single(), Charsets.UTF_8)).getString("method"))
     }
+    @Test fun preflightStatusRejectsMalformedResultsAndClosedSessionCallbacks() {
+        Application.completion = "s"
+        val calls = mutableListOf<android.content.Intent>()
+        val context = object : android.content.ContextWrapper(Application.getInstance()) {
+            override fun startForegroundService(service: android.content.Intent): android.content.ComponentName {
+                calls.add(service)
+                return android.content.ComponentName("com.termux", "com.termux.app.RunCommandService")
+            }
+        }
+        val file = File("/status-workspace/main.py")
+        try {
+            servers.ensure(context, file, EditFragment.TYPE_PYTHON)
+            val lsp = servers.find(file)!!
+            assertEquals(LanguageServers.State.CHECKING, lsp.state())
+            servers.ensure(context, file, EditFragment.TYPE_PYTHON)
+            assertEquals(1, calls.size)
+            val callback = calls.last().getParcelableExtra<android.app.PendingIntent>("com.termux.RUN_COMMAND_PENDING_INTENT")!!
+            val token = org.robolectric.Shadows.shadowOf(callback).savedIntent.data!!.lastPathSegment!!
+            servers.receive(token, android.os.Bundle().apply { putInt("err", -1); putInt("exitCode", 127); putString("stderr", "Install pylsp") })
+            assertEquals(LanguageServers.State.MISSING, lsp.state())
+            assertEquals("Install pylsp", lsp.detail())
+            servers.restart(context, lsp.root, "pylsp")
+            val replacement = servers.find(file)!!
+            assertNotSame(lsp, replacement)
+            servers.receive(token, android.os.Bundle().apply { putInt("err", -1); putInt("exitCode", 0); putString("stdout", "/bin/python\n") })
+            assertEquals(LanguageServers.State.CHECKING, replacement.state())
+            val second = calls.last().getParcelableExtra<android.app.PendingIntent>("com.termux.RUN_COMMAND_PENDING_INTENT")!!
+            val next = org.robolectric.Shadows.shadowOf(second).savedIntent.data!!.lastPathSegment!!
+            servers.receive(next, android.os.Bundle().apply { putInt("err", -1); putInt("exitCode", 0); putString("stdout", "not-an-absolute-path") })
+            assertEquals(LanguageServers.State.FAILED, replacement.state())
+            servers.restart(context, replacement.root, "pylsp")
+            val third = calls.last().getParcelableExtra<android.app.PendingIntent>("com.termux.RUN_COMMAND_PENDING_INTENT")!!
+            val stale = org.robolectric.Shadows.shadowOf(third).savedIntent.data!!.lastPathSegment!!
+            val stopped = servers.find(file)!!
+            servers.close(file)
+            servers.receive(stale, android.os.Bundle().apply { putInt("err", -1); putInt("exitCode", 0); putString("stdout", "/bin/python\n") })
+            assertEquals(LanguageServers.State.STOPPED, stopped.state())
+            assertNull(servers.find(file))
+        } finally { Application.completion = "n" }
+    }
+
+    @Test fun environmentSelectionRebindsOnlyPythonAndConfiguresJediWithTheSameInterpreter() {
+        val app = Application.getInstance()
+        val scope = "/environment-workspace"
+        val file = File(scope, "main.py")
+        val native = File(scope, "main.c")
+        try {
+            val c = servers.session(native, EditFragment.TYPE_C)!!
+            val python = servers.session(file, EditFragment.TYPE_PYTHON)!!
+            val stale = python.incoming("{}")
+            RunConfiguration.save(app, scope, RunConfiguration(pythonEnvironment = ".venv"))
+            val replacement = servers.session(file, EditFragment.TYPE_PYTHON)!!
+            assertNotSame(python, replacement)
+            assertFalse(stale.isCurrent)
+            assertSame(c, servers.find(native))
+            assertEquals("$scope/.venv", replacement.environment)
+            replacement.configureRuntime("$scope/.venv/bin/python")
+            assertEquals(listOf("$scope/.venv/bin/python", "-m", "pylsp"), replacement.launchArguments().takeLast(3))
+            val sender = replacement.connectedSender()
+            replacement.initialize(scope)
+            val options = JSONObject(String(sender.single(), Charsets.UTF_8)).getJSONObject("params").getJSONObject("initializationOptions")
+            assertEquals("$scope/.venv/bin/python", options.getJSONObject("pylsp").getJSONObject("plugins").getJSONObject("jedi").getString("environment"))
+            replacement.initialized()
+            assertEquals(LanguageServers.State.READY, replacement.state())
+            replacement.connectionFailed()
+            assertEquals(LanguageServers.State.DISCONNECTED, replacement.state())
+        } finally { app.getSharedPreferences("run_configurations", 0).edit().remove(scope).commit() }
+    }
+
+    @Test fun preflightTimeoutAndCorruptConfigurationStayVisibleWithoutBlockingEditing() {
+        val app = Application.getInstance()
+        val scope = "/broken-environment-workspace"
+        val file = File(scope, "main.py")
+        val prefs = app.getSharedPreferences("run_configurations", 0)
+        Application.completion = "s"
+        try {
+            prefs.edit().putString(scope, "broken JSON").commit()
+            val lsp = servers.session(file, EditFragment.TYPE_PYTHON)!!
+            servers.ensure(app, file, EditFragment.TYPE_PYTHON)
+            assertFalse(lsp.isStarted)
+            assertEquals(LanguageServers.State.FAILED, servers.status(scope).last().state)
+            assertNotNull(lsp.configurationError)
+            prefs.edit().remove(scope).commit()
+            val context = object : android.content.ContextWrapper(app) {
+                override fun startForegroundService(service: android.content.Intent) = android.content.ComponentName("com.termux", "com.termux.app.RunCommandService")
+            }
+            servers.ensure(context, file, EditFragment.TYPE_PYTHON)
+            val pending = servers.find(file)!!
+            assertEquals(LanguageServers.State.CHECKING, pending.state())
+            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(RunController.PROBE_TIMEOUT))
+            assertEquals(LanguageServers.State.FAILED, pending.state())
+            assertEquals(app.getString(R.string.runtime_timeout), pending.detail())
+        } finally { prefs.edit().remove(scope).commit(); Application.completion = "n" }
+    }
+
 }

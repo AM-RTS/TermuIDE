@@ -302,9 +302,11 @@ public class MainActivity extends androidx.activity.ComponentActivity implements
             }
             List<Integer> marks = new ArrayList<>();
             if (codeEditor != null) for (int i = 0; i < codeEditor.getText().getMarksCount(); i++) marks.add(codeEditor.getText().getMark(i));
-            Application.getInstance().getRuns().start(new RunCommands.Request(action,
-                getSelectedFilePath(), lastFrag == null ? EditFragment.TYPE_TXT : lastFrag.type,
-                pwd.getAbsolutePath(), Project.snapshot(), Application.cflags, Collections.unmodifiableList(marks), configuration));
+            try {
+                Application.getInstance().getRuns().start(new RunCommands.Request(action,
+                    getSelectedFilePath(), lastFrag == null ? EditFragment.TYPE_TXT : lastFrag.type,
+                    pwd.getAbsolutePath(), Project.snapshot(), Application.cflags, Collections.unmodifiableList(marks), configuration, getPythonEnvironment()));
+            } catch (IllegalArgumentException error) { toast(getString(R.string.run_config_invalid)); }
             return;
         }
         if (id == R.id.save && lastFrag != null) {
@@ -324,7 +326,7 @@ public class MainActivity extends androidx.activity.ComponentActivity implements
         if (!runtimeHostReady) return 0;
         return Objects.equals(request.getPath(), getSelectedFilePath())
             && Objects.equals(request.getProject().rootPath, Project.rootPath)
-            && Objects.equals(request.getDirectory(), pwd.getAbsolutePath()) && matchesRunConfiguration(request) ? 1 : -1;
+            && Objects.equals(request.getDirectory(), pwd.getAbsolutePath()) && matchesRunConfiguration(request) && matchesPythonEnvironment(request) ? 1 : -1;
     }
 
     public String getRunConfigurationScope() {
@@ -337,10 +339,59 @@ public class MainActivity extends androidx.activity.ComponentActivity implements
 
     public boolean saveRunConfiguration(String scope, RunConfiguration configuration) {
         if (!scope.equals(getRunConfigurationScope())) throw new IllegalStateException(getString(R.string.run_config_changed));
+        String oldEnvironment = null;
+        try { oldEnvironment = RunConfiguration.load(this, scope).getPythonEnvironment(); } catch (IllegalArgumentException ignored) { }
         if (!RunConfiguration.save(this, scope, configuration)) return false;
         Application.getInstance().getRuns().onConfigurationChanged();
+        if (!Objects.equals(oldEnvironment, configuration.getPythonEnvironment())) {
+            Application.getInstance().getRuns().cancelPreparation();
+            Application.getInstance().languageServers.restartPythonEnvironment(this, LanguageServers.path(new File(scope)));
+        }
         notifyUiChanged();
         return true;
+    }
+
+    public String getLanguageToolsScope() {
+        if (Project.rootPath != null) return LanguageServers.path(new File(Project.rootPath));
+        String selected = getSelectedFilePath();
+        return selected == null ? LanguageServers.path(pwd) : LanguageServers.root(new File(selected));
+    }
+
+    public List<LanguageServers.Info> getLanguageServerStatus() {
+        String selected = getSelectedFilePath();
+        return Application.getInstance().languageServers.status(selected == null ? getLanguageToolsScope() : LanguageServers.root(new File(selected)));
+    }
+
+    public void restartLanguageServer(String scope, String server) {
+        if (!scope.equals(getLanguageToolsScope())) throw new IllegalStateException(getString(R.string.run_config_changed));
+        String selected = getSelectedFilePath();
+        Application.getInstance().languageServers.restart(this, selected == null ? scope : LanguageServers.root(new File(selected)), server);
+        notifyUiChanged();
+    }
+
+    public boolean savePythonEnvironment(String scope, String value) {
+        if (!scope.equals(getLanguageToolsScope())) throw new IllegalStateException(getString(R.string.run_config_changed));
+        RunConfiguration existing = RunConfiguration.load(this, scope);
+        RunConfiguration changed = existing.withPythonEnvironment(value);
+        if (existing.equals(changed)) return true;
+        if (!RunConfiguration.save(this, scope, changed)) return false;
+        Application app = Application.getInstance();
+        app.getRuns().cancelPreparation();
+        app.languageServers.restartPythonEnvironment(this, scope);
+        notifyUiChanged();
+        return true;
+    }
+
+    private String getPythonEnvironment() {
+        if (!hasProject() && (lastFrag == null || !"python".equals(Languages.forType(lastFrag.type).getId()))) return "";
+        String scope = getLanguageToolsScope();
+        String environment = RunConfiguration.load(this, scope).pythonEnvironmentPath(scope);
+        return environment == null ? "" : environment;
+    }
+
+    private boolean matchesPythonEnvironment(RunCommands.Request request) {
+        try { return request.getPythonEnvironment().equals(getPythonEnvironment()); }
+        catch (IllegalArgumentException error) { return false; }
     }
 
     private boolean matchesRunConfiguration(RunCommands.Request request) {

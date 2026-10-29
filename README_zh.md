@@ -17,7 +17,7 @@ TermuIDE 是由 AM-RTS 和贡献者维护的独立分支，基于 RainbowC0 和�
 
 Python/Java 提供基本控制台运行功能。Python 自动补全使用单独安装的 pylsp，Java 语言服务器尚未选定；Python/Java 调试器、依赖管理和 Maven/Gradle 集成仍未实现。C/C++ 继续使用 clangd 和 GDB。
 
-Python 自动补全：在 Termux 中运行 `pkg install python` 和 `python -m pip install python-lsp-server`，确认 `pylsp --help` 可用；在 TermuIDE 的分析设置中选择语言服务器并打开 `.py` 文件。安装后可关闭 Python 标签页并重新打开以重试，或重新应用语言服务器设置。不同语言/文件夹或项目使用独立会话和端口，同一范围的标签页共享服务器。诊断、格式化等功能取决于安装的 pylsp 插件；暂不提供虚拟环境选择。
+Python 自动补全：在 Termux 中运行 `pkg install python` 和 `python -m pip install python-lsp-server`，确认 `pylsp --help` 可用；在 TermuIDE 的分析设置中选择语言服务器并打开 `.py` 文件。安装后可在 **⋮ → Language tools** 查看状态与错误，并点击 **Restart** 重试。不同语言/文件夹或项目使用独立会话和端口，同一范围的标签页共享服务器。诊断、格式化等功能取决于安装的 pylsp 插件；可在 Language tools 指定已有虚拟环境文件夹（如 `.venv`），相对路径以显示的项目根目录或源文件夹为准；留空使用 Termux 默认 Python。执行与 pylsp 共用该环境的 `bin/python`，也须在其中安装 python-lsp-server。Apply 保存并重启相关 Python 会话；环境缺失时会报错，不会回退到全局 Python。项目命令继承 VIRTUAL_ENV 和 PATH，独立 C/C++、Java 运行不受影响。创建环境和安装依赖仍由用户完成。
 
 未保存或恢复的文本直接同步给服务器，不会为了补全写入源文件。补全修改支持撤销和原有持久恢复；服务器不可用时仍可编辑和恢复。GitHub 预发行流程使用真实 pylsp 检查兄弟模块补全，但不代表已验证手机或 Termux 传输。
 

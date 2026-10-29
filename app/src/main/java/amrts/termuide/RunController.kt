@@ -133,10 +133,7 @@ class RunController @JvmOverloads constructor(
         clearCallback(job)
         job.probe = probe
         val token = UUID.randomUUID().toString()
-        val intent = Intent(app, RunResultReceiver::class.java).setAction(RESULT_ACTION)
-            .setData(Uri.Builder().scheme(RESULT_SCHEME).authority(app.packageName).appendPath(token).build())
-        val flags = PendingIntent.FLAG_ONE_SHOT or if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0
-        val result = PendingIntent.getBroadcast(app, 0, intent, flags)
+        val result = resultCallback(app, RESULT_SCHEME, token)
         job.token = token
         job.callback = result
         if (probe) {
@@ -162,25 +159,10 @@ class RunController @JvmOverloads constructor(
     private fun handleResult(job: Job, result: Bundle?) {
         val probing = job.probe
         clearCallback(job)
-        if (result == null || result.get("err") !is Int) { fail(job, app.getString(R.string.runtime_result_unknown), Stage.UNKNOWN); return }
-        val internalError = result.getInt("err")
-        if (internalError != -1) {
-            if (!probing && history.getString("pending", null) == job.id) history.edit().remove("pending").apply()
-            fail(job, result.getString("errmsg")?.takeIf { it.isNotBlank() } ?: app.getString(R.string.runtime_setup_required))
-            return
-        }
-        if (result.get("exitCode") !is Int) { fail(job, app.getString(R.string.runtime_result_unknown), Stage.UNKNOWN); return }
-        val exit = result.getInt("exitCode")
         if (probing) {
-            if (exit != 0) {
-                fail(job, result.getString("stderr")?.trim()?.takeIf { it.isNotBlank() } ?: app.getString(R.string.runtime_setup_required)); return
-            }
-            val required = RunCommands.requiredTools(job.request)
-            val paths = result.getString("stdout").orEmpty().lineSequence().filter { it.isNotBlank() }.toList()
-            if (paths.size != required.size || paths.any { !it.startsWith('/') || it.any { char -> char.isISOControl() } }) {
-                fail(job, app.getString(R.string.runtime_result_unknown), Stage.UNKNOWN); return
-            }
-            val resolved = required.zip(paths).toMap()
+            val outcome = readProbeResult(app, result, RunCommands.requiredTools(job.request))
+            val resolved = outcome.tools
+            if (resolved == null) { fail(job, outcome.message, if (outcome.unknown) Stage.UNKNOWN else Stage.FAILED); return }
             toolCache.putAll(resolved)
             withHost(job) {
                 if (!validDocument(job)) fail(job, app.getString(R.string.runtime_changed))
@@ -188,6 +170,13 @@ class RunController @JvmOverloads constructor(
                 catch (error: IllegalArgumentException) { fail(job, error.message) }
             }
         } else {
+            if (result == null || result.get("err") !is Int) { fail(job, app.getString(R.string.runtime_result_unknown), Stage.UNKNOWN); return }
+            if (result.getInt("err") != -1) {
+                if (history.getString("pending", null) == job.id) history.edit().remove("pending").apply()
+                fail(job, result.getString("errmsg")?.takeIf { it.isNotBlank() } ?: app.getString(R.string.runtime_setup_required)); return
+            }
+            if (result.get("exitCode") !is Int) { fail(job, app.getString(R.string.runtime_result_unknown), Stage.UNKNOWN); return }
+            val exit = result.getInt("exitCode")
             if (exit == 127) toolCache.clear()
             if (history.getString("pending", null) == job.id) history.edit().remove("pending").apply()
             mutableState.value = Status(Stage.FINISHED, job.request.path, exitCode = exit)
@@ -200,6 +189,7 @@ class RunController @JvmOverloads constructor(
     }
 
     fun onConfigurationChanged() {
+        toolCache.clear()
         val action = current?.request?.action
         if (action == RunCommands.Action.RUN || action == RunCommands.Action.DEBUG) cancelPreparation()
     }
@@ -236,7 +226,32 @@ class RunController @JvmOverloads constructor(
         worker.shutdownNow()
     }
 
+    data class ProbeResult(val tools: Map<String, String>?, val message: String? = null, val unknown: Boolean = false, val missing: Boolean = false)
+
     companion object {
+        @JvmStatic fun resultCallback(context: Context, scheme: String, token: String): PendingIntent {
+            val intent = Intent(context, RunResultReceiver::class.java).setAction(RESULT_ACTION)
+                .setData(Uri.Builder().scheme(scheme).authority(context.packageName).appendPath(token).build())
+            val flags = PendingIntent.FLAG_ONE_SHOT or if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0
+            return PendingIntent.getBroadcast(context, 0, intent, flags)
+        }
+
+        @JvmStatic fun readProbeResult(context: Context, result: Bundle?, required: List<String>): ProbeResult {
+            val unknown = context.getString(R.string.runtime_result_unknown)
+            try {
+                if (result == null || result.get("err") !is Int) return ProbeResult(null, unknown, true)
+                if (result.getInt("err") != -1) return ProbeResult(null,
+                    result.getString("errmsg")?.takeIf { it.isNotBlank() }?.take(500) ?: context.getString(R.string.runtime_setup_required))
+                if (result.get("exitCode") !is Int) return ProbeResult(null, unknown, true)
+                val exit = result.getInt("exitCode")
+                if (exit != 0) return ProbeResult(null,
+                    result.getString("stderr")?.trim()?.takeIf { it.isNotBlank() }?.take(500) ?: context.getString(R.string.runtime_setup_required), missing = exit == 127)
+                val paths = result.getString("stdout").orEmpty().lineSequence().filter { it.isNotBlank() }.toList()
+                if (paths.size != required.size || paths.any { !it.startsWith('/') || it.any { char -> char.isISOControl() } }) return ProbeResult(null, unknown, true)
+                return ProbeResult(required.zip(paths).toMap())
+            } catch (_: RuntimeException) { return ProbeResult(null, unknown, true) }
+        }
+
         const val RESULT_ACTION = "amrts.termuide.RUNTIME_RESULT"
         const val RESULT_SCHEME = "termuide-run"
         const val PROBE_TIMEOUT = 15_000L

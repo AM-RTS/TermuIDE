@@ -265,5 +265,24 @@
     <string name="license_lgpl">GNU LGPL v2.1 — Sora license</string>
     <string name="license_apache">Apache 2.0 — library license</string>
     <string name="no_browser">No browser is available. The source URL is listed in acknowledgements.</string>
-    <string name="python_lsp_unavailable">Python language server disconnected. Install python-lsp-server in Termux with pip, then close and reopen the Python file to retry.</string>
+    <string name="language_tools">Language tools</string>
+    <string name="language_tools_python">Python · pylsp</string>
+    <string name="language_tools_native">C/C++ · clangd</string>
+    <string name="language_tools_java">Java language server selection remains open.</string>
+    <string name="python_environment">Python environment folder</string>
+    <string name="python_environment_help">Leave blank for Termux’s default Python, or enter a virtual environment folder such as .venv. Relative paths use the project or source folder.</string>
+    <string name="python_environment_applies">Apply restarts Python autocomplete and uses the same environment for Python execution and project commands. Install python-lsp-server in that environment.</string>
+    <string name="python_environment_scope">Project/source folder: %1$s</string>
+    <string name="lsp_stopped">Stopped — opens when a supported file is opened</string>
+    <string name="lsp_checking">Checking setup</string>
+    <string name="lsp_starting">Starting</string>
+    <string name="lsp_ready">Ready</string>
+    <string name="lsp_missing">Missing dependency</string>
+    <string name="lsp_disconnected">Disconnected</string>
+    <string name="lsp_failed">Failed</string>
+    <string name="lsp_disabled">Disabled in completion settings</string>
+    <string name="lsp_restart">Restart</string>
+    <string name="lsp_restart_description">Restart %1$s language server</string>
+    <string name="lsp_connection_ended">The connection ended. Check Termux and restart the server.</string>
+    <string name="language_tools_apply">Apply environment</string>
 </resources>

@@ -399,4 +399,33 @@ class RuntimeActivityTest {
         assertTrue(command.getStringArrayExtra("com.termux.RUN_COMMAND_ARGUMENTS")!![1].contains("x=(new-command)"))
         assertEquals("new-command", Project.snapshot().runCmd)
     }
+    @Test fun pythonEnvironmentUsesSourceScopePreservesRunArgumentsAndCancelsStalePreparation() {
+        val activity = host.get()
+        val nested = File(directory, "sources").apply { mkdirs() }
+        val entry = File(nested, "main.py").apply { writeText("print('python')") }
+        val originalDraft = "/* recover me */ " + source.readText()
+        activity.editor.paste("/* recover me */ ")
+        activity.saveRunConfiguration(directory.path, RunConfiguration(arguments = listOf("keep argument")))
+        activity.openFile(entry)
+        activity.fragmentManager.executePendingTransactions()
+        assertEquals(directory.path, activity.runConfigurationScope)
+        assertEquals(nested.path, activity.languageToolsScope)
+        assertTrue(activity.savePythonEnvironment(nested.path, ".venv"))
+        assertEquals(listOf("keep argument"), activity.runConfiguration.arguments)
+        assertEquals(".venv", RunConfiguration.load(app, nested.path).pythonEnvironment)
+        activity.performAction(R.id.run)
+        idle()
+        val probe = shadowOf(app).nextStartedService
+        assertEquals("${nested.path}/.venv/bin/python", probe.getStringArrayExtra("com.termux.RUN_COMMAND_ARGUMENTS")!!.last())
+        val token = shadowOf(probe.getParcelableExtra<PendingIntent>("com.termux.RUN_COMMAND_PENDING_INTENT")!!).savedIntent.data!!.lastPathSegment!!
+        assertTrue(activity.savePythonEnvironment(nested.path, "other-env"))
+        app.runs.receive(token, Bundle().apply { putInt("err", -1); putInt("exitCode", 0); putString("stdout", "${nested.path}/.venv/bin/python\n") })
+        idle()
+        assertNull(shadowOf(app).nextStartedService)
+        app.documents.flush()
+        assertEquals(originalDraft, app.documents.recoveryText(source.path))
+        assertTrue(app.documents.isDirty(source.path))
+        assertFalse(source.readText().contains("recover me"))
+    }
+
 }

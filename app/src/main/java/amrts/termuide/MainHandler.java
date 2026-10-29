@@ -24,6 +24,7 @@ public class MainHandler extends Handler {
     final Map<String, Set<String>> cacheData = new HashMap<>();
     MainHandler(MainActivity activity) { ma = activity; }
     void updateActivity(MainActivity activity) { ma = activity; }
+    void languageServerChanged() { if (ma != null) ma.notifyUiChanged(); }
     CompletableFuture<Boolean> saveForRun(String path) {
         EditFragment target = fragment(path);
         if (target != null) return target.save();
@@ -52,6 +53,7 @@ public class MainHandler extends Handler {
         if (!incoming.isCurrent()) return;
         Lsp lsp = incoming.source;
         if (message.what == Lsp.ERROR) {
+            lsp.connectionFailed();
             if (ma != null) for (String path : ma.getOpenFilePaths()) {
                 EditFragment fragment = fragment(path);
                 if (fragment == null || fragment.getView() == null || !Application.getInstance().languageServers.owns(lsp, fragment.getFile())) continue;
@@ -64,7 +66,6 @@ public class MainHandler extends Handler {
             }
             if (ma != null) {
                 ma.notifyUiChanged();
-                if (lsp.server == LanguageServers.Server.PYTHON) ma.toast(ma.getString(R.string.python_lsp_unavailable));
             }
             return;
         }
@@ -119,7 +120,9 @@ public class MainHandler extends Handler {
                 if (current[0] != request.start || current[1] != request.end) return;
             }
             if (json.has("error")) {
-                if (ma != null) ma.toast(json.getJSONObject("error").optString("message", "Language-server error"));
+                String detail = json.getJSONObject("error").optString("message", "Language-server error");
+                if (id == Lsp.INITIALIZE) lsp.initializationFailed(detail);
+                else if (ma != null) ma.toast(detail);
                 return;
             }
             Object result = json.opt("result");

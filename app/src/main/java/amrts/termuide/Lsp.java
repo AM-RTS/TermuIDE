@@ -31,6 +31,11 @@ public final class Lsp implements Runnable {
     final LanguageServers.Server server;
     final String root, host;
     final int port;
+    final String environment;
+    private String executable;
+    private LanguageServers.State state = LanguageServers.State.STOPPED;
+    private String detail;
+    String configurationError;
     private volatile int generation;
     private boolean started;
     private volatile boolean failed;
@@ -42,8 +47,24 @@ public final class Lsp implements Runnable {
     private final Map<String, OpenDocument> opened = new HashMap<>();
     private JSONObject capabilities;
     Lsp() { this(LanguageServers.Server.CLANGD, null, Application.lsp_host, Application.lsp_port); }
-    Lsp(LanguageServers.Server server, String root, String host, int port) {
-        this.server = server; this.root = root; this.host = host; this.port = port;
+    Lsp(LanguageServers.Server server, String root, String host, int port) { this(server, root, host, port, ""); }
+    Lsp(LanguageServers.Server server, String root, String host, int port, String environment) {
+        this.server = server; this.root = root; this.host = host; this.port = port; this.environment = environment;
+    }
+    LanguageServers.State state() { return state; }
+    String detail() { return detail; }
+    void setState(LanguageServers.State state, String detail) {
+        this.state = state; this.detail = detail;
+        Application app = Application.getInstance();
+        if (app != null && app.hand != null) app.hand.languageServerChanged();
+    }
+    void configureRuntime(String executable) { this.executable = executable; }
+    void initializationFailed(String message) {
+        end(); failed = true; setState(LanguageServers.State.FAILED, message);
+    }
+    void connectionFailed() {
+        setState(state == LanguageServers.State.READY ? LanguageServers.State.DISCONNECTED : LanguageServers.State.FAILED,
+            Application.getInstance().getString(R.string.lsp_connection_ended));
     }
     static final class Incoming {
         final Lsp source;
@@ -93,7 +114,16 @@ public final class Lsp implements Runnable {
     String[] launchArguments() {
         ArrayList<String> args = new ArrayList<>(Arrays.asList("nc", "-l", "-s", host, "-p", Integer.toString(port), "-w", "6"));
         if (server == LanguageServers.Server.CLANGD) args.addAll(Arrays.asList("nice", "-n", "-20"));
-        args.addAll(Arrays.asList(server.command));
+        if (server == LanguageServers.Server.PYTHON && !environment.isEmpty()) {
+            args.addAll(Arrays.asList(Utils.PREF + "/usr/bin/bash", "-c",
+                "unset PYTHONHOME;export VIRTUAL_ENV=\"$1\";export PATH=\"$1/bin:$PATH\";shift;exec \"$@\"", "termuide-lsp", environment));
+        }
+        if (executable == null) args.addAll(Arrays.asList(server.command));
+        else {
+            args.add(executable);
+            if (server == LanguageServers.Server.PYTHON) args.addAll(Arrays.asList("-m", "pylsp"));
+            else args.add("--header-insertion-decorators=0");
+        }
         return args.toArray(new String[0]);
     }
 
@@ -102,6 +132,7 @@ public final class Lsp implements Runnable {
     public void start(Context context, Handler read) {
         end();
         started = true;
+        setState(LanguageServers.State.STARTING, null);
         failed = false;
         ready = false;
         capabilities = null;
@@ -131,6 +162,7 @@ public final class Lsp implements Runnable {
         sender.offer(wrap("exit", "{}", -1).getBytes(StandardCharsets.UTF_8));
         sender.offer(TERM);
         started = false;
+        setState(LanguageServers.State.STOPPED, null);
     }
 
 	public boolean isEnded() {
@@ -256,6 +288,9 @@ public final class Lsp implements Runnable {
 		}
 		if (server == LanguageServers.Server.CLANGD)
             sb.append(",\"initializationOptions\":{\"fallbackFlags\":[\"-Wall\"]}");
+        if (server == LanguageServers.Server.PYTHON && executable != null)
+            sb.append(",\"initializationOptions\":{\"pylsp\":{\"plugins\":{\"jedi\":{\"environment\":")
+                .append(JSONObject.quote(executable)).append("}}}}");
         sb.append('}');
 		mSndr.send("initialize", sb.toString(), 0);
 	}
@@ -325,6 +360,7 @@ public final class Lsp implements Runnable {
 		mSndr.send("initialized", new HashMap<>(), -1);
         requests.clear();
         ready = true;
+        setState(LanguageServers.State.READY, null);
 	}
 
 	public void didClose(File f) {

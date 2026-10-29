@@ -52,12 +52,14 @@ jobs:
         run: |
           python3 -m venv "$RUNNER_TEMP/pylsp"
           "$RUNNER_TEMP/pylsp/bin/python" -m pip install --disable-pip-version-check 'python-lsp-server==1.15.0'
+          "$RUNNER_TEMP/pylsp/bin/python" -c "import pathlib, sysconfig; pathlib.Path(sysconfig.get_path('purelib'), 'termuide_env_marker.py').write_text(\"env_specific_value = 'termuide environment package'\\n\")"
           printf '%s\n' "$RUNNER_TEMP/pylsp/bin" >> "$GITHUB_PATH"
 
       - name: Run host regression suite
         id: regressions
         env:
           TERMUIDE_PYLSP_INTEGRATION: '1'
+          TERMUIDE_TEST_PYTHON_ENV: ${{ runner.temp }}/pylsp
         run: bash ./gradlew :app:testDebugUnitTest --no-daemon --stacktrace
 
       - name: Upload regression reports

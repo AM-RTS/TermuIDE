@@ -244,6 +244,8 @@ class ActivityRecoveryTest {
 
     @Test fun realPylspCompletesSiblingImportsFromAnUnsavedRecoveredBuffer() {
         org.junit.Assume.assumeTrue("Enabled by the GitHub prerelease workflow", System.getenv("TERMUIDE_PYLSP_INTEGRATION") == "1")
+        val environment = requireNotNull(System.getenv("TERMUIDE_TEST_PYTHON_ENV"))
+        RunConfiguration.save(app, directory.path, RunConfiguration(pythonEnvironment = environment))
         val file = directory.resolve("main.py").apply { writeText("# original source\n") }
         directory.resolve("sibling.py").writeText("greeting = 'hello'\n")
         directory.resolve("data-file.txt").writeText("example")
@@ -258,7 +260,9 @@ class ActivityRecoveryTest {
         val lsp = fragment.languageServer()
         Lsp::class.java.getDeclaredField("mRead").apply { isAccessible = true }.set(lsp, app.hand)
         // Host-only transport smoke: Termux uses the same JSON framing through the existing nc stdio bridge.
-        val process = ProcessBuilder("pylsp", "--tcp", "--host", lsp.host, "--port", lsp.port.toString())
+        assertEquals(environment, lsp.environment)
+        lsp.configureRuntime("$environment/bin/python")
+        val process = ProcessBuilder("$environment/bin/python", "-m", "pylsp", "--tcp", "--host", lsp.host, "--port", lsp.port.toString())
             .directory(directory).redirectError(ProcessBuilder.Redirect.INHERIT).start()
         val reader = Thread { lsp.run() }
         fun await(description: String, condition: () -> Boolean) {
@@ -301,12 +305,24 @@ class ActivityRecoveryTest {
             assertTrue("Missing data-file.txt completion", fileIndex >= 0)
             activity.editor.autoCompletePanel.select(fileIndex)
             assertEquals("open('data-file.txt'", activity.editor.text.toString())
+            activity.editor.setSelection(0, activity.editor.text.length - 1)
+            activity.editor.paste("import termuide_env_marker\ntermuide_env_marker.env_spec")
+            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+            assertTrue(lsp.completionTry(file, 1, "termuide_env_marker.env_spec".length, 'c'.code))
+            await("pylsp did not see the selected environment's package") { activity.editor.autoCompletePanel.isShow }
+            val environmentItems = EditorCompletionPanel::class.java.getDeclaredField("items").apply { isAccessible = true }
+                .get(activity.editor.autoCompletePanel) as List<*>
+            val environmentIndex = environmentItems.indexOfFirst { (it as cn.rbc.codeeditor.view.autocomplete.ListItem).label == "env_specific_value" }
+            assertTrue("Missing environment-specific completion", environmentIndex >= 0)
+            activity.editor.autoCompletePanel.select(environmentIndex)
+            assertEquals("import termuide_env_marker\ntermuide_env_marker.env_specific_value", activity.editor.text.toString())
             app.documents.flush()
             assertEquals(activity.editor.text.toString(), app.documents.recoveryText(file.path))
             assertEquals("# original source\n", file.readText())
             assertTrue(app.documents.isDirty(file.path))
         } finally {
             Application.completion = "n"
+            app.getSharedPreferences("run_configurations", 0).edit().remove(directory.path).commit()
             lsp.end()
             process.destroyForcibly()
             reader.join(3000)
