@@ -1,0 +1,38 @@
+name: Java tooling integration
+on:
+  push:
+    branches: [codex/java-lsp-integration]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  android:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - name: Android SDK
+        run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-34" "build-tools;34.0.0" >/dev/null'
+      - name: Python tooling for existing integration coverage
+        run: |
+          python3 -m venv "$RUNNER_TEMP/pylsp"
+          "$RUNNER_TEMP/pylsp/bin/python" -m pip install --disable-pip-version-check 'python-lsp-server==1.15.0'
+          "$RUNNER_TEMP/pylsp/bin/python" -c "import pathlib, sysconfig; pathlib.Path(sysconfig.get_path('purelib'), 'termuide_env_marker.py').write_text(\"env_specific_value = 'termuide environment package'\\n\")"
+          printf '%s\n' "$RUNNER_TEMP/pylsp/bin" >> "$GITHUB_PATH"
+      - name: App host regressions
+        env:
+          TERMUIDE_PYLSP_INTEGRATION: '1'
+          TERMUIDE_TEST_PYTHON_ENV: ${{ runner.temp }}/pylsp
+        run: bash ./gradlew :app:testDebugUnitTest --no-daemon --stacktrace
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: java-tooling-regressions
+          path: app/build/test-results/testDebugUnitTest/

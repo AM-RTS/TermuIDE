@@ -31,7 +31,7 @@ class RunCommandsTest {
         assertTrue(Languages.canRun(EditFragment.TYPE_JAVA))
         assertTrue(Languages.canRun(Languages.fileType("Main.java")!!))
         assertEquals("java", Languages.forType(EditFragment.TYPE_JAVA or EditFragment.TYPE_HEADER).id)
-        assertFalse(Languages.forType(EditFragment.TYPE_JAVA).hasLsp)
+        assertTrue(Languages.forType(EditFragment.TYPE_JAVA).hasLsp)
         assertEquals(EditFragment.TYPE_PYTHON, Languages.fileType("main.py"))
         assertTrue(Languages.canRun(Languages.fileType("main.py")!!))
         assertTrue(Languages.forType(EditFragment.TYPE_PYTHON).hasLsp)

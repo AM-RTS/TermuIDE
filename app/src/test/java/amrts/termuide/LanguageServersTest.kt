@@ -29,7 +29,11 @@ class LanguageServersTest {
         assertNotSame(c, python)
         assertNotSame(python, other)
         assertEquals(3, setOf(c.port, python.port, other.port).size)
-        assertNull(servers.session(File("/workspace/Main.java"), EditFragment.TYPE_JAVA))
+        val java = servers.session(File("/workspace/Main.java"), EditFragment.TYPE_JAVA)!!
+        assertNotSame(c, java)
+        assertNotSame(python, java)
+        assertSame(java, servers.session(File("/workspace/Helper.java"), EditFragment.TYPE_JAVA))
+        assertEquals(4, setOf(c.port, python.port, other.port, java.port).size)
     }
 
     @Test fun projectRootGroupsNestedFilesAndRebindsARetainedTabWhenItChanges() {

@@ -319,3 +319,10 @@ JDT's ARM64/256 MiB trial retained `greeting` instead of returning `farewell` th
 Existing microbenchmarks, baseline / fixed throughput in operations per second: parser 726.790 / 699.658; plain compilation 136.520 / 129.599; pruned compilation 710.633 / 669.049; plain parsing 772.034 / 753.061. Their wide reported uncertainty intervals overlap; these small samples do not establish a performance improvement or regression. They also do not measure completion, indexing, or cross-file cache invalidation; the direct-LSP comparison supplies that limited behavioral evidence.
 
 The host fixes make the smaller server a viable candidate for the next integration step. They do not enable Java autocomplete in TermuIDE, validate Termux/bionic or the app adapter, or exercise Android process death and draft recovery. Local builds, tests, Gradle, and phone/emulator checks remain skipped. A later Termux check must use a compatible JDK 25 with the required compiler exports and verify the actual app bridge before making a device-support claim.
+
+
+### Optional Java LSP integration plan - 2026-10-30
+
+Reuse `Languages`, `LanguageServers`, `RunCommands` preflight, the existing stdio bridge, and LSP document/revision handling. Route Java separately from clangd/pylsp, add status/restart to the existing Material 3 language-tools dialog, and require an explicitly installed `termuide-java-lsp` launcher using JDK 25. Keep basic Java execution compatible with its existing JDK requirement.
+
+Package only the pinned fork JARs, launcher, and notices in GitHub CI; no JDK or server goes into the APK. Reuse that build in the host comparison. Verify launcher rejection of unsupported/missing JDKs, Java session isolation/restart, UTF-16 completions, diagnostics, and unsaved recovered buffers through the actual app adapter. Respect clients that do not advertise snippet support in the server fork. Preserve C/C++/Python regression coverage and run Android compilation/tests only in CI. Physical Termux transport and phone responsiveness remain unverified.
