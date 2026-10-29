@@ -469,22 +469,22 @@ class ActivityRecoveryTest {
         val activity = launch()
         activity.fragmentManager.executePendingTransactions()
         val servers = app.languageServers
-        val java = servers.session(main, EditFragment.TYPE_JAVA)!!
-        java.connectedSender()
+        val originalJava = servers.session(main, EditFragment.TYPE_JAVA)!!
+        originalJava.connectedSender()
         val nativeFile = directory.resolve("main.c")
         val pythonFile = directory.resolve("main.py")
         val otherFile = directory.resolve("other/Other.java")
         val native = servers.session(nativeFile, EditFragment.TYPE_C)!!
         val python = servers.session(pythonFile, EditFragment.TYPE_PYTHON)!!
         val other = servers.session(otherFile, EditFragment.TYPE_JAVA)!!
-        val stale = java.incoming("{}")
+        val stale = originalJava.incoming("{}")
         Application.completion = "s"
         try {
             activity.renameFile(helper.path, "Renamed.java")
             val renamed = directory.resolve("Renamed.java")
             assertTrue(renamed.isFile)
             val replacement = servers.find(main)!!
-            assertNotSame(java, replacement)
+            assertNotSame(originalJava, replacement)
             assertFalse(stale.isCurrent)
             assertSame(native, servers.find(nativeFile))
             assertSame(python, servers.find(pythonFile))
