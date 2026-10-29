@@ -442,7 +442,7 @@ class ActivityRecoveryTest {
             activity.editor.replaceText(0, activity.editor.text.length, invalid)
             fragment.flushLanguageChange()
             await("Java semantic diagnostics did not reach the editor") {
-                activity.editor.text.diag?.any { it.msg?.contains("cannot find symbol") == true } == true
+                activity.editor.text.diag?.any { it.msg?.contains("missingSymbol") == true } == true
             }
             app.documents.flush()
             assertEquals(invalid, app.documents.recoveryText(file.path))
