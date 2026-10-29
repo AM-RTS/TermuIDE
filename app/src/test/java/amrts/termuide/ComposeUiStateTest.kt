@@ -259,7 +259,10 @@ class ComposeUiStateTest {
         var saved: String? = null
         var succeed = false
         var restarts = 0
-        val statuses = listOf(LanguageServers.Info(LanguageServers.Server.PYTHON, LanguageServers.State.MISSING, "Install pylsp", true))
+        val statuses = listOf(
+            LanguageServers.Info(LanguageServers.Server.PYTHON, LanguageServers.State.MISSING, "Install pylsp", true),
+            LanguageServers.Info(LanguageServers.Server.JAVA, LanguageServers.State.READY, null, true)
+        )
         restore.setContent {
             MaterialTheme { LanguageToolsDialog("/project", "", statuses,
                 onSave = { saved = it; succeed }, onRestart = { restarts++ }, onDismiss = {}) }
@@ -270,6 +273,9 @@ class ComposeUiStateTest {
         restore.emulateSavedInstanceStateRestore()
         compose.onNodeWithTag("python-environment").performScrollTo().assertTextContains(".venv")
         compose.onNodeWithTag("lsp-restart-pylsp").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithText(app.getString(R.string.language_tools_java)).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("lsp-restart-java").performScrollTo().assertIsEnabled().performClick()
+        assertEquals(2, restarts)
         compose.onNodeWithTag("python-environment-apply").performClick()
         assertEquals(".venv", saved)
         compose.onNodeWithText(app.getString(R.string.run_config_save_failed)).performScrollTo().assertIsDisplayed()
