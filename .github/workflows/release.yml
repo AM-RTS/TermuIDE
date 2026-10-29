@@ -49,7 +49,7 @@ jobs:
           python3 -m unittest discover -s tools/java_lsp -p 'test_*.py' -v
           bash tools/java_lsp/build.sh "$RUNNER_TEMP/java-lsp"
           mkdir -p dist
-          cp "$RUNNER_TEMP/java-lsp/termuide-java-lsp.tar.gz" dist/
+          cp "$RUNNER_TEMP/java-lsp/termuide-java-lsp"*.tar.gz dist/
 
       - name: Set up JDK 17
         uses: actions/setup-java@v5
@@ -114,7 +114,7 @@ jobs:
             --ks-pass env:KEYSTORE_PASSWORD --key-pass env:KEY_PASSWORD --v4-signing-enabled false \
             --out "dist/$apk" "$RUNNER_TEMP/aligned.apk"
           "$tools/apksigner" verify --verbose --print-certs "dist/$apk"
-          (cd dist && sha256sum "$apk" termuide-java-lsp.tar.gz > SHA256SUMS)
+          (cd dist && sha256sum "$apk" termuide-java-lsp*.tar.gz > SHA256SUMS)
           printf 'version=%s\ntag=%s\n' "$version" "$tag" >> "$GITHUB_OUTPUT"
 
       - name: Write change notes
@@ -144,7 +144,7 @@ jobs:
           name: TermuIDE-${{ steps.apk.outputs.tag }}
           path: |
             dist/*.apk
-            dist/termuide-java-lsp.tar.gz
+            dist/termuide-java-lsp*.tar.gz
             dist/SHA256SUMS
           if-no-files-found: error
 
@@ -154,7 +154,7 @@ jobs:
           RELEASE_TAG: ${{ steps.apk.outputs.tag }}
           VERSION: ${{ steps.apk.outputs.version }}
         run: |
-          gh release create "$RELEASE_TAG" dist/*.apk dist/termuide-java-lsp.tar.gz dist/SHA256SUMS \
+          gh release create "$RELEASE_TAG" dist/*.apk dist/termuide-java-lsp*.tar.gz dist/SHA256SUMS \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
             --title "TermuIDE $VERSION (${GITHUB_SHA::7}, attempt $GITHUB_RUN_ATTEMPT)" \
             --notes-file dist/change-notes.md --prerelease --latest=false

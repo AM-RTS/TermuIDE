@@ -18,6 +18,9 @@ cp source/dist/classpath/*.jar termuide-java-lsp/lib/
 install -m 755 "$scripts/termuide-java-lsp" termuide-java-lsp/bin/
 cp source/LICENSE.md termuide-java-lsp/LICENSE.md
 cp source/src/main/java/org/javacs/ReusableCompiler.java termuide-java-lsp/NOTICE-ReusableCompiler.java
+cp "$JAVA_HOME/legal/java.base/LICENSE" termuide-java-lsp/GPL-2.0-with-Classpath-exception.txt
 printf 'George Fraser Java language server, TermuIDE fork\nSource: https://github.com/AM-RTS/java-language-server/tree/%s\nBuilt using Maven; JDK 25 required, installed separately.\nDependency versions and notices: source pom.xml and META-INF in the included JARs.\nReusableCompiler retains its Oracle GPLv2 with Classpath Exception notice in the linked source.\n' "$revision" > termuide-java-lsp/SOURCE.txt
 tar -czf termuide-java-lsp.tar.gz termuide-java-lsp
 sha256sum termuide-java-lsp.tar.gz > termuide-java-lsp.tar.gz.sha256
+cp source.tar.gz termuide-java-lsp-sources.tar.gz
+sha256sum termuide-java-lsp-sources.tar.gz > termuide-java-lsp-sources.tar.gz.sha256

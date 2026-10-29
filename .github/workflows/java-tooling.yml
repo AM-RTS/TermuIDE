@@ -35,8 +35,7 @@ jobs:
         with:
           name: termuide-java-lsp
           path: |
-            ${{ runner.temp }}/java-lsp/termuide-java-lsp.tar.gz
-            ${{ runner.temp }}/java-lsp/termuide-java-lsp.tar.gz.sha256
+            ${{ runner.temp }}/java-lsp/termuide-java-lsp*.tar.gz*
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
