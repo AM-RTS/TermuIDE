@@ -862,7 +862,11 @@ internal fun LanguageToolsDialog(
             Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(context.getString(R.string.python_environment_scope, scope), style = MaterialTheme.typography.bodySmall)
                 statuses.forEach { info ->
-                    val label = context.getString(if (info.server == LanguageServers.Server.PYTHON) R.string.language_tools_python else R.string.language_tools_native)
+                    val label = context.getString(when (info.server) {
+                        LanguageServers.Server.PYTHON -> R.string.language_tools_python
+                        LanguageServers.Server.JAVA -> R.string.language_tools_java
+                        else -> R.string.language_tools_native
+                    })
                     val status = context.getString(when (info.state) {
                         LanguageServers.State.CHECKING -> R.string.lsp_checking
                         LanguageServers.State.STARTING -> R.string.lsp_starting
@@ -895,7 +899,7 @@ internal fun LanguageToolsDialog(
                     modifier = Modifier.fillMaxWidth().testTag("python-environment"))
                 Text(context.getString(R.string.python_environment_applies), style = MaterialTheme.typography.bodySmall)
                 TextButton(onClick = { environment = "" }, modifier = Modifier.heightIn(min = 48.dp)) { Text(context.getString(R.string.run_use_defaults)) }
-                Text(context.getString(R.string.language_tools_java), style = MaterialTheme.typography.bodySmall)
+                Text(context.getString(R.string.language_tools_java_help), style = MaterialTheme.typography.bodySmall)
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }) }
             }
         }, confirmButton = {

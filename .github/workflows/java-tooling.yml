@@ -14,6 +14,21 @@ jobs:
         with:
           persist-credentials: false
       - uses: actions/setup-java@v5
+        id: java25
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Package optional pinned Java server and check launcher
+        run: |
+          python3 -m unittest discover -s tools/java_lsp -p 'test_*.py' -v
+          bash tools/java_lsp/build.sh "$RUNNER_TEMP/java-lsp"
+      - uses: actions/upload-artifact@v6
+        with:
+          name: termuide-java-lsp
+          path: |
+            ${{ runner.temp }}/java-lsp/termuide-java-lsp.tar.gz
+            ${{ runner.temp }}/java-lsp/termuide-java-lsp.tar.gz.sha256
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -30,7 +45,12 @@ jobs:
         env:
           TERMUIDE_PYLSP_INTEGRATION: '1'
           TERMUIDE_TEST_PYTHON_ENV: ${{ runner.temp }}/pylsp
+          TERMUIDE_JAVA_LSP_INTEGRATION: '1'
+          TERMUIDE_JAVA_LSP_BUNDLE: ${{ runner.temp }}/java-lsp/termuide-java-lsp
+          TERMUIDE_TEST_JAVA_HOME: ${{ steps.java25.outputs.path }}
         run: bash ./gradlew :app:testDebugUnitTest --no-daemon --stacktrace
+      - name: Compile Android debug APK
+        run: bash ./gradlew :app:assembleDebug --no-daemon --stacktrace
       - uses: actions/upload-artifact@v6
         if: always()
         with:

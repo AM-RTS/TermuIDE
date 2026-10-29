@@ -64,6 +64,23 @@ class ScriptRuntimeTest {
         return bashPath(python!!)
     }
 
+    @Test fun javaLanguageServerProbeChecksTheOptionalLauncherWithoutChangingExecutionRequirements() {
+        val tools = File(directory, "tools").apply { mkdirs() }
+        val launcher = File(tools, "termuide-java-lsp").apply {
+            writeText("#!/bin/bash\n[ \"\$1\" = --check ] || exit 99\nprintf '%s' checked > \"${Utils.escape(bashPath(File(directory, "checked")))}\"\nexit \"\${TERMUIDE_FAKE_EXIT:-0}\"\n")
+            setExecutable(true)
+        }
+        val environment = mapOf("PATH" to bashPath(tools) + ":" + System.getenv("PATH"))
+        val plan = RunCommands.languageServerProbe("java", bashPath(directory), "")
+        val ready = execute(plan, environment = environment)
+        assertEquals(ready.stderr, 0, ready.exit)
+        assertEquals(bashPath(launcher), ready.stdout.trim())
+        assertEquals("checked", File(directory, "checked").readText())
+        assertEquals(127, execute(plan, environment = environment + ("TERMUIDE_FAKE_EXIT" to "1")).exit)
+        assertEquals(127, execute(plan, noPath = true).exit)
+        assertFalse(RunCommands.probe(request("Main.java", "class Main {}" )).arguments[1].contains("termuide-java-lsp"))
+    }
+
     @Test fun pythonProbeChecksVersionReadabilityAndMissingRuntimeWithoutRunningTheSource() {
         val env = File(directory, "environment with spaces").apply { resolve("bin").mkdirs() }
         val runtime = env.resolve("bin/python").apply { writeText("#!/bin/bash\nexit 0\n"); setExecutable(true) }.let(::bashPath)

@@ -1,21 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
+scripts=$(cd -- "$(dirname -- "$0")" && pwd)
 root=$1
 mkdir -p "$root"
 cd "$root"
 
 # Pin source and binaries; never run upstream scripts that download desktop JDKs.
-revision=4b3835cf7fb40371c0670afb2d86f037da17b902
+revision=$(tr -d '\r\n' < "$scripts/../java_lsp/revision")
 repository=AM-RTS/java-language-server
-curl -fL --retry 3 "https://codeload.github.com/$repository/tar.gz/$revision" -o george-source.tar.gz
-mkdir george-source
-tar -xzf george-source.tar.gz -C george-source --strip-components=1
-if ! (cd george-source && mvn -B -Dmaven.test.skip=true package) >build.log 2>&1; then
-  tail -n 80 build.log
-  exit 1
-fi
+bash "$scripts/../java_lsp/build.sh" "$root/java-server"
+cp java-server/build.log build.log
 mkdir george
-cp george-source/dist/classpath/*.jar george/
+cp java-server/termuide-java-lsp/lib/*.jar george/
 
 archive=jdt-language-server-1.63.0-202610191322.tar.gz
 curl -fL --retry 3 "https://download.eclipse.org/jdtls/milestones/1.63.0/$archive" -o jdtls.tar.gz

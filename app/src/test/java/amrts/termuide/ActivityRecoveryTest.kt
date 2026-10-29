@@ -338,6 +338,117 @@ class ActivityRecoveryTest {
         }
     }
 
+    @Test fun realJavaServerCompletesRecoveredDraftsAndUnsavedSiblingEditsWithoutSavingSources() {
+        org.junit.Assume.assumeTrue("Enabled by Java tooling CI", System.getenv("TERMUIDE_JAVA_LSP_INTEGRATION") == "1")
+        val bundle = File(requireNotNull(System.getenv("TERMUIDE_JAVA_LSP_BUNDLE")))
+        val javaHome = requireNotNull(System.getenv("TERMUIDE_TEST_JAVA_HOME"))
+        val sources = directory.resolve("demo").apply { mkdirs() }
+        val mainSource = "package demo;\nclass Main {}\n"
+        val helperSource = "package demo; public class Helper { public static String greeting() { return \"hi\"; } }"
+        val file = sources.resolve("Main.java").apply { writeText(mainSource) }
+        val helper = sources.resolve("Helper.java").apply { writeText(helperSource) }
+        val draft = "package demo;\nclass Main { Object value = /*🧪*/ Helper.gre; }\n"
+        app.documents.open(file.path) { draft }
+        app.documents.changed(file.path)
+        app.documents.flush()
+        val activity = launch()
+        controller!!.visible()
+        activity.fragmentManager.executePendingTransactions()
+        val fragment = activity.fragmentManager.findFragmentByTag(file.path) as EditFragment
+        val lsp = fragment.languageServer()
+        assertEquals(LanguageServers.Server.JAVA, lsp.server)
+        Lsp::class.java.getDeclaredField("mRead").apply { isAccessible = true }.set(lsp, app.hand)
+        Lsp::class.java.getDeclaredField("started").apply { isAccessible = true }.setBoolean(lsp, true)
+        val process = ProcessBuilder("/bin/bash", bundle.resolve("bin/termuide-java-lsp").path)
+            .directory(sources).redirectError(ProcessBuilder.Redirect.INHERIT)
+            .apply { environment()["PATH"] = "$javaHome/bin:" + environment()["PATH"] }.start()
+        // Host stand-in for the existing Termux nc stdio bridge; use the actual app framing/handler.
+        val listener = java.net.ServerSocket(lsp.port, 1, java.net.InetAddress.getByName(lsp.host))
+        val bridge = Thread {
+            try {
+                listener.accept().use { socket ->
+                    val input = Thread {
+                        try { socket.getInputStream().copyTo(process.outputStream) }
+                        catch (_: java.io.IOException) {}
+                        finally { process.outputStream.close() }
+                    }.apply { isDaemon = true; start() }
+                    try { process.inputStream.copyTo(socket.getOutputStream()) }
+                    finally { socket.close(); input.join(3000) }
+                }
+            } catch (_: java.io.IOException) {}
+        }.apply { isDaemon = true }
+        val reader = Thread { lsp.run() }
+        fun await(description: String, condition: () -> Boolean) {
+            val deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(30)
+            while (System.nanoTime() < deadline) {
+                org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+                if (condition()) return
+                Thread.sleep(20)
+            }
+            fail(description)
+        }
+        fun complete(name: String) {
+            val text = activity.editor.text.toString()
+            val caret = text.indexOf("; }")
+            activity.editor.setSelection(caret)
+            val position = cn.rbc.codeeditor.util.TextPositions(text).position(caret)
+            assertTrue(lsp.completionTry(file, position[0], position[1], text[caret - 1].code))
+            await("Java completion popup did not appear") { activity.editor.autoCompletePanel.isShow }
+            val items = EditorCompletionPanel::class.java.getDeclaredField("items").apply { isAccessible = true }
+                .get(activity.editor.autoCompletePanel) as List<*>
+            val index = items.indexOfFirst { (it as cn.rbc.codeeditor.view.autocomplete.ListItem).label == name }
+            assertTrue("Missing $name completion: $items", index >= 0)
+            activity.editor.autoCompletePanel.select(index)
+        }
+        Application.completion = "s"
+        try {
+            bridge.start()
+            lsp.initialize(lsp.root)
+            reader.start()
+            await("Java server initialization did not finish") { lsp.state() == LanguageServers.State.READY }
+            assertFalse(lsp.supports("renameProvider"))
+            complete("greeting")
+            assertEquals(draft.replace("Helper.gre", "Helper.greeting"), activity.editor.text.toString())
+
+            activity.openFile(helper)
+            activity.fragmentManager.executePendingTransactions()
+            val helperFragment = activity.fragmentManager.findFragmentByTag(helper.path) as EditFragment
+            val changedHelper = helperSource.replace("greeting", "farewell")
+            activity.editor.replaceText(0, activity.editor.text.length, changedHelper)
+            helperFragment.flushLanguageChange()
+            activity.selectItem(0)
+            activity.fragmentManager.executePendingTransactions()
+            val changedMain = draft.replace("Helper.gre", "Helper.far")
+            activity.editor.replaceText(0, activity.editor.text.length, changedMain)
+            fragment.flushLanguageChange()
+            complete("farewell")
+            assertEquals(changedMain.replace("Helper.far", "Helper.farewell"), activity.editor.text.toString())
+
+            val invalid = draft.replace("Helper.gre", "missingSymbol")
+            activity.editor.replaceText(0, activity.editor.text.length, invalid)
+            fragment.flushLanguageChange()
+            await("Java semantic diagnostics did not reach the editor") {
+                activity.editor.text.diag?.any { it.msg?.contains("cannot find symbol") == true } == true
+            }
+            app.documents.flush()
+            assertEquals(invalid, app.documents.recoveryText(file.path))
+            assertEquals(changedHelper, app.documents.recoveryText(helper.path))
+            assertEquals(mainSource, file.readText())
+            assertEquals(helperSource, helper.readText())
+            assertTrue(app.documents.isDirty(file.path))
+            assertTrue(app.documents.isDirty(helper.path))
+        } finally {
+            Application.completion = "n"
+            lsp.end()
+            listener.close()
+            process.destroyForcibly()
+            reader.join(3000)
+            bridge.join(3000)
+            assertFalse("Java LSP reader did not terminate", reader.isAlive)
+            assertFalse("Java stdio bridge did not terminate", bridge.isAlive)
+        }
+    }
+
     @Test fun rotationAfterStateCaptureKeepsServerVersionsAndPendingDraftsCurrent() {
         val file = directory.resolve("main.py").apply { writeText("value = 1") }
         val activity = launch()

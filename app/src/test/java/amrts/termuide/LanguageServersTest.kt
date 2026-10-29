@@ -183,6 +183,50 @@ class LanguageServersTest {
         assertTrue(sender.stopped)
     }
 
+    @Test fun javaUsesTheOptionalLauncherAndKeepsUtf16AndAdvancedActionsSeparate() {
+        val file = File("/workspace/Main.java")
+        val java = servers.session(file, EditFragment.TYPE_JAVA)!!
+        java.configureRuntime("/termux/bin/termuide-java-lsp")
+        assertEquals(listOf("nc", "-l", "-s", "127.0.0.1", "-p", java.port.toString(), "-w", "6",
+            "/termux/bin/termuide-java-lsp"), java.launchArguments().toList())
+        val sender = java.connectedSender()
+        java.initialize(java.root)
+        val initialization = JSONObject(String(sender.remove(), Charsets.UTF_8)).getJSONObject("params")
+        assertFalse(initialization.getJSONObject("capabilities").getJSONObject("textDocument")
+            .getJSONObject("completion").getJSONObject("completionItem").getBoolean("snippetSupport"))
+        java.setCapabilities(JSONObject().put("completionProvider", JSONObject()).put("renameProvider", true))
+        java.didOpen(file, "java", 0, "/*🧪*/ Helper.gre")
+        sender.clear()
+        assertTrue(java.completionTry(file, 0, 17, 'e'.code))
+        val request = JSONObject(String(sender.remove(), Charsets.UTF_8)).getJSONObject("params")
+        assertEquals(17, request.getJSONObject("position").getInt("character"))
+        java.rename(file, 0, 10, "renamed")
+        java.formatting(file, 4, true)
+        java.definition(file, 0, 10)
+        assertTrue(sender.isEmpty())
+    }
+
+    @Test fun restartingJavaPreservesItsLanguageAndLeavesNativeAndPythonSessionsAlone() {
+        val file = File("/workspace/Main.java")
+        val java = servers.session(file, EditFragment.TYPE_JAVA)!!
+        val native = servers.session(File("/workspace/main.c"), EditFragment.TYPE_C)!!
+        val python = servers.session(File("/workspace/main.py"), EditFragment.TYPE_PYTHON)!!
+        Application.completion = "s"
+        val unavailable = object : android.content.ContextWrapper(Application.getInstance()) {
+            override fun startForegroundService(service: android.content.Intent): android.content.ComponentName {
+                throw SecurityException("No Termux service in this host fixture")
+            }
+        }
+        try {
+            servers.restart(unavailable, java.root, "java")
+            val replacement = servers.find(file)!!
+            assertNotSame(java, replacement)
+            assertEquals(LanguageServers.Server.JAVA, replacement.server)
+            assertSame(native, servers.find(File("/workspace/main.c")))
+            assertSame(python, servers.find(File("/workspace/main.py")))
+        } finally { Application.completion = "n" }
+    }
+
     @Test fun pythonCapabilitiesSuppressUnsupportedNativeRequests() {
         val file = File("/workspace/main.py")
         val python = servers.session(file, EditFragment.TYPE_PYTHON)!!

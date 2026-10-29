@@ -110,7 +110,7 @@ public final class Lsp implements Runnable {
 	private Handler mRead;
     private volatile boolean ready;
 
-    // The existing Termux stdio bridge works for both servers and exits when its socket closes.
+    // All language servers share the Termux stdio bridge and exit when its socket closes.
     String[] launchArguments() {
         ArrayList<String> args = new ArrayList<>(Arrays.asList("nc", "-l", "-s", host, "-p", Integer.toString(port), "-w", "6"));
         if (server == LanguageServers.Server.CLANGD) args.addAll(Arrays.asList("nice", "-n", "-20"));
@@ -327,6 +327,8 @@ public final class Lsp implements Runnable {
 
     void setCapabilities(JSONObject capabilities) { this.capabilities = capabilities == null ? new JSONObject() : capabilities; }
     boolean supports(String capability) {
+        // Java starts with completion and diagnostics; advanced tools need separate adapter validation.
+        if (server == LanguageServers.Server.JAVA && !"completionProvider".equals(capability)) return false;
         if (capabilities == null) return true;
         Object value = capabilities.opt(capability);
         return value != null && value != JSONObject.NULL && !Boolean.FALSE.equals(value);

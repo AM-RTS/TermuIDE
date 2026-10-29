@@ -534,7 +534,10 @@ ActionMode.Callback, TextEditor.OnEditedListener {
         List<Command> acts = tActs;
         int flag = acts == null ? 2 : 1;
         p2.findItem(R.id.search).setVisible(start != end).setShowAsActionFlags(flag);
-        p2.findItem(R.id.rename).setVisible(start != end && "s" == Application.completion && hasLsp()).setShowAsActionFlags(flag);
+        p2.findItem(R.id.rename).setVisible(start != end && "s" == Application.completion && hasLsp()
+            && languageServer().supports("renameProvider")).setShowAsActionFlags(flag);
+        p2.findItem(R.id.goto_).setVisible("s" == Application.completion && hasLsp()
+            && languageServer().supports("definitionProvider"));
         p2.findItem(ClipboardPanel.ID_SELECTALL).setShowAsActionFlags(flag);
         p2.findItem(ClipboardPanel.ID_CUT).setShowAsActionFlags(flag);
         p2.findItem(ClipboardPanel.ID_COPY).setShowAsActionFlags(flag);

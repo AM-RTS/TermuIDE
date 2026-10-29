@@ -28,7 +28,7 @@ object Languages {
         Definition("c", EditFragment.TYPE_C, "clang", true),
         Definition("cpp", EditFragment.TYPE_CPP, "clang++", true),
         Definition("python", EditFragment.TYPE_PYTHON, null, true),
-        Definition("java", EditFragment.TYPE_JAVA, "javac", false),
+        Definition("java", EditFragment.TYPE_JAVA, "javac", true),
         Definition("javascript", EditFragment.TYPE_JAVASCRIPT, "node", false),
         Definition("json", EditFragment.TYPE_JSON, null, false),
         Definition("text", EditFragment.TYPE_TXT, null, false)

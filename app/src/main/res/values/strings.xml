@@ -268,7 +268,8 @@
     <string name="language_tools">Language tools</string>
     <string name="language_tools_python">Python · pylsp</string>
     <string name="language_tools_native">C/C++ · clangd</string>
-    <string name="language_tools_java">Java language server selection remains open.</string>
+    <string name="language_tools_java">Java · TermuIDE Java server</string>
+    <string name="language_tools_java_help">Optional Java completion and diagnostics require the TermuIDE Java tools bundle and Termux JDK 25. Install separately using the README instructions, then open a Java file or restart its server. Navigation, formatting and rename are not enabled yet.</string>
     <string name="python_environment">Python environment folder</string>
     <string name="python_environment_help">Leave blank for Termux’s default Python, or enter a virtual environment folder such as .venv. Relative paths use the project or source folder.</string>
     <string name="python_environment_applies">Apply restarts Python autocomplete and uses the same environment for Python execution and project commands. Install python-lsp-server in that environment.</string>

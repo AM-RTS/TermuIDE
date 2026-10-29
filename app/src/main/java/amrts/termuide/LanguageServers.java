@@ -13,14 +13,15 @@ import java.util.*;
 final class LanguageServers {
     enum Server {
         CLANGD("clangd", "clangd", "--header-insertion-decorators=0"),
-        PYTHON("pylsp", "python");
+        PYTHON("pylsp", "python"),
+        JAVA("java", "termuide-java-lsp");
 
         final String id;
         final String[] command;
         Server(String id, String... command) { this.id = id; this.command = command; }
         static Server forType(int type) {
             String id = Languages.forType(type).getId();
-            return "c".equals(id) || "cpp".equals(id) ? CLANGD : "python".equals(id) ? PYTHON : null;
+            return "c".equals(id) || "cpp".equals(id) ? CLANGD : "python".equals(id) ? PYTHON : "java".equals(id) ? JAVA : null;
         }
     }
 
@@ -142,7 +143,7 @@ final class LanguageServers {
         probe.callback.cancel();
         Lsp session = probe.session;
         if (!sessions.containsValue(session) || !documents.containsValue(session)) return;
-        String tool = session.server == Server.PYTHON ? "python" : "clangd";
+        String tool = session.server.command[0];
         RunController.ProbeResult outcome = RunController.readProbeResult(Application.getInstance(), result, Collections.singletonList(tool));
         if (outcome.getTools() == null) {
             session.setState(outcome.getMissing() ? State.MISSING : State.FAILED, outcome.getMessage());
@@ -193,7 +194,8 @@ final class LanguageServers {
             if (predicate.test(document.getValue())) files.put(document.getKey(), document.getValue().server);
         for (String file : files.keySet()) close(new File(file));
         for (Map.Entry<String, Server> file : files.entrySet())
-            ensure(context, new File(file.getKey()), file.getValue() == Server.PYTHON ? EditFragment.TYPE_PYTHON : EditFragment.TYPE_CPP);
+            ensure(context, new File(file.getKey()), file.getValue() == Server.PYTHON ? EditFragment.TYPE_PYTHON
+                : file.getValue() == Server.JAVA ? EditFragment.TYPE_JAVA : EditFragment.TYPE_CPP);
     }
 
     Lsp find(File file) { return documents.get(path(file)); }
