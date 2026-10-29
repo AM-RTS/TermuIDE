@@ -1,0 +1,45 @@
+name: Java LSP evaluation
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/java-lsp-evaluation]
+    paths:
+      - .github/workflows/java-lsp-evaluation.yml
+      - tools/java_lsp_evaluation/**
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Check benchmark framing and response handling
+        run: python3 -m unittest discover -s tools/java_lsp_evaluation -p 'test_*.py' -v
+      - name: Prepare pinned servers without bundled JDKs
+        run: bash tools/java_lsp_evaluation/prepare.sh "$RUNNER_TEMP/java-lsp-evaluation"
+      - name: Compare both servers at identical heap limits
+        run: python3 tools/java_lsp_evaluation/benchmark.py --tools "$RUNNER_TEMP/java-lsp-evaluation" --output results
+      - name: Upload measurements and logs
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: java-lsp-${{ matrix.runner }}-${{ github.run_attempt }}
+          path: |
+            results/
+            ${{ runner.temp }}/java-lsp-evaluation/preparation.json
+            ${{ runner.temp }}/java-lsp-evaluation/build.log
+          if-no-files-found: warn
