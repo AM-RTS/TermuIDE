@@ -346,16 +346,21 @@ class ActivityRecoveryTest {
         val mainSource = "package demo;\nclass Main {}\n"
         val helperSource = "package demo; public class Helper { public static String greeting() { return \"hi\"; } }"
         val file = sources.resolve("Main.java").apply { writeText(mainSource) }
-        val helper = sources.resolve("Helper.java").apply { writeText(helperSource) }
+        val helper = sources.resolve("Helper.java").apply { writeText("") }
         val draft = "package demo;\nclass Main { Object value = /*🧪*/ Helper.gre; }\n"
         app.documents.open(file.path) { draft }
         app.documents.changed(file.path)
+        app.documents.open(helper.path) { helperSource }
+        app.documents.changed(helper.path)
         app.documents.flush()
         val activity = launch()
         controller!!.visible()
+        activity.openFile(file)
         activity.fragmentManager.executePendingTransactions()
         val fragment = activity.fragmentManager.findFragmentByTag(file.path) as EditFragment
         val lsp = fragment.languageServer()
+        val recoveredHelper = activity.fragmentManager.findFragmentByTag(helper.path) as EditFragment
+        assertSame(lsp, recoveredHelper.languageServer())
         assertEquals(LanguageServers.Server.JAVA, lsp.server)
         Lsp::class.java.getDeclaredField("mRead").apply { isAccessible = true }.set(lsp, app.hand)
         Lsp::class.java.getDeclaredField("started").apply { isAccessible = true }.setBoolean(lsp, true)
@@ -443,7 +448,7 @@ class ActivityRecoveryTest {
             assertEquals(invalid, app.documents.recoveryText(file.path))
             assertEquals(changedHelper, app.documents.recoveryText(helper.path))
             assertEquals(mainSource, file.readText())
-            assertEquals(helperSource, helper.readText())
+            assertEquals("", helper.readText())
             assertTrue(app.documents.isDirty(file.path))
             assertTrue(app.documents.isDirty(helper.path))
         } finally {
@@ -498,6 +503,13 @@ class ActivityRecoveryTest {
             assertFalse(activity.isDeleting)
             assertFalse(renamed.exists())
             assertNotSame(replacement, servers.find(main))
+            assertSame(native, servers.find(nativeFile))
+            assertSame(python, servers.find(pythonFile))
+            assertSame(other, servers.find(otherFile))
+            val beforeCreate = servers.find(main)
+            activity.createFile("New.java", false)
+            assertTrue(directory.resolve("New.java").isFile)
+            assertNotSame(beforeCreate, servers.find(main))
             assertSame(native, servers.find(nativeFile))
             assertSame(python, servers.find(pythonFile))
             assertSame(other, servers.find(otherFile))

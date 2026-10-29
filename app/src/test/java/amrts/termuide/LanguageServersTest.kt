@@ -245,6 +245,31 @@ class LanguageServersTest {
         assertTrue(python.completionTry(file, 0, 1, 'a'))
         assertEquals("textDocument/completion", JSONObject(String(sender.single(), Charsets.UTF_8)).getString("method"))
     }
+
+    @Test fun ancestorDirectoryChangesRestartJavaWithoutMatchingNeighbourFolderNames() {
+        val file = File("/workspace/src/Main.java")
+        val old = servers.session(file, EditFragment.TYPE_JAVA)!!
+        val neighbourFile = File("/workspace-other/Main.java")
+        val neighbour = servers.session(neighbourFile, EditFragment.TYPE_JAVA)!!
+        val nativeFile = File("/workspace/src/main.c")
+        val native = servers.session(nativeFile, EditFragment.TYPE_C)!!
+        val unavailable = object : android.content.ContextWrapper(Application.getInstance()) {
+            override fun startForegroundService(service: android.content.Intent): android.content.ComponentName {
+                throw SecurityException("No Termux service in this host fixture")
+            }
+        }
+        Application.completion = "s"
+        try {
+            servers.javaWorkspaceChanged(unavailable, File("/workspace"))
+            val replacement = servers.find(file)!!
+            assertNotSame(old, replacement)
+            assertSame(neighbour, servers.find(neighbourFile))
+            assertSame(native, servers.find(nativeFile))
+            servers.javaWorkspaceChanged(unavailable, File("/work"))
+            assertSame(replacement, servers.find(file))
+            assertSame(neighbour, servers.find(neighbourFile))
+        } finally { Application.completion = "n" }
+    }
     @Test fun preflightStatusRejectsMalformedResultsAndClosedSessionCallbacks() {
         Application.completion = "s"
         val calls = mutableListOf<android.content.Intent>()
