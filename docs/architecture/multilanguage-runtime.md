@@ -274,3 +274,21 @@ The workflow uploads raw protocol/stderr logs, JSON measurements, and a summary 
 The initial host run exposed George's line-based package detection: a valid `package demo; public class Helper ...` line was treated as having no package, making sibling classes and records unavailable. The follow-up uses conventional separate package lines for the main checks and retains a dedicated one-line-package case. Cold first completion gets up to 20 seconds to become available; later small-fixture checks retry for up to five seconds. Peak RSS includes these retries, and is not a fixed-workload memory benchmark when candidate checks differ.
 
 Each primary process is observed for at least 30 seconds so fast successful checks do not end memory sampling while initial background indexing is still beginning. This is a common observation window, not proof that all indexing has become idle.
+
+Host results, 2026-10-29: [final GitHub run 40927094709](https://github.com/AM-RTS/TermuIDE/actions/runs/40927094709), benchmark code `2285c7d`. Both architectures used Temurin 25.0.5+8. Protocol harness checks passed; server quality failures are recorded in the artifacts despite the workflow completing successfully. No app builds or regression suite were run for this benchmark-only branch.
+
+| Server | Heap cap MiB | Checks on both architectures | Peak RSS MiB, ARM64 / x86-64 | First useful completion ms, ARM64 / x86-64 | Warm median ms, ARM64 / x86-64 |
+| --- | ---: | --- | --- | --- | --- |
+| George | 256 | 9/11 | 159.93 / 167.65 | 799 / 1011 | 19.38 / 15.81 |
+| JDT LS | 256 | 11/11 | 567.31 / 584.45 | 3541 / 5046 | 12.73 / 29.01 |
+| George | 512 | 9/11 | 228.03 / 236.36 | 771 / 990 | 14.80 / 16.16 |
+| JDT LS | 512 | 11/11 | 769.09 / 809.54 | 3217 / 3608 | 12.26 / 18.32 |
+
+Server-only file sizes: George's JARs total 3,329,528 bytes, packaged archive approximately 3.10 MB; JDT LS files total 54,795,630 bytes, official archive 51,143,565 bytes (decimal MB). Both exclude the JDK. The full Linux JDK installation measured approximately 318 MB on ARM64 and 371 MB on x86-64; these are host installations, not Termux download estimates. JDT's measured configuration/metadata folders grew to approximately 54.4 MB. George wrote no files to the harness's measured configuration/metadata folders; this is not a whole-filesystem cache audit.
+
+George passed member completion with supplementary Unicode before the caret, generic element resolution, normal cross-file completion, external-JAR completion, record accessors, diagnostics, and reopening unsaved content after restart. Its two reproducible failures were:
+
+- After changing an open sibling method from `greeting` to `farewell` without saving, completion in the current file continued to return `greeting` and omitted `farewell`. A fresh process with the same unsaved contents returned the new method. This is stale analysis, not lost draft text.
+- A valid one-line `package demo; public class Compact ...` declaration was not available for cross-file completion. The pinned upstream `StringSearch.packageName` scans whole lines using a regular expression that does not handle this layout. Conventional separate package lines work.
+
+JDT LS passed all eleven small-fixture checks at both heap limits on both architectures. George is a promising smaller server, but these failures need investigation before adoption, especially the unsaved cross-file analysis. Do not force-save drafts to conceal the stale-analysis issue. JDT is the more complete tested candidate here, with a substantially higher observed startup/indexing memory cost. Neither result establishes large-project scaling, production Android compatibility, or a final server choice. Raw JSON, protocol traces and stderr are available as `java-lsp-ubuntu-24.04-1` and `java-lsp-ubuntu-24.04-arm-1` artifacts on the linked run.
