@@ -5,7 +5,7 @@ mkdir -p "$root"
 cd "$root"
 
 # Pin source and binaries; never run upstream scripts that download desktop JDKs.
-revision=31984bf3dbdcc4b8ccb225997d0f57285eb98ec1
+revision=2206c4691dce8d2b2ac1810a9f4902694b663740
 repository=AM-RTS/java-language-server
 curl -fL --retry 3 "https://codeload.github.com/$repository/tar.gz/$revision" -o george-source.tar.gz
 mkdir george-source
