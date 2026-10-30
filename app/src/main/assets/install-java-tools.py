@@ -97,6 +97,9 @@ def install(revision, home, prefix):
                 launcher = unpack(archive, candidate, revision)
                 if launcher is None:
                     continue
+                # Resolve a usable server before downloading the much larger JDK.
+                if not (prefix / 'lib/jvm/java-25-openjdk/bin/java').is_file():
+                    subprocess.run(['apt-get', 'install', '--no-install-recommends', 'openjdk-25'], check=True)
                 subprocess.run([str(launcher), '--check'], check=True)
                 command = prefix / 'bin/termuide-java-lsp'
                 if command.exists() and not command.is_symlink():

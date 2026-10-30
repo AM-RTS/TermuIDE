@@ -67,9 +67,7 @@ case "$server" in
       fi
     fi
     apt-get update
-    packages=(python)
-    [ -x "$jdk" ] || packages+=(openjdk-25)
-    apt-get install --no-install-recommends --no-upgrade "${packages[@]}"
+    apt-get install --no-install-recommends --no-upgrade python
     cd "$HOME"
     "$PREFIX/bin/python" -I -c "$java_installer" "$revision"
     "$PREFIX/bin/termuide-java-lsp" --check

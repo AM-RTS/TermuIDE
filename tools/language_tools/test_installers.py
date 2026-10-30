@@ -40,11 +40,13 @@ class JavaInstallTest(unittest.TestCase):
         self.home = Path(self.temp.name)
         self.prefix = self.home / 'prefix'
         (self.prefix / 'bin').mkdir(parents=True)
+        self.jdk = self.prefix / 'lib/jvm/java-25-openjdk/bin/java'
+        self.jdk.parent.mkdir(parents=True); self.jdk.touch()
         self.old = self.home / 'old'; self.old.write_text('old server')
         self.command = self.prefix / 'bin/termuide-java-lsp'
         self.command.symlink_to(self.old)
 
-    def run_install(self, data, digest=None, run_error=False):
+    def run_install(self, data, digest=None, run_error=False, needs_jdk=False):
         release = [{'tag_name': 'ci-fixture', 'prerelease': True, 'assets': [{
             'name': 'termuide-java-lsp.tar.gz', 'browser_download_url': installer.DOWNLOAD_PREFIX + 'ci-fixture/tools.tar.gz',
             'digest': 'sha256:' + (digest or hashlib.sha256(data).hexdigest())}]}]
@@ -53,7 +55,10 @@ class JavaInstallTest(unittest.TestCase):
         with patch.object(installer, 'fetch', side_effect=fetch), patch.object(installer.subprocess, 'run',
                 side_effect=RuntimeError('preflight failed') if run_error else None) as run:
             installer.install(REVISION, self.home, self.prefix)
-            run.assert_called_once()
+            self.assertEqual(2 if needs_jdk else 1, run.call_count)
+            if needs_jdk:
+                self.assertEqual(['apt-get', 'install', '--no-install-recommends', 'openjdk-25'], run.call_args_list[0].args[0])
+            self.assertEqual('--check', run.call_args_list[-1].args[0][-1])
 
     def test_verified_prerelease_atomically_replaces_link_and_keeps_old_folder(self):
         self.run_install(archive())
@@ -72,6 +77,10 @@ class JavaInstallTest(unittest.TestCase):
         with self.assertRaises(RuntimeError): self.run_install(archive(), run_error=True)
         self.assertEqual(self.old, self.command.resolve())
         self.assertFalse(list((self.home / '.local/share').glob('termuide-java-tools-*')))
+
+    def test_jdk_is_requested_only_after_a_matching_verified_archive_is_available(self):
+        self.jdk.unlink()
+        self.run_install(archive(), needs_jdk=True)
 
     def test_rejects_traversal_symlinks_and_duplicate_entries(self):
         link = tarfile.TarInfo('termuide-java-lsp/link'); link.type = tarfile.SYMTYPE; link.linkname = '/etc'
