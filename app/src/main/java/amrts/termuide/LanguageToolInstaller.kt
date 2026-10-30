@@ -69,8 +69,9 @@ class LanguageToolInstaller(context: Context) {
         }
         val error = try {
             when {
-                result == null || result.get("err") !is Int || result.get("exitCode") !is Int -> app.getString(R.string.tools_setup_unknown)
+                result == null || result.get("err") !is Int -> app.getString(R.string.tools_setup_unknown)
                 result.getInt("err") != -1 -> result.getString("errmsg") ?: app.getString(R.string.runtime_setup_required)
+                result.get("exitCode") !is Int -> app.getString(R.string.tools_setup_unknown)
                 result.getInt("exitCode") != 0 -> app.getString(R.string.tools_setup_failed, result.getInt("exitCode"))
                 else -> null
             }

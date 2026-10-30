@@ -61,6 +61,9 @@ class LanguageToolInstallerTest {
         installer.start(app, "/project", "java", "")
         installer.receive(token(), Bundle().apply { putString("err", "-1") })
         assertEquals(LanguageToolInstaller.Stage.FAILED, installer.state.value.stage)
+        installer.start(app, "/project", "java", "")
+        installer.receive(token(), Bundle().apply { putInt("err", 1); putString("errmsg", "Allow external commands in Termux") })
+        assertEquals("Allow external commands in Termux", installer.state.value.detail)
     }
 
     @Test fun pendingCallbackSurvivesProcessOwnerRecreationAndProbeTimesOut() {
