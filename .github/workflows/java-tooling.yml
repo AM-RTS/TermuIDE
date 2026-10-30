@@ -60,6 +60,10 @@ jobs:
       - name: Compile Android debug APK
         run: bash ./gradlew :app:assembleDebug --no-daemon --stacktrace
       - uses: actions/upload-artifact@v6
+        with:
+          name: termuide-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: java-tooling-regressions
