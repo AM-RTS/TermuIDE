@@ -63,6 +63,28 @@ jobs:
         with:
           name: termuide-debug-apk
           path: app/build/outputs/apk/debug/*.apk
+      - name: Build signed release for device verification
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          bash ./gradlew :app:assembleRelease --no-daemon --stacktrace
+          umask 077
+          signing_key="$RUNNER_TEMP/termuide-release.jks"
+          trap 'rm -f -- "$signing_key"' EXIT
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$signing_key"
+          tools="$ANDROID_HOME/build-tools/34.0.0"
+          "$tools/zipalign" -f -p 4 app/build/outputs/apk/release/app-release-unsigned.apk "$RUNNER_TEMP/aligned.apk"
+          "$tools/apksigner" sign --ks "$signing_key" --ks-key-alias "$KEY_ALIAS" \
+            --ks-pass env:KEYSTORE_PASSWORD --key-pass env:KEY_PASSWORD --v4-signing-enabled false \
+            --out "$RUNNER_TEMP/termuide-release.apk" "$RUNNER_TEMP/aligned.apk"
+          "$tools/apksigner" verify --verbose "$RUNNER_TEMP/termuide-release.apk"
+      - uses: actions/upload-artifact@v6
+        with:
+          name: termuide-signed-release-apk
+          path: ${{ runner.temp }}/termuide-release.apk
       - uses: actions/upload-artifact@v6
         if: always()
         with:
