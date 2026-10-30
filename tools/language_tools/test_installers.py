@@ -111,7 +111,8 @@ class SetupScriptTest(unittest.TestCase):
         self.fake('clangd', 'exit 0\n')
         result = self.run_setup('clangd')
         self.assertEqual(0, result.returncode, result.stderr)
-        self.assertIn('--no-upgrade --reinstall clang gdb make', self.log.read_text())
+        self.assertIn('--reinstall clang gdb make', self.log.read_text())
+        self.assertNotIn('--no-upgrade', self.log.read_text())
 
     def test_missing_selected_python_does_not_install_global_packages(self):
         result = self.run_setup('pylsp', self.home / 'missing environment')

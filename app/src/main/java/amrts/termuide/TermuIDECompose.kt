@@ -905,7 +905,7 @@ internal fun LanguageToolsDialog(
                     }
                     }
                 }
-                if (setup.scope == scope && setup.stage != LanguageToolInstaller.Stage.IDLE) {
+                if ((setup.scope == scope || setup.busy) && setup.stage != LanguageToolInstaller.Stage.IDLE) {
                     val message = when (setup.stage) {
                         LanguageToolInstaller.Stage.INSTALLING -> context.getString(R.string.tools_setup_installing)
                         LanguageToolInstaller.Stage.CHECKING -> context.getString(R.string.tools_setup_checking)
@@ -913,6 +913,7 @@ internal fun LanguageToolsDialog(
                     }
                     Text(message, modifier = Modifier.testTag("tools-setup-status").semantics { liveRegion = LiveRegionMode.Polite },
                         color = if (setup.stage == LanguageToolInstaller.Stage.FAILED) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
+                    if (setup.scope != scope) Text(setup.scope, style = MaterialTheme.typography.bodySmall)
                 }
                 OutlinedTextField(value = environment, onValueChange = { environment = it }, singleLine = true,
                     label = { Text(context.getString(R.string.python_environment)) },

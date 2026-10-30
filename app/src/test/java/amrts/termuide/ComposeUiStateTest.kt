@@ -272,7 +272,7 @@ class ComposeUiStateTest {
         compose.onNodeWithTag("python-environment").performScrollTo().performTextInput(".venv")
         compose.onNodeWithTag("tools-install-pylsp").performScrollTo().assertIsNotEnabled()
         compose.onNodeWithTag("tools-install-java").performScrollTo().assertIsEnabled()
-        compose.runOnIdle { setup.value = LanguageToolInstaller.Status(LanguageToolInstaller.Stage.INSTALLING, "java", "/project") }
+        compose.runOnIdle { setup.value = LanguageToolInstaller.Status(LanguageToolInstaller.Stage.INSTALLING, "java", "/another-project") }
         compose.onNodeWithTag("tools-install-java").performScrollTo().assertIsNotEnabled()
         compose.onNodeWithTag("tools-setup-status").performScrollTo().assertTextEquals(app.getString(R.string.tools_setup_installing))
     }

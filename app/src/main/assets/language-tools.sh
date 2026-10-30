@@ -29,7 +29,7 @@ trap finish EXIT
 case "$server" in
   clangd)
     apt-get update
-    apt-get install --no-install-recommends --no-upgrade --reinstall clang gdb make
+    apt-get install --no-install-recommends --reinstall clang gdb make
     command -v clangd >/dev/null
     ;;
   pylsp)
