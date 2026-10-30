@@ -37,7 +37,8 @@ public class Utils {
         it.putExtra(PREFC + "BACKGROUND", background);
         it.putExtra(PREFC + "SESSION_ACTION", "0");
         if (result != null) it.putExtra(PREFC + "PENDING_INTENT", result);
-        cont.startForegroundService(it);
+        if (cont.startForegroundService(it) == null)
+            throw new IllegalStateException(cont.getString(R.string.tools_termux_missing));
 	}
 
 	public static String escape(String str) {

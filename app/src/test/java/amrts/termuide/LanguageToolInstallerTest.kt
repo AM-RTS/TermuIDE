@@ -1,6 +1,9 @@
 package amrts.termuide
 
 import android.content.Context
+import android.content.ContextWrapper
+import android.content.Intent
+import android.content.ComponentName
 import android.os.Bundle
 import android.os.Looper
 import java.time.Duration
@@ -78,5 +81,17 @@ class LanguageToolInstallerTest {
         try { installer.start(app, "/other", "pylsp", ""); fail("Concurrent setup") }
         catch (_: IllegalStateException) { }
         assertEquals(saved, token())
+    }
+
+    @Test fun unresolvedTermuxServiceFailsImmediatelyAndAllowsRetry() {
+        val absent = object : ContextWrapper(app) {
+            override fun startForegroundService(service: Intent): ComponentName? = null
+        }
+        installer.start(absent, "/project", "java", "")
+        assertEquals(LanguageToolInstaller.Stage.FAILED, installer.state.value.stage)
+        assertEquals(app.getString(R.string.tools_termux_missing), installer.state.value.detail)
+        assertFalse(prefs.contains("token"))
+        installer.start(app, "/project", "java", "")
+        assertEquals(LanguageToolInstaller.Stage.INSTALLING, installer.state.value.stage)
     }
 }

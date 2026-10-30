@@ -295,6 +295,7 @@
     <string name="tools_install_java">Installs JDK 25, Python for archive verification, and the matching Java server. Expect about 120 MB for a missing JDK plus roughly 3 MB for the server, with additional dependencies. Your existing Java runtime selection is preserved. A matching published tools bundle is required.</string>
     <string name="tools_install_confirm">Open Termux and install</string>
     <string name="tools_setup_busy">Another language-tools setup is running.</string>
+    <string name="tools_termux_missing">The Termux command service is unavailable. Install or enable Termux, then retry.</string>
     <string name="tools_setup_installing">Setup is running in Termux. Review its prompts, then return here.</string>
     <string name="tools_setup_checking">Checking installed tools…</string>
     <string name="tools_setup_ready">Tools verified. Open a supported file to use them.</string>
