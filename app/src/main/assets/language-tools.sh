@@ -41,8 +41,13 @@ case "$server" in
       apt-get install --no-install-recommends --no-upgrade python python-pip
       python="$PREFIX/bin/python"
     fi
+    # pip dependencies such as ujson may need a native build on Android.
+    if ! command -v clang >/dev/null; then
+      apt-get update
+      apt-get install --no-install-recommends --no-upgrade clang
+    fi
     cd "$HOME"
-    "$python" -I -m pip install --disable-pip-version-check --upgrade 'python-lsp-server==1.15.0'
+    "$python" -I -m pip install --disable-pip-version-check --upgrade --force-reinstall 'python-lsp-server==1.15.0'
     "$python" -I -c 'import pylsp'
     ;;
   java)

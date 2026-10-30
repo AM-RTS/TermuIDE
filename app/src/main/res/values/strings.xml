@@ -291,7 +291,7 @@
     <string name="tools_install_title">Set up %1$s?</string>
     <string name="tools_install_help">Setup opens Termux and asks before installing packages. Keep Termux open, review its download sizes and answer its prompts. No root is needed. Your documents are not saved or changed by setup.</string>
     <string name="tools_install_native">Installs clang (including clangd), GDB and Make. Termux shows the download size before confirmation.</string>
-    <string name="tools_install_python">Installs Python and pylsp in the saved Python environment. A selected environment must already exist; setup will not fall back to global Python.</string>
+    <string name="tools_install_python">Installs pylsp in the saved Python environment and clang if dependency builds need it. Default setup also installs Python and pip. A selected environment must already exist; setup will not fall back to global Python.</string>
     <string name="tools_install_java">Installs JDK 25, Python for archive verification, and the matching Java server. Expect about 120 MB for a missing JDK plus roughly 3 MB for the server, with additional dependencies. Your existing Java runtime selection is preserved. A matching published tools bundle is required.</string>
     <string name="tools_install_confirm">Open Termux and install</string>
     <string name="tools_setup_busy">Another language-tools setup is running.</string>

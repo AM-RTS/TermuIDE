@@ -12,6 +12,7 @@ import tempfile
 import urllib.request
 import uuid
 
+# shortcut: search 20 recent releases, add pagination if older app pins need longer support.
 RELEASES = 'https://api.github.com/repos/AM-RTS/TermuIDE/releases?per_page=20'
 DOWNLOAD_PREFIX = 'https://github.com/AM-RTS/TermuIDE/releases/download/'
 
@@ -39,6 +40,8 @@ def unpack(archive, directory, revision):
                     not (member.isdir() or member.isfile())):
                 raise ValueError('Unsafe Java tools archive entry')
             seen.add(member.name)
+            if member.size < 0:
+                raise ValueError('Invalid Java tools archive size')
             total += member.size
             if len(seen) > 512 or total > 64 * 1024 * 1024:
                 raise ValueError('Java tools archive exceeded its extraction limit')

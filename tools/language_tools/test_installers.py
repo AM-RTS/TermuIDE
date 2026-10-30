@@ -120,6 +120,7 @@ class SetupScriptTest(unittest.TestCase):
         self.assertFalse(self.log.exists())
 
     def test_selected_python_receives_literal_arguments_and_not_global_install(self):
+        self.fake('clang', 'exit 0\n')
         environment = self.home / "venv with ' quote"; (environment / 'bin').mkdir(parents=True)
         python = environment / 'bin/python'; python.write_text('#!/bin/sh\nprintf "%s\\n" "$@" >> "$TEST_LOG"\n'); python.chmod(0o755)
         result = self.run_setup('pylsp', environment)
@@ -127,6 +128,14 @@ class SetupScriptTest(unittest.TestCase):
         self.assertNotIn('apt ', self.log.read_text())
         self.assertIn('python-lsp-server==1.15.0', self.log.read_text())
         self.assertIn('-I', self.log.read_text())
+        self.assertIn('--force-reinstall', self.log.read_text())
+
+    def test_default_python_bootstraps_compiler_for_android_pip_dependencies(self):
+        self.fake('python', 'exit 0\n')
+        result = self.run_setup('pylsp')
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn('python python-pip', self.log.read_text())
+        self.assertIn('--no-upgrade clang', self.log.read_text())
 
     def test_old_java_alternatives_fail_before_package_mutation(self):
         alternatives = self.prefix / 'var/lib/dpkg/alternatives'; alternatives.mkdir(parents=True)
