@@ -253,6 +253,30 @@ class ComposeUiStateTest {
         compose.onNodeWithText(app.getString(R.string.save)).assertIsDisplayed().performClick()
         assertEquals(List(7) { "value $it" }, saved!!.arguments)
     }
+    @Test fun languageToolsInstallNeedsConfirmationAndRetainsSelectionOnRecreation() {
+        val app = Application.getInstance()
+        val restore = StateRestorationTester(compose)
+        val setup = mutableStateOf(LanguageToolInstaller.Status())
+        var installed: String? = null
+        restore.setContent {
+            MaterialTheme { LanguageToolsDialog("/project", "", listOf(
+                LanguageServers.Info(LanguageServers.Server.PYTHON, LanguageServers.State.MISSING, null, false),
+                LanguageServers.Info(LanguageServers.Server.JAVA, LanguageServers.State.MISSING, null, false)),
+                onSave = { true }, onRestart = {}, onDismiss = {}, onInstall = { installed = it }, setup = setup.value) }
+        }
+        compose.onNodeWithTag("tools-install-java").performScrollTo().performClick()
+        assertNull(installed)
+        restore.emulateSavedInstanceStateRestore()
+        compose.onNodeWithTag("tools-install-confirm").assertIsDisplayed().performClick()
+        assertEquals("java", installed)
+        compose.onNodeWithTag("python-environment").performScrollTo().performTextInput(".venv")
+        compose.onNodeWithTag("tools-install-pylsp").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithTag("tools-install-java").performScrollTo().assertIsEnabled()
+        compose.runOnIdle { setup.value = LanguageToolInstaller.Status(LanguageToolInstaller.Stage.INSTALLING, "java", "/project") }
+        compose.onNodeWithTag("tools-install-java").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithTag("tools-setup-status").performScrollTo().assertTextEquals(app.getString(R.string.tools_setup_installing))
+    }
+
     @Test fun languageToolsPreservesDraftsAndDisablesRestartUntilEnvironmentIsSaved() {
         val app = Application.getInstance()
         val restore = StateRestorationTester(compose)

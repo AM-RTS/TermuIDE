@@ -6,6 +6,7 @@ on:
       - app/**
       - codeeditor/**
       - tools/java_lsp/**
+      - tools/language_tools/**
       - .github/workflows/java-tooling.yml
       - .github/workflows/release.yml
       - '**/*.gradle*'
@@ -29,6 +30,7 @@ jobs:
           java-version: '25'
       - name: Package optional pinned Java server and check launcher
         run: |
+          python3 -m unittest discover -s tools/language_tools -p 'test_*.py' -v
           python3 -m unittest discover -s tools/java_lsp -p 'test_*.py' -v
           bash tools/java_lsp/build.sh "$RUNNER_TEMP/java-lsp"
       - uses: actions/upload-artifact@v6

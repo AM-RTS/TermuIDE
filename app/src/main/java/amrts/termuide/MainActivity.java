@@ -369,6 +369,12 @@ public class MainActivity extends androidx.activity.ComponentActivity implements
         notifyUiChanged();
     }
 
+    public void installLanguageTools(String scope, String server) {
+        if (!scope.equals(getLanguageToolsScope())) throw new IllegalStateException(getString(R.string.run_config_changed));
+        String environment = "pylsp".equals(server) ? RunConfiguration.load(this, scope).pythonEnvironmentPath(scope) : "";
+        Application.getInstance().getToolInstaller().start(this, scope, server, environment == null ? "" : environment);
+    }
+
     public boolean savePythonEnvironment(String scope, String value) {
         if (!scope.equals(getLanguageToolsScope())) throw new IllegalStateException(getString(R.string.run_config_changed));
         RunConfiguration existing = RunConfiguration.load(this, scope);

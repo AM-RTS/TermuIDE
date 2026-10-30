@@ -46,6 +46,7 @@ jobs:
 
       - name: Package optional Java tooling
         run: |
+          python3 -m unittest discover -s tools/language_tools -p 'test_*.py' -v
           python3 -m unittest discover -s tools/java_lsp -p 'test_*.py' -v
           bash tools/java_lsp/build.sh "$RUNNER_TEMP/java-lsp"
           mkdir -p dist

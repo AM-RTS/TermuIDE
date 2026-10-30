@@ -286,4 +286,18 @@
     <string name="lsp_restart_description">Restart %1$s language server</string>
     <string name="lsp_connection_ended">The connection ended. Check Termux and restart the server.</string>
     <string name="language_tools_apply">Apply environment</string>
+    <string name="tools_install">Install / Repair</string>
+    <string name="tools_install_description">Install or repair %1$s tools</string>
+    <string name="tools_install_title">Set up %1$s?</string>
+    <string name="tools_install_help">Setup opens Termux and asks before installing packages. Keep Termux open, review its download sizes and answer its prompts. No root is needed. Your documents are not saved or changed by setup.</string>
+    <string name="tools_install_native">Installs clang (including clangd), GDB and Make. Termux shows the download size before confirmation.</string>
+    <string name="tools_install_python">Installs Python and pylsp in the saved Python environment. A selected environment must already exist; setup will not fall back to global Python.</string>
+    <string name="tools_install_java">Installs JDK 25, Python for archive verification, and the matching Java server. Expect about 120 MB for a missing JDK plus roughly 3 MB for the server, with additional dependencies. Your existing Java runtime selection is preserved. A matching published tools bundle is required.</string>
+    <string name="tools_install_confirm">Open Termux and install</string>
+    <string name="tools_setup_busy">Another language-tools setup is running.</string>
+    <string name="tools_setup_installing">Setup is running in Termux. Review its prompts, then return here.</string>
+    <string name="tools_setup_checking">Checking installed tools…</string>
+    <string name="tools_setup_ready">Tools verified. Open a supported file to use them.</string>
+    <string name="tools_setup_unknown">Setup may still be running in Termux. Check its terminal before retrying; a second setup cannot run concurrently.</string>
+    <string name="tools_setup_failed">Setup failed (exit %1$d). Read the messages in Termux, then retry.</string>
 </resources>

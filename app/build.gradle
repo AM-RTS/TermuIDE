@@ -14,6 +14,7 @@ android {
         versionCode 13 + ciBuildNumber
         versionName(ciBuildNumber > 0 ? "0.2.4-ci.${ciBuildNumber}" : "0.2.4")
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
+        resValue 'string', 'java_lsp_revision', rootProject.file('tools/java_lsp/revision').text.trim()
     }
 
     buildTypes {

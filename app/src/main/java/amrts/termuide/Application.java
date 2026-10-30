@@ -49,6 +49,7 @@ public class Application extends android.app.Application {
     private DocumentSessions documents;
     DocumentSaver saver;
     private RunController runs;
+    private LanguageToolInstaller toolInstaller;
     private boolean recoveryWarningShown;
 
 	@Override
@@ -69,6 +70,7 @@ public class Application extends android.app.Application {
             });
         }, 500L);
         saver = new DocumentSaver(documents);
+        toolInstaller = new LanguageToolInstaller(this);
         runs = new RunController(this, () -> documents,
             path -> hand.saveForRun(path),
             request -> hand == null ? 0 : hand.matchRunContext(request),
@@ -102,6 +104,7 @@ public class Application extends android.app.Application {
 
     public DocumentSessions getDocuments() { return documents; }
     public RunController getRuns() { return runs; }
+    public LanguageToolInstaller getToolInstaller() { return toolInstaller; }
 
     void sourceSaved(String path, Document document, long timestamp) {
         if (hand != null) hand.sourceSaved(path, document, timestamp);

@@ -76,9 +76,17 @@ Completion, definitions and signature help reuse the existing editor controls. D
 
 Unsaved and recovered text is sent directly to the server without saving the source. Completion edits remain undoable and participate in the same durable recovery as typing. Python positions are translated between Jedi code points and the editor's UTF-16 offsets, including supplementary Unicode characters; filename completions replace the full filename component. Rename/code-action edits reject tabs changed since their request; recovered drafts and documents owned by another session are protected. Missing/disconnected servers leave files editable and recoverable. The prerelease workflow installs a pinned pylsp in a temporary host environment and exercises real sibling-module and environment-only package completion through the app's LSP client, plus execution with the same selected environment; this does not verify Termux/phone transport.
 
+## Install language tools from the app
+
+Open **⋮ → Language tools → Install / Repair** beside C/C++, Python, or Java. Review the explanation, then open Termux to confirm package sizes and answer package-manager prompts. Return to TermuIDE afterward: setup verifies the tools and restarts the affected server. No root is needed. Setup does not save or alter editor documents.
+
+Python uses the saved environment shown in the dialog; apply environment changes before installing, and create a selected virtual environment first. Java installs JDK 25 alongside existing Java, preserves the existing runtime selection, and downloads only a checksum-verified server matching the app's pin. It also installs Python to verify/extract the archive. A matching public tools prerelease must exist; branch-only CI artifacts are not downloaded automatically. An older Termux Java alternatives layout is detected with instructions to update the existing OpenJDK package before retrying. Manual setup below remains available.
+
+Setup runs visibly in Termux. If the app process is killed, check the Termux terminal before retrying; concurrent setup is blocked. Downloads and failures leave existing Java tools in place. Package-manager operations can still fail on unavailable mirrors, insufficient storage, or an interrupted Termux process; review the terminal output before retrying.
+
 ## Optional Java completion and diagnostics
 
-Install [Termux OpenJDK 25](https://github.com/termux/termux-packages/tree/master/packages/openjdk-25) and the separate **termuide-java-lsp.tar.gz** tools archive from a build containing this integration. Prereleases attach it alongside the APK; the **Java tooling integration** workflow also uploads it as the `termuide-java-lsp` artifact, with an archive checksum. Verify the checksum supplied by the same build before extracting. No server or JDK is bundled in the APK, and the app does not download or install tools automatically.
+Install [Termux OpenJDK 25](https://github.com/termux/termux-packages/tree/master/packages/openjdk-25) and the separate **termuide-java-lsp.tar.gz** tools archive from a build containing this integration. Prereleases attach it alongside the APK; the **Java tooling integration** workflow also uploads it as the `termuide-java-lsp` artifact, with an archive checksum. Verify the checksum supplied by the same build before extracting. No server or JDK is bundled in the APK, and tools are downloaded or installed only after an explicit setup confirmation.
 
 In Termux, from the folder containing the verified archive:
 
