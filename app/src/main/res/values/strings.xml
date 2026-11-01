@@ -23,6 +23,7 @@
     <string name="console_stop_unconfirmed">The console channel was closed to request cleanup. Process termination could not be confirmed.</string>
     <string name="console_renderer_failed">The terminal renderer could not start. Update Android System WebView and retry. The program may still be running; Force stop remains available.</string>
     <string name="console_retry_renderer">Reload terminal display</string>
+    <string name="console_renderer_lost">The terminal renderer stopped. Reloaded history will not resend old terminal responses. Interactive programs may need restarting.</string>
     <string name="console_output_omitted">[Earlier terminal output omitted]</string>
     <string name="license_xterm">MIT — xterm.js</string>
     <string name="license_xterm_fit">MIT — xterm.js fit addon</string>

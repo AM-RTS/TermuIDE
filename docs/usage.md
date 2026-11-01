@@ -10,7 +10,7 @@ The play button uses **Run here**: Termux executes the program in the background
 
 **⋮ → Run in Termux** retains the external terminal and needs no additional Python bridge for C/C++ or Java. Build, Compile and GDB still use the existing Termux flow. Cancelling preparation never stops a dispatched external command.
 
-The in-app console supports one run at a time and retains bounded output in memory. Rotation keeps the connection; app process death closes it and the runner requests cleanup, without replaying execution. Detached processes that leave the run's process group are not managed. If Android kills Termux or the connection fails, termination may be unconfirmed. Reopening a truncated transcript resets the renderer and marks omitted output; complex full-screen terminal state may need redrawing. Editor draft recovery is independent of console output.
+The in-app console supports one run at a time. Its renderer and connection survive hiding the console and Activity recreation; live terminal queries keep working while hidden. App process death closes the connection and requests cleanup, without replaying execution. Force stop targets the initial process group and the terminal's foreground job; jobs leaving both groups are not managed. If Android kills Termux or the connection fails, termination may be unconfirmed. Output history is bounded. After renderer loss, restoring that history suppresses old terminal responses to protect program input; complex interactive programs may need restarting. A finished, hidden console releases its renderer. Editor draft recovery is independent of console output.
 
 ## Language tools
 

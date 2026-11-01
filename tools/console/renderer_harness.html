@@ -1,0 +1,18 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<link rel="stylesheet" href="../../app/src/main/assets/console/xterm.css">
+<style>#terminal { width: 640px; height: 320px; }</style>
+<script>
+const replies = [];
+const pending = new Map();
+let failed = false;
+window.ConsoleBridge = {
+  ready() {}, resize() {}, failed() { failed = true; }, input(data) { replies.push(data); },
+  rendered(sequence) { pending.get(sequence)?.(); pending.delete(sequence); }
+};
+</script>
+<script src="../../app/src/main/assets/console/xterm.js"></script>
+<script src="../../app/src/main/assets/console/addon-fit.js"></script>
+<script src="../../app/src/main/assets/console/console.js"></script>
+<script defer src="renderer_test.js"></script>
+</head><body><div id="terminal"></div><pre id="result">RUNNING</pre></body></html>

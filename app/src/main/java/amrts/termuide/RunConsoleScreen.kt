@@ -106,15 +106,12 @@ internal fun RunConsoleScreen(console: RunConsole) {
                 } else AndroidView(factory = { context ->
                     FrameLayout(context).apply {
                         try {
-                            addView(ConsoleTerminalView(context, console) { rendererFailed = true },
-                                FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+                            console.attachRenderer(this) { rendererFailed = true }
                         } catch (_: RuntimeException) { post { rendererFailed = true } }
                     }
                 }, modifier = Modifier.fillMaxSize().padding(padding),
                     onReset = null, onRelease = { host ->
-                        val terminal = host.getChildAt(0) as? ConsoleTerminalView
-                        host.removeAllViews()
-                        terminal?.release()
+                        console.detachRenderer(host)
                     }, update = { host ->
                         (host.getChildAt(0) as? ConsoleTerminalView)?.let {
                             it.configure(colors.surface.toArgb(), colors.onSurface.toArgb(), colors.primary.toArgb())

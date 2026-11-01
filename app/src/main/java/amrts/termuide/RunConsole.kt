@@ -1,10 +1,12 @@
 package amrts.termuide
 
 import android.content.Context
+import android.content.MutableContextWrapper
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.widget.FrameLayout
 import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.io.ByteArrayOutputStream
@@ -50,14 +52,41 @@ class RunConsole(private val context: Context) {
     private var outputChanged: (() -> Unit)? = null
     private var columns = 80
     private var rows = 24
+    private var renderer: ConsoleTerminalView? = null
+    private var rendererCreated = false
 
     fun show() { mutableState.value = mutableState.value.copy(visible = true) }
-    fun hide() { mutableState.value = mutableState.value.copy(visible = false) }
+    fun hide() {
+        mutableState.value = mutableState.value.copy(visible = false)
+        if (!state.value.active) releaseRenderer()
+    }
+    internal fun attachRenderer(host: FrameLayout, onError: () -> Unit) {
+        val terminal = renderer ?: ConsoleTerminalView(MutableContextWrapper(context.applicationContext), this,
+            if (rendererCreated) output.latestSequence else 0).also {
+            renderer = it
+            rendererCreated = true
+        }
+        terminal.attach(host, onError)
+    }
+    internal fun detachRenderer(host: FrameLayout) { renderer?.detach(host) }
+    internal fun rendererFailed(terminal: ConsoleTerminalView) {
+        if (renderer === terminal) {
+            releaseRenderer()
+            if (state.value.active) mutableState.value = state.value.copy(detail = context.getString(R.string.console_renderer_lost))
+        }
+    }
+    private fun releaseRenderer() {
+        val terminal = renderer
+        renderer = null
+        terminal?.release()
+    }
     internal fun observeOutput(listener: (() -> Unit)?) { outputChanged = listener }
     internal fun removeOutputObserver(listener: () -> Unit) { if (outputChanged === listener) outputChanged = null }
 
     internal fun prepare(plan: RunCommands.Plan, python: String, complete: (Int?, String?) -> Unit): RunCommands.Plan {
         check(!state.value.active) { "A console program is already running" }
+        releaseRenderer()
+        rendererCreated = false
         val script = context.assets.open("console/runner.py").bufferedReader().use { it.readText() }
         val server = ServerSocket(0, 4, InetAddress.getByName("127.0.0.1")).apply { soTimeout = 500 }
         val run = Session(server, complete)
@@ -75,11 +104,21 @@ class RunConsole(private val context: Context) {
             var accepted: Socket? = null
             while (!run.finished && SystemClock.elapsedRealtime() < deadline) {
                 val peer = try { run.server.accept() } catch (_: SocketTimeoutException) { continue }
+                run.socket = peer
+                if (run.finished) { peer.close(); return }
                 try {
-                    peer.soTimeout = 2000
                     val expected = "TERMUIDE1 ${run.token}\n".toByteArray(Charsets.US_ASCII)
                     val actual = ByteArray(expected.size)
-                    DataInputStream(peer.getInputStream()).readFully(actual)
+                    val authenticationDeadline = SystemClock.elapsedRealtime() + 2000
+                    var offset = 0
+                    while (offset < actual.size) {
+                        val remaining = authenticationDeadline - SystemClock.elapsedRealtime()
+                        if (remaining <= 0) throw SocketTimeoutException("Console authentication timed out")
+                        peer.soTimeout = remaining.toInt()
+                        val count = peer.getInputStream().read(actual, offset, actual.size - offset)
+                        if (count < 0) throw IOException("Console authentication disconnected")
+                        offset += count
+                    }
                     if (!MessageDigest.isEqual(expected, actual)) { peer.close(); continue }
                     if (run.finished) { peer.close(); return }
                     peer.getOutputStream().write("OK\n".toByteArray(Charsets.US_ASCII))
@@ -88,6 +127,7 @@ class RunConsole(private val context: Context) {
                     accepted = peer
                     break
                 } catch (_: IOException) { peer.close() }
+                finally { if (accepted !== peer) { peer.close(); run.socket = null } }
             }
             val socket = accepted ?: throw IOException(context.getString(R.string.console_connect_timeout))
             run.socket = socket
@@ -96,6 +136,7 @@ class RunConsole(private val context: Context) {
             main.post {
                 if (session === run && !run.finished && state.value.phase == Phase.CONNECTING) {
                     mutableState.value = state.value.copy(phase = Phase.RUNNING)
+                    renderer?.updateInput()
                     resize(columns, rows)
                 }
             }
@@ -136,6 +177,7 @@ class RunConsole(private val context: Context) {
     }
 
     fun input(text: String) {
+        if (text == "\u0003") { interrupt(); return }
         if (text.length > 16384) {
             mutableState.value = state.value.copy(detail = context.getString(R.string.console_input_limit))
             return
@@ -147,16 +189,22 @@ class RunConsole(private val context: Context) {
         }
         if (data.isNotEmpty()) send('I', data)
     }
-    fun interrupt() { send('C') }
+    fun interrupt() {
+        if (state.value.phase != Phase.RUNNING) return
+        session?.writes?.queue?.clear()
+        send('C')
+    }
     fun forceStop() {
         val run = session ?: return
-        if (!state.value.active) return
+        if (!state.value.active || state.value.phase == Phase.STOPPING) return
         if (state.value.phase == Phase.CONNECTING) {
             finish(run, null, context.getString(R.string.console_stop_unconfirmed))
             return
         }
+        run.writes.queue.clear()
         send('K')
         mutableState.value = state.value.copy(phase = Phase.STOPPING)
+        renderer?.updateInput()
         // Closing the authenticated channel also makes the runner kill its owned process group.
         main.postDelayed({
             if (session === run && state.value.active) finish(run, null, context.getString(R.string.console_stop_unconfirmed))
@@ -179,9 +227,16 @@ class RunConsole(private val context: Context) {
                     out.writeByte(kind.code)
                     out.write(data)
                     out.flush()
-                } catch (error: IOException) { main.post { finish(run, null, error.message) } }
+                } catch (error: IOException) {
+                    // An input-side error can race a buffered exit frame; let the reader consume it first.
+                    main.post {
+                        if (session === run && !run.finished) {
+                            main.postDelayed({ finish(run, null, error.message) }, 3000)
+                        }
+                    }
+                }
             }
-            if (state.value.detail != null) mutableState.value = state.value.copy(detail = null)
+            if (kind != 'R' && state.value.detail != null) mutableState.value = state.value.copy(detail = null)
         } catch (_: java.util.concurrent.RejectedExecutionException) {
             mutableState.value = state.value.copy(detail = context.getString(R.string.console_input_limit))
         }
@@ -207,6 +262,8 @@ class RunConsole(private val context: Context) {
         } else null
         mutableState.value = state.value.copy(phase = if (exit != null) Phase.FINISHED else Phase.UNKNOWN,
             exitCode = exit, detail = detail)
+        renderer?.updateInput()
+        if (!state.value.visible) releaseRenderer()
         run.complete(exit, detail)
     }
     private fun close(run: Session) {
@@ -217,6 +274,7 @@ class RunConsole(private val context: Context) {
     fun shutdown() {
         session?.let { it.finished = true; close(it) }
         session = null
+        releaseRenderer()
         outputChanged = null
         reader.shutdownNow()
     }
@@ -229,6 +287,7 @@ internal class ConsoleOutput(private val limit: Int = 262144) {
     private val chunks = ArrayDeque<Chunk>()
     private var size = 0
     private var sequence = 0L
+    val latestSequence: Long get() = sequence
     fun clear() { chunks.clear(); size = 0; sequence = 0 }
     fun append(bytes: ByteArray) {
         if (bytes.isEmpty()) return
@@ -237,9 +296,9 @@ internal class ConsoleOutput(private val limit: Int = 262144) {
         size += retained.size
         while (size > limit) size -= chunks.removeFirst().bytes.size
     }
-    fun after(previous: Long): Batch? {
+    fun after(previous: Long, through: Long = Long.MAX_VALUE): Batch? {
         // shortcut: a bounded byte tail cannot exactly restore a truncated full-screen terminal; add snapshots if needed.
-        val selected = chunks.filter { it.sequence > previous }.take(2)
+        val selected = chunks.filter { it.sequence > previous && it.sequence <= through }.take(2)
         if (selected.isEmpty()) return null
         val bytes = ByteArrayOutputStream().apply { selected.forEach { write(it.bytes) } }.toByteArray()
         return Batch(bytes, selected.last().sequence,

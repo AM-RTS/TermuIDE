@@ -8,6 +8,7 @@ import sys
 import tempfile
 import time
 import unittest
+import signal
 
 RUNNER = Path(__file__).resolve().parents[2] / 'app/src/main/assets/console/runner.py'
 
@@ -159,6 +160,57 @@ class ConsoleRunnerTest(unittest.TestCase):
         self.runner.communicate(timeout=5)
         self.assertNotEqual(0, self.runner.returncode)
         self.assertFalse(self.alive(pid))
+
+    def test_interrupt_bypasses_input_backpressure_in_cbreak_mode(self):
+        self.start("import signal,sys,time,tty; tty.setcbreak(0); signal.signal(signal.SIGINT,lambda *_:sys.exit(42)); print('READY',flush=True); time.sleep(30)")
+        self.until(b'READY')
+        for _ in range(10):
+            self.send(b'I', b'x' * 16384)
+        self.send(b'C')
+        code, _ = self.finished()
+        self.assertEqual(42, code)
+
+    def test_interrupt_is_still_a_control_byte_for_raw_terminal_programs(self):
+        self.start("import os,tty; tty.setraw(0); print('READY',flush=True); data=os.read(0,1); print(data.hex(),flush=True)")
+        self.until(b'READY')
+        self.send(b'C')
+        code, output = self.finished()
+        self.assertEqual(0, code)
+        self.assertIn(b'03', output)
+
+    def test_force_stop_also_kills_the_ptys_separate_foreground_job(self):
+        self.start('''import os,signal,time
+signal.signal(signal.SIGINT,signal.SIG_IGN)
+signal.signal(signal.SIGHUP,signal.SIG_IGN)
+read_end,write_end=os.pipe()
+child=os.fork()
+if child == 0:
+    os.close(read_end)
+    os.setpgid(0,0)
+    os.write(write_end,b'1')
+    os.close(write_end)
+    time.sleep(30)
+    os._exit(0)
+os.close(write_end)
+os.read(read_end,1)
+os.close(read_end)
+os.tcsetpgrp(0,child)
+print('FOREGROUND',child,flush=True)
+os.waitpid(child,0)
+time.sleep(30)
+''')
+        child = int(self.until(b'\n').decode().strip().split()[-1])
+        try:
+            self.send(b'K')
+            code, _ = self.finished()
+            self.assertEqual(137, code)
+            deadline = time.monotonic() + 2
+            while self.alive(child) and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertFalse(self.alive(child))
+        finally:
+            if self.alive(child):
+                os.kill(child, signal.SIGKILL)
 
 
 if __name__ == '__main__':

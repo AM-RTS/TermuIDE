@@ -1,7 +1,9 @@
 package amrts.termuide
 
 import android.annotation.SuppressLint
-import android.content.Context
+import android.content.MutableContextWrapper
+import android.os.Handler
+import android.os.Looper
 import android.util.Base64
 import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
@@ -10,12 +12,14 @@ import android.webkit.WebResourceError
 import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.FrameLayout
 import java.io.ByteArrayInputStream
 import org.json.JSONObject
 
 /** Offline terminal renderer. Only the bundled page can access the active session's input bridge. */
 @SuppressLint("SetJavaScriptEnabled", "ViewConstructor")
-internal class ConsoleTerminalView(context: Context, private val console: RunConsole, private val onError: () -> Unit) : WebView(context) {
+internal class ConsoleTerminalView(private val wrappedContext: MutableContextWrapper, private val console: RunConsole,
+                                   private val replayThrough: Long) : WebView(wrappedContext) {
     private val id = console.state.value.id
     private var ready = false
     private var released = false
@@ -23,6 +27,28 @@ internal class ConsoleTerminalView(context: Context, private val console: RunCon
     private var pending: Long? = null
     private var options = JSONObject()
     private val listener: () -> Unit = { pump() }
+    private var errorListener: (() -> Unit)? = null
+    private val main = Handler(Looper.getMainLooper())
+
+    fun attach(host: FrameLayout, onError: () -> Unit) {
+        (parent as? android.view.ViewGroup)?.removeView(this)
+        wrappedContext.baseContext = host.context
+        errorListener = onError
+        host.addView(this, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+    }
+    fun detach(host: FrameLayout) {
+        if (parent !== host) return
+        host.removeView(this)
+        clearFocus()
+        errorListener = null
+        wrappedContext.baseContext = wrappedContext.applicationContext
+    }
+    private fun failed() {
+        if (!valid()) return
+        val notify = errorListener
+        console.rendererFailed(this)
+        notify?.invoke()
+    }
 
     init {
         settings.javaScriptEnabled = true
@@ -47,19 +73,15 @@ internal class ConsoleTerminalView(context: Context, private val console: RunCon
                 return WebResourceResponse(mime, "utf-8", context.assets.open("console/$name"))
             }
             override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
-                if (request.isForMainFrame && valid()) onError()
+                if (request.isForMainFrame) failed()
             }
             override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
-                if (valid()) {
-                    onError()
-                    (parent as? android.view.ViewGroup)?.removeView(this@ConsoleTerminalView)
-                    release()
-                }
+                failed()
                 return true
             }
         }
         loadUrl(PAGE)
-        postDelayed({ if (valid() && !ready) onError() }, 5000)
+        main.postDelayed({ if (valid() && !ready) failed() }, 5000)
     }
 
     fun configure(background: Int, foreground: Int, cursor: Int) {
@@ -83,23 +105,31 @@ internal class ConsoleTerminalView(context: Context, private val console: RunCon
     }
     private fun pump() {
         if (!ready || !valid() || pending != null) return
-        val batch = console.output.after(acknowledged) ?: return
+        val historical = acknowledged < replayThrough
+        val batch = console.output.after(acknowledged, if (historical) replayThrough else Long.MAX_VALUE)
+        if (batch == null) {
+            if (historical) { acknowledged = replayThrough; pump() }
+            return
+        }
         pending = batch.sequence
         val bytes = JSONObject.quote(Base64.encodeToString(batch.bytes, Base64.NO_WRAP))
-        evaluateJavascript("consoleTerminal.write($bytes,${JSONObject.quote(batch.sequence.toString())},${batch.reset})", null)
+        evaluateJavascript("consoleTerminal.write($bytes,${JSONObject.quote(batch.sequence.toString())},${batch.reset},$historical)", null)
     }
     fun release() {
         if (released) return
         released = true
+        errorListener = null
+        (parent as? android.view.ViewGroup)?.removeView(this)
+        wrappedContext.baseContext = wrappedContext.applicationContext
         console.removeOutputObserver(listener)
         removeJavascriptInterface("ConsoleBridge")
         stopLoading()
         destroy()
     }
     private inner class Bridge {
-        @JavascriptInterface fun failed() { post { if (valid()) { ready = false; onError() } } }
+        @JavascriptInterface fun failed() { main.post { this@ConsoleTerminalView.failed() } }
         @JavascriptInterface fun ready() {
-            post {
+            main.post {
                 if (valid()) {
                     ready = true
                     console.observeOutput(listener)
@@ -108,11 +138,11 @@ internal class ConsoleTerminalView(context: Context, private val console: RunCon
             }
         }
         @JavascriptInterface fun input(data: String) {
-            post { if (valid()) console.input(data) }
+            main.post { if (valid()) console.input(data) }
         }
-        @JavascriptInterface fun resize(columns: Int, rows: Int) { post { if (valid()) console.resize(columns, rows) } }
+        @JavascriptInterface fun resize(columns: Int, rows: Int) { main.post { if (valid()) console.resize(columns, rows) } }
         @JavascriptInterface fun rendered(sequence: String) {
-            post {
+            main.post {
                 if (valid() && pending?.toString() == sequence) {
                     acknowledged = pending!!
                     pending = null

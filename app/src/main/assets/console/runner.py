@@ -11,7 +11,6 @@ import struct
 import sys
 import tempfile
 import termios
-import time
 
 MAX_FRAME = 32768
 MAX_QUEUE = 262144
@@ -19,6 +18,23 @@ MAX_QUEUE = 262144
 
 def frame(kind, data=b''):
     return struct.pack('!I', len(data) + 1) + kind + data
+
+
+def kill_run(pid, master):
+    # The controlling PTY's foreground job may use its own group within this run's session.
+    groups = {pid}
+    try:
+        foreground = os.tcgetpgrp(master)
+        if foreground > 0:
+            groups.add(foreground)
+    except OSError as error:
+        if error.errno not in (errno.EIO, errno.ENOTTY):
+            raise
+    for group in sorted(groups, key=lambda group: group == pid):
+        try:
+            os.killpg(group, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
 
 
 def run(port, token, argv, runtime_directory):
@@ -66,10 +82,7 @@ def run(port, token, argv, runtime_directory):
         # A disconnect or signal during startup must wait for the dedicated group to exist.
         os.read(ready_read, 1)
         os.close(ready_read)
-        try:
-            os.killpg(pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
+        kill_run(pid, master)
         os.waitpid(pid, 0)
         os.close(master)
         peer.close()
@@ -84,15 +97,11 @@ def pump(peer, master, pid, ready_read):
     exited = False
     child_status = None
     exit_sent = False
-    exit_deadline = None
     poll = selectors.DefaultSelector()
 
     def kill_group():
         # Keep the leader unreaped until cleanup so its process-group ID cannot be reused.
-        try:
-            os.killpg(pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
+        kill_run(pid, master)
 
     def watch(fd, events):
         try:
@@ -117,8 +126,7 @@ def pump(peer, master, pid, ready_read):
                 code = child_status.si_status if child_status.si_code == os.CLD_EXITED else 128 + child_status.si_status
                 outgoing.extend(frame(b'E', struct.pack('!i', code)))
                 exit_sent = True
-                exit_deadline = time.monotonic() + 5
-            if exit_sent and (not outgoing or time.monotonic() >= exit_deadline):
+            if exit_sent and not outgoing:
                 break
             watch(peer, selectors.EVENT_READ | (selectors.EVENT_WRITE if outgoing else 0))
             watch(master, (selectors.EVENT_READ if not eof and len(outgoing) < MAX_QUEUE else 0)
@@ -126,7 +134,10 @@ def pump(peer, master, pid, ready_read):
             for key, events in poll.select(0.1):
                 if key.fileobj is peer:
                     if events & selectors.EVENT_READ:
-                        data = peer.recv(MAX_FRAME)
+                        try:
+                            data = peer.recv(MAX_FRAME)
+                        except BlockingIOError:
+                            continue
                         if not data:
                             return
                         incoming.extend(data)
@@ -146,23 +157,48 @@ def pump(peer, master, pid, ready_read):
                                 rows, columns = struct.unpack('!II', payload)
                                 if not (1 <= rows <= 1000 and 2 <= columns <= 1000):
                                     raise ValueError('Invalid terminal size')
-                                fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack('HHHH', rows, columns, 0, 0))
+                                try:
+                                    fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack('HHHH', rows, columns, 0, 0))
+                                except OSError as error:
+                                    if error.errno not in (errno.EIO, errno.ENOTTY):
+                                        raise
                             elif kind == b'C' and not payload:
-                                if len(input_queue) >= MAX_QUEUE:
-                                    raise ValueError('Console input queue is full')
-                                input_queue.extend(b'\x03')
+                                if eof:
+                                    continue
+                                try:
+                                    attributes = termios.tcgetattr(master)
+                                    interrupt_char = attributes[6][termios.VINTR]
+                                    if attributes[3] & termios.ISIG and interrupt_char in (b'\x03', 3):
+                                        if not attributes[3] & termios.NOFLSH:
+                                            input_queue.clear()
+                                            termios.tcflush(master, termios.TCIFLUSH)
+                                        group = os.tcgetpgrp(master)
+                                        if group > 0:
+                                            os.killpg(group, signal.SIGINT)
+                                    else:
+                                        # Raw-mode programs consume Ctrl+C as a byte, ahead of pending input.
+                                        input_queue.clear()
+                                        input_queue.append(3)
+                                except (OSError, termios.error) as error:
+                                    if error.args[0] not in (errno.EIO, errno.ENOTTY, errno.ESRCH):
+                                        raise
                             elif kind == b'K' and not payload:
                                 kill_group()
                             else:
                                 raise ValueError('Unknown console frame')
                     if events & selectors.EVENT_WRITE and outgoing:
-                        count = peer.send(outgoing)
+                        try:
+                            count = peer.send(outgoing)
+                        except BlockingIOError:
+                            count = 0
                         del outgoing[:count]
                 else:
                     if events & selectors.EVENT_READ:
                         try:
                             data = os.read(master, 16384)
                         except OSError as error:
+                            if error.errno == errno.EAGAIN:
+                                continue
                             if error.errno != errno.EIO:
                                 raise
                             data = b''

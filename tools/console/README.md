@@ -5,12 +5,14 @@
 Both GitHub workflows run the Linux PTY regressions before building:
 
 ```sh
-python3 -m unittest discover -s tools/console -p 'test_*.py' -v
+TERMUIDE_CONSOLE_BROWSER_TEST=1 python3 -m unittest discover -s tools/console -p 'test_*.py' -v
 ```
 
 These exercise real TTY input, resize, nonzero exits, output draining, invalid controls, authentication and process-group cleanup. JVM tests cover the Android-side protocol, renderer replacement, bounded history and failed-save recovery. [CI 41339676267](https://github.com/AM-RTS/TermuIDE/actions/runs/41339676267), code `c5dfab8`, passed all seven PTY checks and 300 app tests, and compiled debug/device-test/signed release APKs. These checks do not establish Android PTY permissions, WebView keyboard/accessibility behaviour or background-process survival. Those require a physical device.
 
 ## Vendored terminal renderer
+
+The browser regression uses Chrome already installed on the GitHub runner and exercises the bundled xterm.js: historical query suppression, live query replies, Unicode paste, detached rendering and input enabled/disabled state. It does not install an npm dependency or run an Android emulator. JVM regressions additionally cover full input queues, authentication cancellation/deadlines, exit/write races and renderer ownership across host replacement. These review additions await CI verification.
 
 Unmodified runtime distribution files, downloaded from the npm registry:
 
