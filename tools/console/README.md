@@ -12,7 +12,7 @@ These exercise real TTY input, resize, nonzero exits, output draining, invalid c
 
 ## Vendored terminal renderer
 
-The browser regression uses Chrome already installed on the GitHub runner and exercises the bundled xterm.js: historical query suppression, live query replies, Unicode paste, detached rendering and input enabled/disabled state. It does not install an npm dependency or run an Android emulator. JVM regressions additionally cover full input queues, authentication cancellation/deadlines, exit/write races and renderer ownership across host replacement. These review additions await CI verification.
+The browser regression uses Chrome already installed on the GitHub runner and exercises the bundled xterm.js: historical query suppression, live query replies, Unicode paste, detached rendering and input enabled/disabled state. It does not install an npm dependency or run an Android emulator. JVM regressions additionally cover full input queues, authentication cancellation/deadlines, exit/write races and renderer ownership across host replacement. [Review CI 41342925237](https://github.com/AM-RTS/TermuIDE/actions/runs/41342925237), code `4ba50d3`, passed 307 app tests, ten Linux PTY tests and the real-renderer browser test. Debug/device-test/release APKs compiled and release v2/v3 signatures verified. These are host results; Android keyboard/accessibility and background behaviour remain unverified.
 
 Unmodified runtime distribution files, downloaded from the npm registry:
 

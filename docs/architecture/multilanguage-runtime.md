@@ -106,6 +106,8 @@ Project parsing uses the shared reader, so interrupted provider publication is r
 
 ## Verification records
 
+- Console review: [CI 41342925237](https://github.com/AM-RTS/TermuIDE/actions/runs/41342925237), code `4ba50d3`, passed 307 app tests (zero failures/errors/skips), ten Linux PTY tests, one browser test using bundled xterm.js, and 18 installer/launcher checks. Coverage includes full input queues, Unicode rejection, raw/cbreak Ctrl+C, foreground-group force-stop, authentication deadlines/cancellation, write/exit/callback races, history-response suppression and retained renderer host ownership. Debug/device-test/minified release APKs compiled; release v2/v3 signatures verified. Device tests were compiled only. No local Gradle/builds/tests or phone/emulator checks were run; Android IME/accessibility and background behaviour still require physical verification.
+
 - In-app console: [CI 41339676267](https://github.com/AM-RTS/TermuIDE/actions/runs/41339676267), code `c5dfab8`, passed 300 app tests (zero failures/errors/skips), seven Linux PTY checks and 18 installer/launcher checks. Debug, device-test and minified release APKs compiled; release v2/v3 signatures verified. No phone/emulator checks were run for this feature; PTY permissions, WebView input/accessibility and Android background behaviour remain unverified.
 
 Verification applies to the named revisions; host tests and APK compilation do not replace device checks.
