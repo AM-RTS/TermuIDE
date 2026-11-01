@@ -1,4 +1,6 @@
 'use strict';
+window.addEventListener('error', () => ConsoleBridge.failed());
+window.addEventListener('unhandledrejection', () => ConsoleBridge.failed());
 let terminal;
 let fit;
 let omitted;

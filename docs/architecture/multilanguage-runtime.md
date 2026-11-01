@@ -42,7 +42,7 @@ The Application-owned controller survives Activity recreation and distinguishes 
 
 One in-app run is supported at a time. Closing its screen retains the Application-owned connection; socket loss requests group cleanup. Explicitly detached process groups and Android killing the runner itself are outside that guarantee. Confirmed exit frames preserve the program's status; missing frames retain unknown status, including after app process death. No console session is automatically re-executed. Source saves and durable drafts are unchanged.
 
-The app retains at most 256 KiB of raw terminal history; the renderer keeps 2,000 scrollback rows. UI output is acknowledged in batches, without an unbounded JavaScript queue. Gaps reset the display and mark omitted history; replaying a truncated ANSI stream cannot reconstruct every full-screen application's prior state. The WebView serves an allowlist of APK assets from a synthetic HTTPS origin, blocks network/navigation and exposes only session input/resize/render acknowledgements. Program output is passed as bytes, never HTML or JavaScript source. Versions, licenses and checks are recorded in `tools/console/README.md`. The new console regressions have been authored but not executed in this checkout; the dated CI results below predate this feature.
+The app retains at most 256 KiB of raw terminal history; the renderer keeps 2,000 scrollback rows. UI output is acknowledged in batches, without an unbounded JavaScript queue. Gaps reset the display and mark omitted history; replaying a truncated ANSI stream cannot reconstruct every full-screen application's prior state. The WebView serves an allowlist of APK assets from a synthetic HTTPS origin, blocks network/navigation and exposes only session input/resize/render acknowledgements. Program output is passed as bytes, never HTML or JavaScript source. Versions, licenses and checks are recorded in `tools/console/README.md`.
 
 Workspace close completion waits for a resumed host and mutable FragmentManager state. Project-save failure keeps the project open; changed tab/session revisions cancel closing. Auto-save pauses throughout closing, and a later explicit save cancels the pending close. Rotation can retain a confirmed decision; process-death restoration recreates prompts without replaying an in-memory Discard approval.
 
@@ -105,6 +105,8 @@ The review added Activity-typed shared setup actions, a List-based completion bo
 Project parsing uses the shared reader, so interrupted provider publication is restored before its timestamp is captured. Oversized debugger records are shortened before appending, preventing the visible-history limit from retaining a much larger backing buffer. Regression fixtures cover these cases alongside file-operation rotation, stale listings, auto-save retry and dirty-draft preservation.
 
 ## Verification records
+
+- In-app console: [CI 41339676267](https://github.com/AM-RTS/TermuIDE/actions/runs/41339676267), code `c5dfab8`, passed 300 app tests (zero failures/errors/skips), seven Linux PTY checks and 18 installer/launcher checks. Debug, device-test and minified release APKs compiled; release v2/v3 signatures verified. No phone/emulator checks were run for this feature; PTY permissions, WebView input/accessibility and Android background behaviour remain unverified.
 
 Verification applies to the named revisions; host tests and APK compilation do not replace device checks.
 

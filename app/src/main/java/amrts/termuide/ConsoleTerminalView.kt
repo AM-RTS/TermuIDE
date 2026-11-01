@@ -97,6 +97,7 @@ internal class ConsoleTerminalView(context: Context, private val console: RunCon
         destroy()
     }
     private inner class Bridge {
+        @JavascriptInterface fun failed() { post { if (valid()) { ready = false; onError() } } }
         @JavascriptInterface fun ready() {
             post {
                 if (valid()) {
