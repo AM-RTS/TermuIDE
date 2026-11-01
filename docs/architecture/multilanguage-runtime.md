@@ -1,413 +1,126 @@
-# Multi-language runtime architecture
+# Runtime and recovery architecture
 
-Status: TermuIDE (`amrts.termuide`); shared runtime foundation, basic Python/Java execution, generalized LSP sessions, Python pylsp integration, and optional Java completion/diagnostics implemented; advanced Java integrations remain planned. Updated 2026-10-30.
+[README](../../README.md) · [User guide](../usage.md) · [Build instructions](../building.md)
 
-## Shared language-server foundation
+Implemented: shared C/C++/Python/Java execution, per-language LSP sessions, Python environments, optional Java completion/diagnostics, and guided tool installation. Python/Java debuggers, build-tool import, dependency management and additional Java editing features remain separate work.
 
-`LanguageServers` owns lazy sessions keyed by server and normalized project/folder root. C/C++ share clangd; Python uses pylsp; Java uses the separately installed `termuide-java-lsp` launcher, requiring JDK 25 independently of Java execution. Every session keeps its own socket port, initialize capabilities, request IDs and open-document set. The configured port is the starting port; allocation avoids immediately reusing a bridge still shutting down. The existing Termux `nc` stdio bridge launches all three servers with literal argument arrays. No app dependency, additional module or recovery-format change is needed.
+## Ownership
 
-The existing `MainHandler` remains the Activity/save bridge and parses messages carrying their source LSP and generation. Replies, diagnostics, semantic tokens, commands and completion selections use that identity. Shutdown invalidates queued events and displayed completions. Unsupported capabilities are not requested; only clangd receives fallback compiler flags. `Languages.canDebug()` separately restricts GDB to native languages.
-
-`didOpen` uses the language registry and current document version, and sends the actual editor buffer, including recovered unsaved text. Opening the same document twice in one session is suppressed. Subsequent changes retain version/revision guards. Settings changes and project transitions restart sessions; closing the last associated tab stops its server. Opening another supported tab retries an unexpectedly disconnected server on a fresh port, rebinds its existing documents and reopens their current buffers after initialization; unrelated language sessions continue running. A disconnected server never changes draft/source ownership. Installation/retry instructions are in the README; Python environment selection and optional Java setup use the same status/restart flow.
-
-CI regression coverage includes session isolation, port allocation, capabilities, stale responses, recovery-preserving Python completion and C/C++ debugger gating. The signed prerelease workflow installs `python-lsp-server==1.15.0` in a temporary virtual environment and enables a host integration check using the actual app LSP client against real pylsp, including a sibling import from an unsaved recovered buffer. Local Gradle/build/test execution, phone and emulator checks remain skipped. CI reports distinguish host verification from device behavior; previous physical-device evidence below predates this implementation. The initial CI run also exposed programmatic paste arriving before Sora line measurements completed; that path now reuses `EditorTextEdits` and the existing safe full-buffer refresh while layout is busy, retaining undo and dirty/recovery tracking.
-
-Review hardening (2026-10-26): LSP framing now validates bounded headers and UTF-8 byte lengths before allocating reply buffers. Initialization has a main-handler deadline; initialized idle sessions keep their connection. Shutdown drops obsolete queued requests and bounds socket release. Caret callbacks wait until the Fragment has a view, and recreated C/C++ views request fresh semantic tokens without reopening an already-open server document. Sora cursor movement avoids renderer queries while a multiline selection is active, retaining caret animations and undo. Per-document versions survive view recreation and increase when a tab is reopened in a shared session, including pending edits after saved-state capture. Requests flush pending document synchronization before capturing their revision/position.
-
-Pylsp/Jedi currently uses Python code-point columns without advertising a position encoding; the adapter converts these to/from the editor's UTF-16 offsets. An explicit server encoding takes precedence. clangd retains UTF-16 positions, and only UTF-16/UTF-32 are advertised. Completion replacement keeps complete filename components and supplementary Unicode identifiers; unsupported snippet insertions are ignored. Rename/code-action results validate all affected open-document revisions; server-initiated edits reject buffers with unsynchronized changes. Workspace edits reject another session's documents and preserve dirty recovery when a target became stale. The real-pylsp CI check includes an emoji before a completion in the middle of a line and a hyphenated filename completion. No local builds, tests or phone checks are performed for this review.
-
-## Fork identity and provenance
-
-TermuIDE is the AM-RTS fork of RainbowC0/TermuC. The application ID, namespace and source package are `amrts.termuide`; the `codeeditor` library retains its upstream namespace and author notices. Projects and templates use `termuide.json` only, with no automatic fallback for legacy `termuc.json`. The new application ID has its own Android sandbox; old settings, permissions and recovery drafts are not imported automatically. See [README.md](../../README.md#what-is-different-in-this-fork) for fork differences and [NOTICE.md](../../NOTICE.md) for authors and licensing. Full licenses are bundled for the Settings About dialog.
-
-Fork-owned UI names are `TermuIDECompose` and `TermuIDETheme`; runtime labels, callback scheme and native staging use `termuide`. Upstream credits and historical checkpoint names remain unchanged. `SourceWriter` retains its existing `.termuc-*` staging/journal identifiers so interrupted saves can still be recovered; branding changes do not rewrite recovery records.
-
-The identity/attribution work and workspace refactor have a successful [GitHub-hosted signed release build](https://github.com/AM-RTS/TermuIDE/actions/runs/40169775316). The prerelease workflow now requires the JVM/Robolectric regression suite to pass before building, signing and publishing; test reports are retained as workflow artifacts even when tests fail. Coverage includes restored workspace prompts, tab selection, scoped discard approval, stale save completion, durable drafts and safe project creation. Local Gradle, builds, tests, phone and emulator checks remain skipped. CI host tests do not establish physical-device behavior. Historical device checkpoints below retain their original package names, artifact paths and results.
-
-## Direction and initial scope
-
-Build shared runtime support first, then basic Python and Java execution. Add language servers, project/build-tool integration, dependency environments and debuggers independently as useful capabilities. Neither language must reach full IDE parity before another language can run.
-
-Initial delivery covers existing C/C++ behavior plus running a saved Python script or a single-file Java console program using tools installed in Termux. Java uses source-file launch on a compatible JDK; this does not include Android APK building. Existing project commands remain compatible. Python/Java project templates and automatic entry-point discovery are outside this first scope.
-
-## Reuse map
-
-| Existing component | Responsibility to retain | Necessary change |
-| --- | --- | --- |
-| `Utils.run()` | Termux RUN_COMMAND transport and foreground terminal launch | Add an overload for correlated results; retain the existing signature for LSP/debugger/setup callers. |
-| `MainActivity.performAction()` | Receive user actions and present errors | Delegate execution planning and runtime checks; keep navigation and editor hosting. |
-| `EditFragment.save()`, `DocumentSaver`, `SourceWriter` | Background, interruption-aware source saves and completion | Reuse the returned future; execution must await a current, successful save. |
-| `DocumentSessions`, `DraftStore`, `TextBuffer` | Observable revisions, undo and durable recovery | Use existing revision/ownership checks; keep source execution independent of private draft storage. |
-| `Project` | Existing `termuide.json` commands and environment variables | Expose an immutable configuration snapshot for a run; preserve the current schema and native execution behavior. Closing saves current commands and tab order through `DocumentSaver` and `SourceWriter`. |
-| `TextEditor`, Sora and `codeeditor` language classes | Editing, input, highlighting and local editing utilities | Select the existing Python/Java highlighters through shared language lookup. |
-| `Lsp`, `MainHandler`, `DebugSession`, `DebugPanel` | Current clangd and GDB features | Keep clangd/GDB for C/C++; reuse shared LSP ownership for Python pylsp. Java server selection remains open. `DebugSession` owns GDB transport/protocol state; `DebugPanel` presents immutable session snapshots. |
-| `TermuIDECompose`, settings and setup prompts | Material3 controls and accessibility | Bind Run availability/status and missing-tool feedback to the new execution state. |
-
-No new Gradle modules, runtime bundles, embedded terminal, plugin framework, DI framework or editor replacement are needed.
-
-### Maintenance boundaries
-
-- Startup and Settings reuse `Application.initConfs()` for defaults and numeric validation. The port dialog rejects values outside 1–65535 before persisting them. Existing stored word-wrap preferences are retained; the missing-value default matches the original XML default of false.
-- `DocumentSessions` owns dirty state. `WorkspaceSession` reuses `HeaderAdapter` for tab order and owns selection by file path, project-open prompts, close requests and pending save completion. `MainActivity` derives tab indices and hosts the Fragments. Save-point and document undo ownership remain unchanged.
-- Language definitions are reused across tabs. Discovered local completion words belong to each `TextEditor` rather than the shared language singleton.
-- Diagnostic entries record the document version at publication. Edits hide older entries from the diagnostics sheet, and opening a new LSP document session clears obsolete diagnostic metadata. The client advertises [LSP diagnostic version support](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_publishDiagnostics) so servers can identify and the client can reject stale replies.
-- Project-close saves serialize current disk commands on the existing save worker and publish with the existing atomic/journaled writer. Failure leaves the project open; tab/session revision changes during the operation cancel closing. A restored close prompt can still close documents after process-local project state is lost.
-
-- The unused old editor UI (10 files, 5,149 lines) and old search/progress group (five files, 497 lines) were removed after caller and shrinker checks. Active model, undo, lexer, color and completion-edit utilities remain in `codeeditor`.
-- GDB replies are parsed with `StreamTokenizer` into MI values. Token-correlated variable requests tolerate interleaved asynchronous events and out-of-order replies. Transport and session data have no Activity dependency; the overlay receives immutable snapshots on the main thread and ignores callbacks from closed sessions. Overlay layout/input behavior is retained; this does not establish a fix for the deferred physical-device input issue.
-
-### Workspace coordination
-
-Workspace coordination refactor (after checkpoint `d0135bd`): retain the workspace through the existing custom non-configuration mechanism, detach the old Activity's tab listener on destruction, and resume source/project close completion only when the new host is resumed and Fragment state can be changed. Bundle metadata stores the selected path while retaining the old selected-index key for compatibility. Process-death restoration recreates close prompts without replaying a Discard approval. Project file opening reuses `openFile()` and shared LSP startup; `Project` remains the canonical configuration and `DocumentSessions`/`DocumentSaver`/`SourceWriter` retain document and write ownership. No dependency, module or recovery-format change was introduced. Signed release builds have since passed on GitHub, and the prerelease workflow now requires host regression tests. Local Gradle/build/test execution, phone and emulator checks remain skipped. The historical 198-test and physical-device results below apply to the preceding checkpoint.
-
-Review hardening:
-
-- A pending metadata-close operation is retained across Activity recreation. Fragment removal and draft discard wait until the host is resumed and FragmentManager state can be changed. Session revisions are rechecked before closing. Process loss still restores documents through durable recovery; an in-memory Discard decision is not replayed after a new process starts.
-- Auto-save remains paused throughout asynchronous closing, including metadata publication after a Discard decision. A later explicit source save cancels closing before its document owner can be removed. A rejected save executor completes the failed future and clears its pending entry.
-- Running/stopped transitions invalidate earlier variable/frame/child requests. Visible inspection refreshes after stopping; delayed variable objects are deleted, and root objects remain tracked when the UI displays their children.
-- Breakpoint locations use quoted MI arguments. Insertion results map breakpoint entries to GDB's actual breakpoint numbers; failed insertions cannot shift later controls onto another breakpoint. Pending toggles are applied after the insertion reply. See GDB's [breakpoint commands](https://sourceware.org/gdb/current/onlinedocs/gdb.html/GDB_002fMI-Breakpoint-Commands.html).
-- Incomplete MI strings, trailing stream-record data and variable results without object names are rejected before they can create invalid UI state.
-
-Review verification on 2026-10-23: all 194 host tests passed across 23 suites, with zero failures, errors or skips. New regressions cover saved-state/rotation close completion, retained Discard approval, auto-save suppression during metadata writes, explicit saves that cancel closing, rejected save workers, stale inspection replies, root-variable cleanup, malformed MI input, breakpoint quoting/assigned IDs and visible inspection refresh. The state-only debugger test is isolated from Compose touch fixtures using the existing per-class worker isolation. Debug, minified unsigned release and AndroidTest APK builds passed with `:app:testDebugUnitTest :app:assembleDebug :app:assembleRelease :app:assembleDebugAndroidTest --offline`; log: `app/build/reuse-review-final.txt`. Initial failing regressions are recorded in `app/build/reuse-review-red.txt` and `app/build/reuse-review-autosave-red.txt`. No emulator or phone checks were run; the physical GDB overlay-input investigation remains pending.
-
-The MI value forms were checked against GDB's official [stack commands](https://sourceware.org/gdb/current/onlinedocs/gdb.html/GDB_002fMI-Stack-Manipulation.html) and [variable object commands](https://sourceware.org/gdb/current/onlinedocs/gdb.html/GDB_002fMI-Variable-Objects.html).
-
-Initial maintenance verification on 2026-10-23: all 182 host tests passed across 22 suites, with no failures, errors or skips. Coverage includes project-save failures, edits during asynchronous close, explicit discard, restored close prompts, malformed configuration retention, settings validation, per-tab completion words, immutable debugger snapshots, interleaved/out-of-order GDB replies and socket EOF. Existing source-save, C/C++, Python/Java, UI and durable-recovery regressions also passed. Debug, minified unsigned release and AndroidTest APK builds succeeded with `:app:testDebugUnitTest :app:assembleDebug :app:assembleRelease :app:assembleDebugAndroidTest --offline`; log: `app/build/reuse-final.txt`. No emulator or physical-device checks were run. Real GDB/Termux behavior and the deferred system-input issue still require the phone.
-
-## Small additions inside the app module
-
-Use Kotlin for new coordination code and Java-callable entry points for the existing hosts. Keep small value types beside their owner rather than creating a separate model layer.
-
-### 1. `Languages.kt`: one source of language facts
-
-A fixed list maps filename extensions to a stable language ID, highlighting implementation and required runtime. Command planning uses a small switch for native, Python and Java source execution. Actual C/C++ headers remain distinct from runnable source files. Python uses an unused low-bit ID while legacy saved-state IDs and header bits stay unchanged; known extensions are reclassified when restoring old tabs.
-
-`EditFragment.fileType()`, `invalidateType()`, `hasLsp()` and Run/Debug menu checks delegate to these facts. Retain the old integer values as a compatibility bridge while saved fragment state still contains them; stop interpreting the overloaded `TYPE_HEADER` bit as the universal execution policy. Java currently carries this bit despite being source code.
-
-Keep three questions separate: can this file be run, is its required tool available, and does it have an installed IDE integration? Java highlighting alone does not enable Java diagnostics or debugging. An installed GDB does not make Python debuggable. Preserve existing C/C++ formatting; do not silently apply a C-family formatter to Python.
-
-### 2. `RunCommands.kt`: pure command planning
-
-Extract the current C/C++ and project shell construction from `MainActivity` before adding language cases. A small explicit switch is sufficient; there is no need for an interface per language.
-
-The output is an immutable `ExecutionPlan`: executable, argument list, working directory, required tools for generated commands, and terminal/background mode. It contains paths and arguments, not document text or Android views.
-
-- C/C++: retain compiler flags, compile-before-run, native artifact staging and the existing GDB launch flow. Keep native staging specific to native execution.
-- Python: resolved Python 3 interpreter plus absolute script path; standalone working directory is the source parent. Probe the interpreter with `-E -S` to skip environment overrides and startup hooks; actual program execution retains the normal Python environment. `LanguagePython` implements the current language/lexer API; its basic highlighting handles escaped quotes and continued lines, indentation ignores comments and string contents, and its formatter leaves significant indentation unchanged.
-- Java: resolved `java`, `-Dfile.encoding=UTF-8` and absolute source path; the encoding matches the editor's source saves even with a different runtime default. Verify `--source 11 --version` support and the `jdk.compiler` module without running user source. Do not parse Java to invent a main class or require a separate `javac` step for this mode. The installed JDK controls accepted syntax; no source level is forced during execution. Use the first class in the file with a conventional static `main` method. This basic path does not configure dependencies or discover other source files.
-- Existing project commands: use the configured commands and `$p`, `$o`, `$d`, `$f`, `$e` semantics. A project Run keeps its configured entry point; selecting a Python tab must not silently replace that command. Preserve legacy native artifact preparation in this branch.
-
-Use raw argument arrays wherever possible. Python/Java use the existing terminal pause through a fixed wrapper and pass the runtime, source and configured program arguments as positional parameters (`"$@"`). Native Run/Debug capture configured arguments in a Bash array and clear positional parameters before expanding compiler flags or project commands, then append the array once to the program command. Preserve the program's exit status even after waiting for a key, including failing programs. The pause prompt uses Bash ANSI-C quoting so its leading newline renders correctly. Existing user-authored compiler flags and project commands remain explicit shell configuration; do not treat generated paths as shell source.
-
-### 3. `RunController.kt`: one execution coordinator
-
-One Application-owned instance owns pending probes and execution requests across Activity recreation. It owns no Activity, Fragment or editor view. UI consumers observe a small `StateFlow`; use existing futures for save completion instead of introducing a second async mechanism.
-
-The controller coordinates tool detection, source accessibility checks in Termux, plan dispatch and result correlation through `Utils.run()`. Runtime discovery is a method here, not a second registry or install manager. Resolve tools inside Termux, inspect both output streams for version probes, and retain resolved executable paths. Cache successful discoveries in memory and invalidate on an explicit retry or a missing-tool failure; do not probe on every keystroke.
-
-Keep transport access in `Utils`: its new overload accepts a result token/PendingIntent, while existing callers continue using the current signature. Add one small `RunResultReceiver` and its manifest declaration to route results to the controller. It validates a unique pending request ID, uses an explicit callback component, and ignores unknown, duplicate or expired replies. Use the mutability required for Termux to supply result extras, with the API-level guard documented by Termux.
-
-Distinguish `Checking`, `AwaitingSave`, `Dispatched`, `Finished`, `Failed`, and `Unknown` states. Starting the Android service means dispatched, not proof that the program is running. Bound probe waits and allow retry. Interactive programs may run indefinitely. Foreground results are terminal transcripts, so do not promise live structured stdout/stderr or a Problems panel from them.
-
-Initial cancellation cancels pending preparation before dispatch. Once dispatched, retain Termux's terminal controls, including Ctrl+C. Do not add an app Stop button until a reliable per-execution process/session handle exists; do not kill processes by executable name. If the app process dies, discard in-memory run state and report an unknown prior status instead of assuming the external process stopped. Editor recovery remains durable independently.
-
-A confirmed Termux launch error clears that request's pending marker; missing or malformed completion results retain the unknown status. Language singletons keep their vocabulary/settings, while every syntax analysis receives a separate scanner so simultaneous tabs cannot reset each other's input.
-
-## Execution and save flow
-
-```mermaid
-flowchart TD
-    UI[Existing Run control] --> R[Capture file, action, project config, cwd and arguments]
-    R --> S[Await existing source-save future]
-    S --> P[Check required tools and saved source access through Termux]
-    P --> V{Save current and request still valid?}
-    V -- No --> E[Keep editor and recovery; explain failure or request another Run]
-    V -- Yes --> B[Build immutable execution plan]
-    B --> T[Existing Utils.run transport]
-    T --> X[Termux terminal or existing native debugger]
-    X --> C[Correlated completion callback]
-```
-
-1. Capture the requested source and execution context before asynchronous work; never read whichever tab happens to be selected in a late callback.
-2. Save through the existing source-save path, then reload project configuration into an immutable snapshot before probing source readability. This preserves both editing `termuide.json` before Run and recreating a deleted source from a recovered draft. Probe only fixed tool requirements in Termux; do not run project commands for detection or install packages automatically. Keep existing C setup and add optional Python/Java setup feedback when adding those runners.
-3. Await `EditFragment.save()` through the existing save path. A failed checkpoint/write or newer unsaved edits abort execution. Generated single-file execution saves that file; preserve the current project save policy in the compatibility extraction. Saving all dirty project dependencies belongs with explicit multi-file project support.
-4. After successful save, record the accepted session identity/revision. Revalidate it and the captured execution context immediately before dispatch. Save completion itself advances session state, so do not compare against the pre-save revision. Additional asynchronous preparation must perform this check again.
-5. Pass the saved, Termux-readable source path. Never pass private recovery files, app-private paths or content URIs as though they were Termux filesystem paths. Fail clearly when Termux cannot read the source or enter its working directory; do not silently copy an entire project into another workspace.
-6. Keep callbacks in the controller. The current screen may observe the result after rotation; completion must not navigate back to an old tab, alter editor dirty state or clear a draft.
-
-`Project` should capture root, commands and output directory together. If config reload is part of preparation, parse into temporary values and publish the snapshot only after successful validation; delayed work must not consume a mixture of old and new static fields. This is a small boundary change within the existing class, not a new project subsystem.
-
-## Basic language behavior
-
-### Shared run configurations
-
-One configuration is saved per project root or standalone browser folder. Entry file and working directory may be absolute or relative to that scope; empty fields keep the selected file and existing working-directory defaults. Arguments are entered as separate literal values, including empty arguments, without shell parsing. Private preferences store the configuration so editing it cannot overwrite an open or unsaved `termuide.json`; existing project commands remain authoritative and portable in that file. The additional run settings are local to this installation.
-
-Run/Debug open a configured entry through the existing document host, then await its normal revision-aware save and recovery checks. Other dirty tabs remain intact. Changing the configuration during preparation cancels that preparation. Build/Compile keep their current commands, selected file and project directory. Native compilation/staging retain their original directory; an optional runtime directory is entered only before launching the native program or GDB. Python/Java use that directory directly.
-
-Before entering an overridden runtime directory, explicitly relative project executables are resolved against the preparation directory; bare command names keep PATH lookup. Empty project commands fail before program arguments can become an executable. An already-open, successfully loaded entry may recreate its deleted source through the normal save path. Configuration parsing rejects trailing corrupt data, and failed preference commits restore the previous in-memory value rather than activating rejected settings.
-
-The shared save path also rejects a buffer whose source read failed, so an automatically opened entry cannot replace existing source with an empty editor. This guard survives Activity recreation and fresh process recovery, including subsequent edits to the partial buffer. Recovery format version 2 persists source-read readiness alongside the existing text and metadata and reads version 1 drafts unchanged. Version 1 has no readiness field and defaults to successfully loaded; it cannot identify a historical failed read without saved Activity state. A successful source reload clears the guard. Successfully loaded recovery drafts remain saveable through the normal path.
-
-`RunConfiguration.kt` owns the immutable values and their private-preference persistence. The existing More options menu opens a Material3 dialog with saved form state and accessible argument rows. `MainActivity` opens a configured entry through its normal document host and includes the configuration in the immutable request; context matching rejects changed configuration values before dispatch. `RunController.onConfigurationChanged()` cancels only pending Run/Debug preparation, leaving Build/Compile and already dispatched processes alone. No `termuide.json` rewrite, module, dependency or SDK change is needed.
-
-Checks cover configuration isolation/defaults/corrupt and trailing data, failed-commit rollback, NUL rejection, literal argument boundaries, native preparation versus runtime cwd, project `$@` expansion, relative and empty project commands, open and recovered entries whose sources were deleted, failed saves, other dirty tabs, configuration changes during probes, native breakpoints, menu/form restoration, large-font RTL controls, actual host Python/Java execution and the native shell flow with a fixture compiler. Recovery checks cover failed reads across fresh session ownership without an Activity bundle, version 1 compatibility and UTF-16 retention. Physical verification of these additions is deferred and emulator checks are excluded.
-
-Earlier run-configuration review verification on 2026-10-23: all 169 host tests passed with no failures, errors or skips, including failed-read protection across fresh durable recovery, old-format drafts, rejected configuration commits, relative project executables, empty commands and project `$@` compatibility. Debug, minified release and AndroidTest APK builds passed using `:app:testDebugUnitTest :app:assembleDebug :app:assembleRelease :app:assembleDebugAndroidTest --offline`; log: `app/build/run-config-review-final.txt`. The physical-device checkpoint below predates these additions. No updated APK was installed, the new release output is unsigned, and the GDB floating-controls investigation remains unresolved.
-
-| Capability | C/C++ | Python first scope | Java first scope |
-| --- | --- | --- | --- |
-| Editing, undo, saves and durable recovery | Existing | Shared | Shared |
-| Highlighting | Existing | Reuse `LanguagePython` | Reuse `LanguageJava` |
-| Console execution and stdin | Existing native path | Saved script through installed Python | Saved single source file through a compatible installed JDK |
-| Existing custom project commands | Preserve | Available through explicit existing configuration; no automatic Python project mode | Available through explicit existing configuration; no automatic Java project mode |
-| Code intelligence and semantic diagnostics | Existing clangd | Separate future integration | Separate future integration |
-| Debugging | Existing GDB | Separate future integration | Separate future integration |
-
-JDK 11+ provides single-file source launch, but a version number alone is insufficient if the installed runtime lacks compilation support. Verify that capability. Single-file launch is not a promise of arbitrary Maven/Gradle projects. Likewise, basic Python execution does not manage virtual environments, native Python packages or dependency installation.
-
-## Delivery order and checks
-
-1. Extract shared language lookup and C/C++ command planning; add correlated Termux results and runtime checks. Existing C/C++ behavior is the compatibility check for this foundation.
-2. Add basic Python and Java execution using the same flow. They can ship together; Python does not have to gain advanced tooling first. Include file icons/detection, highlighting, run availability, missing-runtime messages and accessible status controls in this change.
-3. Add advanced capabilities independently when needed: Python/Java project modes and templates, dependency environments, language-server sessions and language-specific debugger adapters. Reuse JSON-RPC framing, revision checks and editor edit application where valid. Replace clangd-specific startup/session selection only when adding another server; GDB MI must not be reused as a Java/Python debugging protocol.
-
-Implementation checks must cover pure C command compatibility, filenames with spaces/quotes/shell characters, argument boundaries, cwd, missing runtime, incompatible Java runtime, stdin, nonzero exit, stale/out-of-order callbacks, rotation, process loss, failed saves, edits during preparation, and existing custom project commands. Keep all existing recovery/save regression coverage. Mock transport for host tests; verify real Termux execution and storage permissions on a physical device before claiming live support. Skip emulator checks.
-
-Touch points are `MainActivity`, `EditFragment`, `Utils`, `Project`, `Application`, the relevant Compose Run/Debug controls, `FileHelper` extension icons, optional setup feedback, manifest callback receiver, and their tests. Reuse existing language fixtures and add only basic Python/Java source fixtures plus transport callback cases. No dependency or SDK change is required by this design; confirm that during implementation rather than upgrading preemptively.
-
-## References and limits
-
-- [Termux RUN_COMMAND contract](https://github.com/termux/termux-app/wiki/RUN_COMMAND-Intent): command arguments, working directory, permission/setup requirements, terminal sessions and PendingIntent results. Result callbacks require a supporting Termux version; foreground output is a combined transcript and background output has separate streams. Handle missing callbacks explicitly.
-- [Java 17 source-file launch](https://docs.oracle.com/en/java/javase/17/docs/specs/man/java.html#using-source-file-mode-to-launch-single-file-source-code-programs): reuse the launcher rather than writing a Java compilation/main-class discovery pipeline.
-- [Python command-line execution](https://docs.python.org/3/using/cmdline.html): use the installed interpreter's script execution and argument handling.
-
-The foundation adds shared language facts, command planning, an Application-owned coordinator, a private callback receiver and accessible execution status. It tracks the latest requested command; starting another command does not stop an earlier Termux process. Only a pending-status marker survives app process loss, never an executable request or source text. No runtime/dependency bundle or project-schema migration was added.
-
-Host regression checks cover planning, shell exit handling, transport/callback correlation, actual Activity/save integration, rotation and recovery guards, including Python/Java failed saves, edits during probes and recovered tabs. Host Bash checks exercise runtime probes, literal arguments and missing/incompatible tools; installed desktop Python and JDK launch sample programs with stdin, relative files and nonzero exits. The physical-device checks below establish a bounded set of real Termux behaviors. Emulator checks are skipped. Existing source-save limitations, including provider rename support and provider-managed metadata on replacement, remain separate maintenance work.
-
-## Physical-device checkpoint: 2026-10-23
-
-Device: Redmi K20 Pro, Android 11, Termux 0.118.1, installed Python 3.12.11 and Java 17.0.15. Tests used the app's actual Run/Build/Compile/Debug controls and Termux terminal, with ADB input and root access for installation, private-draft inspection and a targeted process kill. No emulator was used.
-
-### Installed artifact
-
-- Version 0.2.4 (13), minSdk 27, targetSdk 34; minified release build, not debuggable.
-- Installed alongside the original as **TermuC Test**, application ID `cn.rbc.termuc.devicecheck`. Only the test application ID and launcher label were overridden. The original `cn.rbc.termuc` app and its data remain installed unchanged; its private-data backup was retained locally.
-- Signed with the available local Android development key, because the original app's signing key differs. This is a signed release configuration, not a production-certificate release.
-- APK: `app/build/phone-runtime-check/TermuC-Test-0.2.4-release-signed.apk`; SHA-256 `fa599fdf6fe9307b2135921f34503f817f9c7f5287aebb3c0ef2ea39917c066c`, matching the installed base APK.
-- Fixtures were isolated under `/sdcard/Download/TermuC-phone-check-20261023-1505`. The fresh test app had Termux command, storage and overlay access configured; autosave was disabled for the unsaved-recovery checks.
-
-### Observed results
-
-| Check | Result | Local evidence under `app/build/phone-runtime-check/` |
-| --- | --- | --- |
-| Python console execution | Passed: stdin `PhonePython`, sibling-module import, relative data-file read, UTF-8 `é`, output file, Python 3.12.11; app reported exit 7 after terminal pause | `python-result.png`, `python-completed.xml` |
-| Java source-file execution | Passed: stdin `PhoneJava`, relative data-file read, UTF-8 `é`, output file, Java 17.0.15; app reported exit 9 after terminal pause | `java-result.png`, `java-completed.xml` |
-| Standalone C | Passed: compile/run with math-library use, `C_PASS:9`, exit 0 | `c-result.png`, `c-completed.xml` |
-| Standalone C++ | Passed: vector/iostream program, `CPP_PASS:9`, exit 0 | `cpp-result.png`, `cpp-completed.xml` |
-| Configured C++ project | Passed: Build produced executable, Compile produced object, Run staged/executed the native artifact and wrote `PROJECT_PASS`; each reported exit 0 | `project-build-completed.xml`, `project-compile-completed.xml`, `project-run-output.png` |
-| Native language diagnostics | Passed: real clangd connection and red underline on undeclared `missing_symbol` | `clangd-diagnostic.png` |
-| Durable unsaved recovery | Passed: edited Python, Java and C++ tabs, observed private draft files, then killed only the app process with `kill -9` while the Java editor was foreground. All three recovered their exact unsaved text as dirty tabs after relaunch | `recovery-killed-pid.txt`, `recovery-after-kill.xml`, `recovered-python-visible.xml`, `recovered-cpp-visible.xml` |
-| Recovery preserves source and permits execution | Passed: Python/Java source files remained unchanged before the kill; recovered Run saved their comments and executed successfully. Discarding the recovered C++ draft left its original source hash unchanged | `recovered-java-saved.xml`, `recovered-python-saved.xml`, `cpp-source-after-recovery.cpp` |
-| Native debugger | Partial: GDB started and hit `main.c:6`. Floating buttons did not respond to repeated ADB taps, including with the soft keyboard hidden; details/stepping/continue remain unresolved | `debug-final-no-ime.png`, `debug-final-details-attempt.png`, `debug-final-window.txt` |
-
-No crash entry for `cn.rbc.termuc.devicecheck` was found in the captured crash buffer. The debug session was ended by returning to the editor; no GDB process remained at the final check.
-
-### Remaining limits
-
-The recovery kill occurred after normal draft checkpointing; it does not establish recovery of a keystroke before its checkpoint, device power-loss behavior or all document-provider failure modes. Failed saves, runtime absence/incompatibility, stale probes and callbacks retain their host coverage; they were not all repeated on this phone. Native completion/rename/format, every C/C++ workflow, TalkBack and other Android versions were not exhaustively tested. The debugger control result requires follow-up before claiming full native debugger verification. A cosmetic literal `\n` in the terminal pause prompt was also observed. Evidence/build outputs are local ignored artifacts, not checked-in fixtures.
-
-### Floating-controls investigation follow-up
-
-Phone verification was deferred at the user's request. `DebugOverlayTest` now exercises actual touch input with the Activity stopped: Continue, Pause, Next, Step, Finish and Close enqueue the expected GDB commands, while More opens the details panel and its Close returns to the compact controls. Both host tests pass against the unchanged production implementation. Together with `WindowThemeTest`, `DocumentSessionsTest` and `SavePathTest`, the focused run passed 23 tests with no failures, errors or skips (`app/build/gdb-overlay-checks.txt`). This does not reproduce or resolve the physical-device failure.
-
-`DebugOverlayInputTest` is a separate device test for system input routing. It injects screen-coordinate taps through `UiAutomation` instead of dispatching directly into a Compose root. It requires overlay permission, checks all six controls with the Activity stopped, removes its window afterward, and does not clear preferences or discard document sessions. Its test APK builds; the test has not run on a device. Run this class alone in the isolated test package when the phone is available, rather than the broader `ComposeRegressionTest` setup that clears sessions. If taps still fail, capture the live input-window state and input-dispatch logs to locate the failing boundary before changing production behavior. No production fix or replacement APK has been made for this unresolved symptom.
-
-Deferred follow-up: establish the failed input boundary on the phone, apply the smallest demonstrated fix, then verify details, stepping, continue/pause, dragging and close against real GDB while retaining save/recovery checks. Keep emulator checks excluded. The separately observed terminal-pause literal `\n` has now been corrected in `RunCommands.build()` with a host regression covering the newline and retained program exit status; it still needs verification in the phone's terminal.
-
-## Physical release follow-up - 2026-10-23
-
-This checkpoint supersedes the deferred debugger-input result above. The signed, minified, non-debuggable release was updated through root ADB on the Redmi K20 Pro (Android 11) as `cn.rbc.termuc.devicecheck` / **TermuC Test**. The original `cn.rbc.termuc` installation was retained. The test app's private-data backup is retained locally; no original-app data was changed. Signing uses the available Android development certificate, not a production certificate.
-
-Final APK: `app/build/phone-project-gdb-check/TermuC-Test-0.2.4-release-signed.apk`. SHA-256 `de1f6af3d72644b88a3249b15d63d6a828a4994e488ad383b366fdab9b6a76c5`, verified against the installed base APK. Minimum API 27, target API 34. Signature verification: `signature-final.txt` in the same evidence directory.
-
-Phone testing exposed and fixed these regressions:
-
-- Opening a project with several tabs retained an invalid selected-tab index during synchronous LSP requests and crashed. Reindex the retained tab before restarting document synchronization.
-- Ending GDB with details open retained full-screen window parameters for the next session. Reset compact dimensions, gravity and focus flags when hiding, including while detached.
-- Debugger replies updated the session but could leave visible details stale because Compose skipped the panel whose meaningful inputs had not changed. Pass the immutable session snapshot explicitly, and use the UI revision when obtaining breakpoint rows so checkbox changes also refresh.
-- Reusing a detached Compose overlay could leave the next session unresponsive. Allocate a fresh overlay view for each connection; the phone restart check now opens details and displays frames after the previous session exits with details visible.
-
-Verified physical workflows, with isolated fixtures under `/sdcard/Download/TermuC-phone-check-20261023-1505/a-review-check`:
-
-| Workflow | Result / evidence under `app/build/phone-project-gdb-check/` |
+| Component | Responsibility |
 | --- | --- |
-| C/C++ standalone execution | Expected `C_PASS:9` and `CPP_PASS:9`; `c-terminal.png`, `final-cpp-result.png`. Final APK repeated C++ execution successfully. |
-| Native project | Open, Build executable, Compile object, Run `PROJECT_REVIEW_PASS`; explicit source save and enabled autosave published edits. Newer on-disk compile commands survived project close and reopen; `metadata-after-close.json`, `project-saved.cpp`. |
-| Project discard | With autosave disabled, Close Project prompted for unsaved edits. Discard retained the previously saved source and closed the tabs; `discard-project-confirm.xml`, `project-after-discard.cpp`. |
-| Durable recovery | Two unsaved C/C++ tabs checkpointed, then app PID 10763 was killed with `kill -9`. Relaunched PID 15013 restored both markers. Source hashes remained unchanged across the kill; saving recovered C published it, discarding recovered C++ retained its original source hash. `termuc-recovery-before-kill.tgz`, `recovery-records.json`, `recovery-relaunch-stable.xml`, `recovered-cpp-visible.xml`. |
-| GDB controls and details | Breakpoint at `debug.c:7`; automatic variables, struct children (4 and 5), frames; Step in to `increment`, Step out, Next, Continue/Pause, breakpoint disable/enable, console `bt`, dragging, normal exit, session restart, compact window sizing and Close passed. `step-fixed-frames.xml`, `pair-expanded-ready.xml`, `pause-fixed-frames.xml`, `console-fixed-bt-ready.xml`, `dragged-window.txt`, `fresh-view-breakpoint-off.xml`, `fresh-view-repeat-frames.xml`, `gdb-control-taps.txt`. |
-| Terminal prompt | Pause prompt displays a real newline; program exit status remained zero in the observed successful runs. |
+| `Languages` | File types, highlighters, runtime/server selection and native-only GDB eligibility |
+| `RunCommands` | Immutable command plans, required tools, literal arguments and working directories |
+| `RunController` / `RunResultReceiver` | Preparation, probes, cancellation, correlated Termux results and observable execution status |
+| `Utils.run` | Existing RUN_COMMAND transport for execution, language servers, debugging and setup |
+| `WorkspaceSession` / `HeaderAdapter` | Path-based selection, tab order, project transitions and pending close operations |
+| `MainActivity` / `EditFragment` | Android lifecycle, editor hosting, user actions and presentation of results |
+| `DocumentSessions` / `DraftStore` | Dirty revisions, document ownership and durable private checkpoints |
+| `DocumentSaver` / `SourceWriter` | Serialized background writes, revision-aware completion and source publication |
+| `Project` / `RunConfiguration` | Project commands/snapshots and private per-scope run/environment overrides |
+| `LanguageServers` / `Lsp` / `MainHandler` | Server sessions, protocol messages, capability/revision guards and editor updates |
+| `DebugSession` / `DebugPanel` | GDB transport/MI state and Compose overlay presentation |
+| `LanguageToolInstaller` | Explicit setup confirmation, pending callbacks and post-install verification |
 
-All 198 host tests passed across 23 suites, with zero failures, errors or skips (`host-final.txt`). Added regressions cover retained project-tab selection, compact-window reset, visible inspection replies and breakpoint state, and fresh overlay views per connection. The final signed release build passed (`build-final.txt`). Autosave was restored to its original enabled setting. No GDB or tracing process remained at the final check.
+Sora supplies rendering/input; inherited `codeeditor` utilities retain document, undo, lexer and completion behavior. No separate runtime module, embedded terminal, DI framework or plugin framework is required.
 
-Limitations: no emulator checks; no power-loss test or guarantee for an edit before its draft checkpoint. Provider-failure and close/rotation race cases retain host coverage and were not forced on the phone. This was a representative C/C++ and debugger check, not an exhaustive language-server or accessibility audit. Overlay permission was observed reverting after package updates and was re-enabled for the test app before final checks. Build outputs, device backups and test evidence remain local ignored artifacts.
+## Execution and workspace boundaries
 
+Capture the entry, action, project configuration, directory and arguments before asynchronous preparation. Open/save the entry through the normal document path, reload project configuration into a validated snapshot, probe tools/source access in Termux, then revalidate the document owner/revision and context before dispatch. Failed saves, newer edits, switched contexts and stale callbacks must not execute a different file or clear recovery.
 
-### Language tools and shared Python environments
+Generated paths/arguments are passed positionally, not interpolated into shell source. Explicit project commands and compiler flags remain user-authored shell configuration. Native Run/Debug capture program arguments before expanding commands and append them once. Terminal pause wrappers preserve the program exit code and use real newlines.
 
-The main overflow menu exposes language-server status and explicit restart using existing application-owned sessions and UI refresh callbacks. Preflight runs through the shared command planner/result parser and private receiver; its one-shot callbacks use a separate URI scheme from execution callbacks. Closing/restarting a session cancels outstanding checks. Missing tools, timeout, initialization failure and disconnection remain visible without interrupting typing.
+C/C++ retains compilation, artifact staging and GDB. Python invokes the resolved interpreter; standalone scripts default to their source directory. Java uses the JDK's UTF-8 source-file launch with `jdk.compiler`, without adding a compiler/main-class discovery pipeline. Existing project commands remain authoritative for every language.
 
-`RunConfiguration.pythonEnvironment` stores an optional existing venv folder alongside existing overrides, without changing project files or recovery storage. Environment scope is the active project root or actual source folder; browser-folder run arguments retain their existing scope. Relative environment paths resolve against that displayed scope. Editing run arguments preserves the environment. Python probes pin `<environment>/bin/python` and refuse a missing selection; default Python is rediscovered rather than reusing an old cached venv. The same interpreter launches pylsp and configures Jedi's environment. Both probing and launch suppress environment-driven Python initialization with `-E -S`, remove the initial workspace import path, then explicitly load `site` so installed venv and normal user-site packages remain available. Tool processes remove inherited `PYTHONPATH`/`PYTHONHOME` before starting child tools. Workspace roots still travel through LSP initialization; ordinary program execution is unchanged. Existing project commands inherit `PATH` and `VIRTUAL_ENV`; standalone native and Java paths remain unchanged. No environment creation, automatic installation or Java server was added.
+Run configuration is private per project root or browser folder. Relative overrides resolve against that scope; explicitly relative project executables keep their project location when the runtime directory changes. Build/Compile retain their selected file and preparation directory. Python environment selection uses the displayed project/source scope and is shared by execution and pylsp.
 
-CI coverage includes configuration persistence/rollback, interpreter selection, no fallback, environment exports, server status/cancellation, dialog restoration/save failure, and real pylsp package completion from an environment-only module alongside recovered unsaved text. Startup regressions use hostile workspace modules, poisoned Python environment variables, an environment with no server installed, and a normal user-site installation. Local Gradle, builds, tests and device checks remain skipped for this delivery; GitHub Actions supplies build/test evidence. Termux bridge/environment behavior still requires physical-device verification.
+The Application-owned controller survives Activity recreation and distinguishes preparation, dispatch, completion, failure and unknown status. Probes have bounded waits; interactive programs may run indefinitely. Cancellation stops preparation, not a dispatched Termux process. After app process death, pending-status metadata reports uncertainty rather than replaying execution.
 
-### Java server host evaluation
+Workspace close completion waits for a resumed host and mutable FragmentManager state. Project-save failure keeps the project open; changed tab/session revisions cancel closing. Auto-save pauses throughout closing, and a later explicit save cancels the pending close. Rotation can retain a confirmed decision; process-death restoration recreates prompts without replaying an in-memory Discard approval.
 
-The separate `Java LSP evaluation` GitHub workflow compares George Fraser's server packaged as JARs, without its desktop JDK, against JDT LS 1.63.0 (verified archive SHA-256). The original baseline pins upstream `58daaa29a0e2fe22764283607da6801cf8b493b9`; the current harness pins the [AM-RTS evaluation fork](https://github.com/AM-RTS/java-language-server/tree/codex/termuide-fixes) using the shared build and revision pin in `tools/java_lsp/`; recorded comparisons below retain their exact historical revisions. It runs on x86-64 and ARM64 Ubuntu with the same Temurin 25 JDK, 64 MiB initial heap, 256/512 MiB maximum heaps, G1 GC, and two JVM-visible processors. Each server/heap has one process trial plus a restart; five repeated completion requests supply a small warm-latency sample. Filesystem caches are not reset. This is a bounded comparison, not a statistical performance study.
+## Durable recovery and source saves
 
-The stdlib-only harness in `tools/java_lsp_evaluation` records server archive/file sizes separately from the full host JDK, initialization response time, time to first useful completion, warmed request latency, Linux JVM RSS/high-water mark, and workspace-cache size. Shared plain-Java fixtures cover UTF-16 positions, String members, generic element types, sibling classes, a dependency JAR, records, unsaved cross-file changes, semantic diagnostics, and reopening unsaved text after restart. Sources remain unchanged; this does not exercise the app's draft store. Maven/Gradle importers are disabled. Server preparation skips Maven tests when packaging; the fork's separate CI runs its regression tests and Java suite. The original upstream baseline was packaged without running its own suite in the comparison job. Missing completion results and startup errors are recorded as candidate failures rather than blocking the other candidate's evaluation.
+`DocumentSessions` owns dirty state and source-load guards. `DraftStore` records text/metadata independently of the editor, including UTF-16 text. Checkpoints run while typing and on backgrounding. A failed snapshot/write preserves the preceding valid checkpoint and reports failure; incomplete/corrupt records do not hide valid drafts. A source-read failure blocks saving until a full reload, including after recovery.
 
-The workflow uploads raw protocol/stderr logs, JSON measurements, and a summary table. Direct LSP compatibility does not establish compatibility with TermuIDE's adapter, Termux/bionic, Android process limits, battery use, or phone typing responsiveness. A server selection requires reviewing the host results and, later, a physical-device check. The evaluation does not enable Java LSP in the app or change C/C++, Python, source saving, or durable recovery.
+`DocumentSaver` flushes recovery before replacing a source. Save points include owner identity and revision; finishing an older save cannot mark newer typing or a reopened document clean. Rejected workers clear pending entries. Run/Build/Debug and Save-before-close await the result.
 
-The initial host run exposed George's line-based package detection: a valid `package demo; public class Helper ...` line was treated as having no package, making sibling classes and records unavailable. The follow-up uses conventional separate package lines for the main checks and retains a dedicated one-line-package case. Cold first completion gets up to 20 seconds to become available; later small-fixture checks retry for up to five seconds. Peak RSS includes these retries, and is not a fixed-workload memory benchmark when candidate checks differ.
+`SourceWriter` publishes local files via synced staging and atomic replacement, resolving symlinks and retaining supported permissions. Termux providers use synced staging, an original backup and a private journal. If publication fails, rollback restores the original; if rollback also fails, the journal/backup remain for restoration on the next open. Providers must support rename; there is no truncate-in-place fallback.
 
-Each primary process is observed for at least 30 seconds so fast successful checks do not end memory sampling while initial background indexing is still beginning. This is a common observation window, not proof that all indexing has become idle.
+After successful publication, staging/backup cleanup is best effort and must not report that save as failed. If a retained backup cannot be removed before the next save, that write fails safely and newer edits remain recoverable. Cleanup can be retried on a later save.
 
-Original upstream host results, 2026-10-29: [final GitHub run 40927094709](https://github.com/AM-RTS/TermuIDE/actions/runs/40927094709), benchmark code `2285c7d`. Both architectures used Temurin 25.0.5+8. Protocol harness checks passed; server quality failures are recorded in the artifacts despite the workflow completing successfully. No app builds or regression suite were run for this benchmark-only branch.
+`SourceWriter` deliberately retains `.termuc-*` staging names so existing interrupted saves remain recoverable. App identity is `amrts.termuide`; projects use `termuide.json` only. Renaming does not migrate another application's private drafts/settings.
 
-| Server | Heap cap MiB | Checks on both architectures | Peak RSS MiB, ARM64 / x86-64 | First useful completion ms, ARM64 / x86-64 | Warm median ms, ARM64 / x86-64 |
-| --- | ---: | --- | --- | --- | --- |
-| George | 256 | 9/11 | 159.93 / 167.65 | 799 / 1011 | 19.38 / 15.81 |
-| JDT LS | 256 | 11/11 | 567.31 / 584.45 | 3541 / 5046 | 12.73 / 29.01 |
-| George | 512 | 9/11 | 228.03 / 236.36 | 771 / 990 | 14.80 / 16.16 |
-| JDT LS | 512 | 11/11 | 769.09 / 809.54 | 3217 / 3608 | 12.26 / 18.32 |
+Recovery does not guarantee edits before their checkpoint, device power-loss durability, or survival of clearing app data/uninstallation. Drafts are excluded from Android backup.
 
-Server-only file sizes: George's JARs total 3,329,528 bytes, packaged archive approximately 3.10 MB; JDT LS files total 54,795,630 bytes, official archive 51,143,565 bytes (decimal MB). Both exclude the JDK. The full Linux JDK installation measured approximately 318 MB on ARM64 and 371 MB on x86-64; these are host installations, not Termux download estimates. JDT's measured configuration/metadata folders grew to approximately 54.4 MB. George wrote no files to the harness's measured configuration/metadata folders; this is not a whole-filesystem cache audit.
+## Language servers
 
-George passed member completion with supplementary Unicode before the caret, generic element resolution, normal cross-file completion, external-JAR completion, record accessors, diagnostics, and reopening unsaved content after restart. Its two reproducible failures were:
+`LanguageServers` lazily owns sessions keyed by server and normalized project/folder root. C/C++ share clangd; Python uses pylsp; Java uses the optional `termuide-java-lsp`. Each session has its own port, capabilities, request IDs and open-document set. Allocation avoids immediately reusing a shutting-down bridge. All reuse the Termux netcat stdio bridge; closing the last tab stops its session.
 
-- After changing an open sibling method from `greeting` to `farewell` without saving, completion in the current file continued to return `greeting` and omitted `farewell`. A fresh process with the same unsaved contents returned the new method. This is stale analysis, not lost draft text.
-- A valid one-line `package demo; public class Compact ...` declaration was not available for cross-file completion. The pinned upstream `StringSearch.packageName` scans whole lines using a regular expression that does not handle this layout. Conventional separate package lines work.
+Messages carry their source LSP/generation. Shutdown invalidates queued events and completions; requests and results use document versions/revisions. Reconnect/restart reopens actual live buffers, including recovered unsaved text, without force-saving them. Unsupported capabilities are suppressed; only clangd receives fallback compiler flags. Framing bounds headers/body allocation and validates UTF-8 lengths; initialization has a deadline.
 
-JDT LS passed all eleven small-fixture checks at both heap limits on both architectures. George is a promising smaller server, but these failures need investigation before adoption, especially the unsaved cross-file analysis. Do not force-save drafts to conceal the stale-analysis issue. JDT is the more complete tested candidate here, with a substantially higher observed startup/indexing memory cost. Neither result establishes large-project scaling, production Android compatibility, or a final server choice. Raw JSON, protocol traces and stderr are available as `java-lsp-ubuntu-24.04-1` and `java-lsp-ubuntu-24.04-arm-1` artifacts on the linked run.
+The editor uses UTF-16 offsets. The adapter converts pylsp/Jedi code-point positions unless the server explicitly negotiates another supported encoding. Completion edits remain undoable; workspace edits validate every affected open-document revision, reject another session's buffers, and preserve drafts on stale responses. Diagnostics hide messages from older revisions.
 
+Python tooling excludes workspace imports and poisoned Python environment variables during startup, then loads installed packages. A selected missing environment/server never falls back to global Python. Normal script execution keeps its environment; project commands inherit the selected `PATH`/`VIRTUAL_ENV`.
 
-### Java server fork fixes
+### Optional Java server
 
-The evaluation fork keeps the upstream server and compiler machinery. It tracks the workspace sources actually parsed by javac, including implicit sibling dependencies. When a retained dependency changes, closes back to disk contents, or leaves the source index, the next operation rebuilds the compiler context instead of using its stale symbols. Explicit compilation roots continue to use javac's existing re-entry path. The compiled-task cache also checks retained dependencies. Index-deletion checks do not read missing metadata back from disk, preserving deletion notifications and their diagnostics.
+The tools bundle uses the [AM-RTS fork of George Fraser's server](https://github.com/AM-RTS/java-language-server/tree/codex/termuide-fixes), pinned by [`tools/java_lsp/revision`](../../tools/java_lsp/revision). Packaging includes JARs, launcher, notices and a separate corresponding-source archive, not a JDK. The launcher selects exactly JDK 25 with compiler exports, limits heap to 256 MiB and uses the default GC for Termux ARM32 compatibility. This does not switch ordinary Java execution's runtime.
 
-Package indexing retains a fast path for a conventional first package line and uses the existing Java parser for compact, commented, or otherwise nonstandard layouts. The fallback reads an explicit content snapshot before file metadata exists, avoiding recursive indexing. Parsed-tree cache invalidation compares modification values for inequality so switching from an indexing snapshot to a live document cannot keep an older tree.
+The app supplies a root classpath before opening buffers; automatic Maven/Bazel import is disabled. Only completion and diagnostics are enabled. Analysis uses JDK 25 APIs; target-release and extra classpath controls are not exposed.
 
-The two original LSP regressions were observed failing on the upstream implementation before the fixes. The fork adds coverage for unsaved dependency renaming, closing that buffer without saving, compact packages, and editing a compact file immediately after indexing. The pre-existing class-deletion regression caught an intermediate invalidation bug; it remains part of the full suite. No force-save workaround, app dependency, Java server configuration, C/C++ or Python behavior, or durable-recovery path is changed.
+The fork invalidates retained javac dependency symbols when live siblings change/close/delete. Package metadata follows unsaved text, including initially empty files and compact package declarations; package changes recreate compiler state. Diagnostics recheck all open Java documents after edits/closure. Completed browser create/rename/delete operations restart affected Java roots only. No continuous filesystem watcher is added; external changes may need manual restart. Large-open-tab analysis cost remains unmeasured.
 
+## Tool installation
 
-Fixed-fork validation, 2026-10-29: [fork CI 40930254402](https://github.com/AM-RTS/java-language-server/actions/runs/40930254402), source `4b3835cf`. The three focused LSP tests passed. The full Java suite reported 248 tests, zero failures/errors, and ten existing skips (238 executed successfully), including the existing deletion-diagnostic regression. Both the upstream-baseline and fixed-fork parser/pruner benchmark jobs completed. Earlier failing/intermediate runs are retained; only this final revision is the delivery result.
+`LanguageToolInstaller` reuses RUN_COMMAND, result callbacks and background preflight. Pending tokens/scope/server/environment survive process death; reconstructed jobs show uncertainty. **Stop waiting** cancels app tracking/timeout without killing Termux, and late callbacks are ignored. A Termux `flock` prevents overlapping installers. Setup never owns or mutates document/save state.
 
-[Host comparison 40930279775](https://github.com/AM-RTS/TermuIDE/actions/runs/40930279775), harness `7f9e713`, verifies the pinned fork provenance in `preparation.json`. George now passes all eleven checks on both architectures at both heap caps, including unsaved cross-file edits and one-line packages. Server JARs total 3,330,872 bytes; archives are approximately 3.10 MB, excluding the JDK.
+Python setup targets the selected interpreter, clears inherited `PIP_*`, disables pip config files and uses isolated mode. Verification requires pylsp inside that interpreter's installation directory. Custom indexes/configuration use manual installation.
 
-| Server | Heap cap MiB | Checks, ARM64 / x86-64 | Peak RSS MiB, ARM64 / x86-64 | First useful completion ms, ARM64 / x86-64 | Warm median ms, ARM64 / x86-64 |
-| --- | ---: | --- | --- | --- | --- |
-| Fixed George | 256 | 11/11 / 11/11 | 181.89 / 170.60 | 800 / 1015 | 19.44 / 14.85 |
-| Fixed George | 512 | 11/11 / 11/11 | 182.84 / 199.56 | 809 / 711 | 18.53 / 19.28 |
-| JDT LS | 256 | 10/11 / 11/11 | 575.09 / 582.16 | 3168 / 4795 | 8.46 / 14.79 |
-| JDT LS | 512 | 11/11 / 11/11 | 768.07 / 796.70 | 3347 / 2979 | 11.10 / 24.99 |
+Java setup preserves the registered runtime selection and detects incompatible old alternatives metadata before JDK mutation. It searches the latest 20 public releases for a matching pinned tools archive, requires its GitHub SHA-256 digest, and rejects traversal, links, duplicates and oversized archives. A fresh extracted launcher must pass preflight before the symlink is replaced. Existing tools remain on failure; old successful folders remain available for rollback. Branch CI artifacts are not public release assets, so fresh guided installation requires a matching published bundle.
 
-JDT's ARM64/256 MiB trial retained `greeting` instead of returning `farewell` throughout the five-second unsaved-edit retry window (24 requests). Other trials and earlier runs passed this check. The cause is uninvestigated; do not treat its baseline perfect score as a stability guarantee or infer a general superiority ranking from these single trials. George's fixed result is reproducible in the focused tests and this bounded comparison, not proof that every Java IDE feature is complete.
+## Debugging
 
-Existing microbenchmarks, baseline / fixed throughput in operations per second: parser 726.790 / 699.658; plain compilation 136.520 / 129.599; pruned compilation 710.633 / 669.049; plain parsing 772.034 / 753.061. Their wide reported uncertainty intervals overlap; these small samples do not establish a performance improvement or regression. They also do not measure completion, indexing, or cross-file cache invalidation; the direct-LSP comparison supplies that limited behavioral evidence.
+`DebugSession` parses GDB MI into immutable snapshots independently of the Activity. Token-correlated replies tolerate interleaved async events and out-of-order responses. Stop/run transitions invalidate stale variable/frame requests; variable objects are cleaned up. Breakpoint controls use GDB-assigned IDs and quoted MI arguments.
 
-The host fixes make the smaller server a viable candidate for the next integration step. They do not enable Java autocomplete in TermuIDE, validate Termux/bionic or the app adapter, or exercise Android process death and draft recovery. Local builds, tests, Gradle, and phone/emulator checks remain skipped. A later Termux check must use a compatible JDK 25 with the required compiler exports and verify the actual app bridge before making a device-support claim.
+`DebugPanel` renders snapshots on the main thread, ignores closed-session callbacks, resets compact sizing and creates a fresh overlay per connection. The console enables IME focus only while visible, including when detached. System input routing still needs physical-device evidence; direct Compose touch tests alone cannot establish it.
 
+## Verification records
 
-### Optional Java LSP integration - 2026-10-30
+These are historical checkpoints, not assertions that later assets/docs were tested.
 
-`Languages` now routes Java to a separate `LanguageServers` session, reusing `RunCommands` preflight, the existing stdio bridge, and LSP document/revision handling. Java status/restart uses the existing Material 3 language-tools dialog. The optional `termuide-java-lsp` launcher requires JDK 25, independently of Java execution’s existing runtime requirement. Python environment drafts or configuration errors do not disable Java/native restart controls.
-
-GitHub CI packages only the pinned fork JARs, launcher, and licenses; no JDK or server goes into the APK. The existing host comparison uses the same build and revision file. The prerelease workflow is configured to attach the tools and corresponding server source archives alongside the signed APK, with checksums. The launcher selects Termux’s installed JDK 25 without switching the program-execution runtime, caps heap at 256 MiB, clears tooling-specific Java option/classpath environment variables, and uses the VM’s default GC because Termux disables G1 on 32-bit ARM.
-
-The app sends an explicit root classpath before opening Java buffers, keeping this phase out of automatic Maven/Bazel import. Only completion and diagnostics are enabled; Java navigation, formatting and rename stay disabled pending separate adapter validation. Analysis uses JDK 25 APIs; target-release and additional dependency-classpath controls are not yet exposed. The fork honors absent/false snippet capability by returning plain method names and registers newly opened siblings even without desktop file-watcher notifications.
-
-The host integration fixture runs the real server behind a socket/stdio bridge using the actual app transport, handler and editor completion UI. It begins with an unsaved recovered Java buffer, checks UTF-16 insertion after an emoji, edits an open sibling without saving, requests updated completion, receives semantic diagnostics, and checks recovery text plus unchanged source files. Launcher tests cover incompatible/missing compiler runtimes, independent Termux JDK selection, bounded heap and quoted paths. Existing C/C++/Python, project/save and recovery checks remain in the app suite. Physical Termux transport and phone responsiveness remain unverified; all local builds, Gradle, tests and device/emulator checks remain skipped.
-
-
-Validation: [app CI 40935641192](https://github.com/AM-RTS/TermuIDE/actions/runs/40935641192), functional/tooling commit `f334717`, passed all 260 host tests with no failures, errors, or skips, including the real Java adapter/recovery test. The Android debug APK compiled successfully. Four launcher checks passed in CI. The generated optional binary archive was 3,124,909 bytes; its checksum, JAR-only runtime contents, license texts, and source provenance were inspected. The separate source archive was 4,743,385 bytes and its checksum also matched. Neither contains a bundled JDK.
-
-Pinned server `d9dc7947c76d21d01f56340e18ccae81880f195a`: [fork CI 40935244811](https://github.com/AM-RTS/java-language-server/actions/runs/40935244811) reported 250 tests, zero failures/errors and ten existing skips (240 executed successfully); focused regression and existing parser/pruner benchmark jobs also passed. New regression cases were observed failing before fixes for plain-text completion capability and new sibling discovery. An earlier app fixture failed because its buffered process-input stream was not flushed; correcting that host-only bridge allowed the actual adapter check to run. An order-dependent Python-status assertion was updated to select its server explicitly.
-
-The implementation is on `codex/java-lsp-integration`. The prerelease workflow's new optional archive/source attachment path is configured but has not been published from master in this task. No local Gradle/build/test, phone, emulator, signed release publication, or installation checks were run. Host results do not establish Android process-death, Termux/bionic transport, large-project memory use, or phone responsiveness.
-
-
-### Java merge-review fixes - 2026-10-30
-
-The fork now batches active-buffer package metadata changes and refreshes them before analysis with the existing package parser. A changed package invalidates the compiler service; closing/discarding a buffer restores its disk metadata. Background diagnostics recheck all open Java documents after edits and closure, including otherwise untouched dependents. This favors correct diagnostics over a new dependency-tracking framework; large-open-tab and phone performance remain unmeasured.
-
-Browser create/rename/delete callbacks use `LanguageServers`' existing restart/reopen path for affected Java roots only, including ancestor-directory mutations and both sides of a rename. Delete completion invalidates even after partial failure because some children may already be gone. Document sessions, save ownership, dirty drafts, and native/Python sessions remain intact. This deliberately hooks completed browser operations rather than low-level `FileHelper` calls used by staged saves. It does not add a continuous filesystem watcher; external changes can still require a manual Java restart.
-
-The optional tools pin advances to `917d14ffb1fe542b5aeb0262f14ccef6e27b03f5`; install the matching tools archive to receive server-side fixes. New fork regressions were observed failing before the fixes for recovered package declarations, packages typed into initially empty files, and dependency-only diagnostics. They now cover package movement/discard and error clearing after discarded helper edits. The app's browser regression was also observed failing before callback wiring. Its coverage includes file creation, closed-sibling rename/delete, Java-only restart isolation, directory-boundary matching, and unchanged dirty recovery/source text. The real Java adapter test now opens an unsaved recovered helper whose source file is empty and requires a diagnostic naming the current invalid identifier.
-
-
-Final verification: [app CI 40940103047](https://github.com/AM-RTS/TermuIDE/actions/runs/40940103047), functional/test commit `5bb5db7`, passed all 262 app host tests with no failures, errors or skips and compiled the Android debug APK. The actual Java adapter/recovery check and browser mutation/recovery check both executed successfully. [Fork CI 40939268982](https://github.com/AM-RTS/java-language-server/actions/runs/40939268982), revision `917d14ff`, reported 253 tests with zero failures/errors and ten existing skips (243 executed successfully); focused regressions and baseline/current parser/pruner benchmark jobs passed. These microbenchmarks do not measure the new all-open-document diagnostic workload, and no performance improvement is claimed.
-
-All three merge-review findings are addressed on `codex/java-lsp-integration`; no master merge, release publication, local build/test/Gradle execution or phone/emulator check was performed. Existing C/C++ and Python behavior plus durable-recovery checks remain covered by the app suite. Termux transport and large-project/phone performance remain unverified.
-
+- [App CI 41276363192](https://github.com/AM-RTS/TermuIDE/actions/runs/41276363192), `4c7c8b9` (November 1, 2026): 276 app host tests, zero failures/errors/skips; 14 installer and four launcher checks; debug/minified release builds and v2/v3 signature verification passed. Includes cleanup/rollback failure, checkpoint recovery, revision-aware saving, project close, LSP, installer callbacks and real pip isolation. Numerical branch coverage, mutation strength and repeated-run flake rates remain unmeasured.
+- [Server CI 40939268982](https://github.com/AM-RTS/java-language-server/actions/runs/40939268982), `917d14ff`: 253 tests, zero failures/errors, ten existing skips; focused regressions and parser/pruner benchmarks passed. Benchmarks do not measure the all-open-document diagnostic workload.
+- October 23, 2026: isolated `cn.rbc.termuc.devicecheck` release on Redmi K20 Pro/Android 11 verified C/C++ Build/Compile/Run, project save/discard, process-death draft recovery and GDB stepping, frames, variables, breakpoints, console, dragging and reconnect. This follow-up superseded an earlier unresponsive-overlay observation. Local evidence: `app/build/phone-project-gdb-check/`.
 
 ### Java physical-device verification - 2026-10-30
 
-[CI 41026228285](https://github.com/AM-RTS/TermuIDE/actions/runs/41026228285), commit `638d555`, passed all 262 app host tests (zero failures/errors/skips), the four launcher checks, debug APK compilation, and the minified signed release build/signature verification. The branch workflow now retains both APKs for device verification without merging or publishing a release. The separately tested server revision remains `917d14ff`.
-
-The signed release installed in place on a Redmi K20 Pro running Android 11/API 30, preserving the installed application's data. The optional tools bundle from CI 41020135613 uses that same pinned server revision. Termux OpenJDK 25.0.5 was installed alongside the existing JDK 17.0.15; `java` and `javac` still default to 17. Installing into this older Termux environment exposed independently registered Java alternatives conflicting with the newer package's grouped alternatives. Their metadata was backed up and the JDK 17 tools consolidated into the group before configuring JDK 25. Root-staged files needed their normal Termux SELinux labels restored; the app then passed the Java preflight and reached Ready through its actual RUN_COMMAND/netcat bridge. These were environment setup issues, not server fallbacks or disabled SELinux enforcement.
+[App CI 41026228285](https://github.com/AM-RTS/TermuIDE/actions/runs/41026228285), `638d555`, supplied the signed TermuIDE release installed in place on Redmi K20 Pro/Android 11. Server pin: `917d14ff`; Termux analysis JDK 25.0.5 alongside the existing default Java/Javac 17.0.15. Old alternatives metadata needed repair and root-staged files needed normal SELinux labels; SELinux enforcement was not disabled.
 
 | Physical check | Observed result |
 | --- | --- |
-| Unsaved package/class in an initially empty Helper.java | Main offered `greeting`; selecting it updated the editor; completing the call cleared the Java diagnostic. Helper's source remained empty throughout this check. |
-| Dependency-only change | Changing Helper's method to `farewell` produced a missing-`greeting()` diagnostic in untouched Main. Restoring the method cleared it. |
-| Process death | Killing the app process and relaunching restored both dirty Java buffers and their exact edited text. The restarted Java session analyzed them again. |
-| Close/discard | The picker offered Save/Discard/Cancel. Discarding a dirty Helper restored its saved declaration for dependent analysis and cleared Main's error. |
-| Browser rename/delete/create | Each operation replaced the affected Java process. Rename/delete produced the expected missing-Helper diagnostic in dirty Main; renaming back cleared it. Dirty Main survived each restart. |
-| Execution regression smoke checks | C, C++, Python and packaged Java each printed their distinct success marker from the app's Run action and returned exit 0. The exit prompt used actual newlines. Java execution continued to use the existing JDK selection. |
-| GDB regression smoke check | A line breakpoint stopped main; Next advanced the frame from line 4 to 5; variables and frames displayed; the focusable console accepted `print count` (returned 0) and `set variable count=120`; Continue completed the program and removed the overlay. |
-| Cleanup | Only test tabs/files were removed. Existing user tabs remained, Auto-save was restored, and closing the last Java tab stopped the Java process. The signed branch build and installed Java tools remain on the phone. |
+| Java completion and diagnostics | Unsaved package/class in an empty Helper.java supplied Main's completion; dependency-only changes produced/cleared diagnostics without saving. |
+| Durable recovery | App kill/relaunch restored both dirty Java buffers exactly and analysis resumed. Discard restored disk declarations. |
+| Browser mutations | Create/rename/delete replaced only affected Java sessions while preserving dirty Main. |
+| Console execution | C, C++, Python and packaged Java printed expected markers and returned exit 0; the terminal prompt used real newlines. |
+| GDB | Breakpoint, Next, variables, frames, console assignment, Continue and overlay removal worked. A nonblocking controlling-terminal permission warning remained in raw MI output. |
 
-GDB printed a controlling-terminal permission warning as raw MI text in the Termux terminal, but breakpoint/stepping/console/continue checks succeeded. This smoke check does not establish every GDB control or terminal scenario. No new application defect was reproduced by the checks above. Physical Python LSP completion, large-project/all-open-tab latency, long-running battery behavior, and other Android devices/ABIs were not tested. Host CI retains the Python integration and broader save/recovery regression coverage. Local Gradle/builds/tests and emulator checks stayed skipped; no master merge or prerelease publication was performed.
+Fixtures were removed and prior tabs/auto-save restored. These checks predate guided installation; that installer has not been exercised on the phone. Python LSP on-device completion, all GDB controls in this build, large-project responsiveness, battery use, other devices/ABIs, power loss and mid-checkpoint kills remain unverified. Recovery kills occurred after checkpointing. Existing screenshots are from this session.
 
+## Java server evaluation
 
-### Guided language-tools setup - 2026-10-30
+The fixed George Fraser fork was selected for optional Java completion/diagnostics because its smaller package and lower observed host memory use suited the initial scope. The [October 29, 2026 comparison](https://github.com/AM-RTS/TermuIDE/actions/runs/40930279775) (harness `7f9e713`) tested it against JDT LS 1.63.0 on ARM64/x86-64 Ubuntu with Temurin 25.
 
-Language tools adds an explicit Install/Repair confirmation for each server. The existing Termux RUN_COMMAND runner owns the visible package-manager terminal; the app reuses its result PendingIntent and background dependency probe, then restarts only the captured server/root. Python setup targets the saved resolved environment and refuses missing environments instead of installing globally. Setup never calls document saving or changes recovery records. The existing Material 3 dialog supplies saved confirmation state, minimum touch targets, readable status and error announcements.
+| Measurement | Fixed George fork | JDT LS |
+| --- | --- | --- |
+| Server archive, excluding JDK | About 3.10 MB | About 51.14 MB |
+| Peak host RSS at 256 MiB heap cap | 171–182 MiB | 575–582 MiB |
+| First useful completion at that cap | 0.80–1.02 seconds | 3.17–4.80 seconds |
+| Small-fixture checks at that cap | 11/11 on both architectures | 10/11 on ARM64; 11/11 on x86-64 |
 
-`LanguageToolInstaller` owns the single pending setup callback and observable UI status. Its token/root/server/environment persist across process death; a reconstructed owner reports uncertainty until a callback arrives. Probe requests have the existing runtime timeout, while interactive installs have no automatic timeout. A Termux `flock` prevents overlapping package/archive changes even after the Android app process dies. Unknown jobs can be retried after checking Termux; failure messages remain in that terminal. No new package-manager UI, root dependency, document/session owner, or dependency framework is introduced.
+JDT's failed check retained a stale sibling method during the five-second retry window; other trials passed, and the cause was not investigated. These were single process trials plus restart, with build-tool import disabled. They do not establish general server quality, large-project scaling or phone memory/latency. The linked run retains detailed measurements and logs; actual app/device verification is recorded above.
 
-The bundled setup scripts use Termux apt and the selected interpreter's pip. JDK 25 installation restores the previously registered Java selection on exit. Older independently registered Java alternatives are detected before package mutation and require updating the existing OpenJDK package in Termux before retrying. Java server discovery uses GitHub's public releases API, includes prereleases, and searches the latest 20 releases for the app's pinned source revision. Downloads require a GitHub SHA-256 asset digest; extraction rejects links, path traversal, duplicates and oversized archives. A new launcher passes preflight before its symlink is replaced atomically. Failed or incompatible downloads preserve existing tools. Old successful tool directories remain available for rollback.
+## References
 
-A branch CI artifact is not a public release asset: fresh Java-server installation requires publishing a matching tools prerelease. Setup reports this absence instead of installing an incompatible server. The source revision resource is read from the existing tools pin at build time. CI checks installer scripts with fake package managers and release fixtures, callback/probe ownership with Robolectric, and confirmation/environment/busy UI state with Compose. Local Gradle/builds/tests remain skipped.
-
-
-Verification: [CI 41034109234](https://github.com/AM-RTS/TermuIDE/actions/runs/41034109234), implementation commit `37d868d`, passed all 268 app tests with zero failures/errors/skips, 12 installer-script checks, and four Java launcher checks. Both debug and minified signed release APKs built successfully, with APK v2/v3 signature verification passing. The test-report artifact confirms all five `LanguageToolInstallerTest` methods and the saved-confirmation/environment/busy Compose regression executed. The shared Termux launch helper now rejects an unresolved service immediately; setup also preserves Termux error messages returned without an exit code. Fresh matching-archive extraction, integrity failures, rejected archive entries, selected-environment behavior, old Java alternatives and restoring Java selection are checked in CI fixtures. The latest public prerelease still has no Java tools archive; a matching archive must be published before fresh Java downloads can succeed. This installer change has not been installed or exercised on the physical phone. No local Gradle/build/test or emulator check was run, and the branch remains unmerged.
-
-
-### Installer review follow-up - 2026-10-30
-
-Stop waiting abandons the app's pending installation/verification callback, removes its timeout, and unlocks the controls without claiming setup succeeded or killing Termux. Late results from the abandoned job are ignored. A cancelled-tracking status remains visible across scopes, while the existing Termux flock continues to prevent overlapping installers. This also lets a reconstructed UNKNOWN job be abandoned explicitly.
-
-Python setup clears inherited PIP_* settings, disables pip configuration files with PIP_CONFIG_FILE=/dev/null, and invokes pip's own isolated mode as well as Python's -I. This protects pip and build subprocesses from destination overrides. The post-install check requires pylsp's resolved module path to be inside that interpreter's purelib directory; an already importable external copy cannot claim a successful repair. Manual setup is still available for custom pip/index configuration. No document save/recovery ownership changes are involved.
-
-Regression cases were added for lost/late callbacks, verification timeout cancellation, the recovery button across scopes, real pip with a local wheel under poisoned destination/config settings, and rejection of an external module. Per the user's instruction, these new checks were not executed, no local Gradle/build/test or phone/emulator checks were run, and no CI run was triggered for this follow-up. The earlier green CI record above predates these fixes.
-
-
-### Test-quality follow-up - 2026-10-30
-
-The print-only GapIntSet demo was replaced with JUnit tests under the app's existing host-test task. All eight original shift examples now assert expected results, with additional membership/toggle/clear checks. Indexed reads are asserted before getData materializes the lazy gap. No editor-library dependency or additional test task is required.
-
-The pure TextBuffer slicing/checkpoint scenario moved from ComposeRegressionTest instrumentation into EditorCheckpointTest with every assertion retained and fixed edit timestamps. Device tests keep the Android-specific workflows. Continuous-typing recovery now uses a bounded background producer, a coordinated start/stop, and a five-second wait for an actual persisted dirty checkpoint while typing remains active; it no longer requires checkpoint completion inside a 350 ms observation window. It still exercises the real recovery scheduler and filesystem rather than claiming fully virtual-time determinism.
-
-Only test sources changed in this follow-up. The earlier uncommitted installer fixes remain separate and intact. Per the existing skip instruction, tests/builds/Gradle/device checks were not run and no CI run was triggered. Branch coverage and mutation strength remain unmeasured; these edits do not establish a numerical test-quality score.
-
-### Save-failure regression follow-up - 2026-11-01
-
-Provider backup-cleanup failure is now covered through DocumentSaver: publication still completes successfully and marks the saved revision clean; a subsequent blocked save preserves the published source and checkpoints newer unsaved edits for reconstruction. Once cleanup is available, retry publishes those edits and removes the staging files and journal. A second regression covers failed publication plus failed rollback: the original remains in the journaled backup and can be restored on the next open before retrying the save.
-
-The adjacent failure paths were reviewed against the existing tests: interrupted local saves, rejected provider backup/publish, project-save failure, worker rejection, newer revisions during save, checkpoint write/snapshot failure and corrupt draft isolation already have behavioral assertions. No production save/recovery change was needed in this pass. Local Gradle, builds, tests, and device/emulator checks remain skipped; branch CI will validate this follow-up together with the previously unexecuted installer and test-quality changes before merge.
-
-Verification: [CI 41276363192](https://github.com/AM-RTS/TermuIDE/actions/runs/41276363192), implementation commit `4c7c8b9`, passed all 276 app host tests with zero failures/errors/skips, all 14 installer-script checks and four Java launcher checks. The uploaded XML reports confirm both new provider cleanup/rollback regressions, all three GapIntSet methods, the moved TextBuffer scenario, continuous-typing checkpoint recovery, and the installer callback regressions executed. Debug and minified release builds passed; the release APK passed v2/v3 signature verification. This supersedes the unexecuted status of the preceding installer/test-quality follow-ups. No CI failure needed fixing. Local Gradle/builds/tests and physical-device/emulator checks stayed skipped; the branch remains unmerged.
+- [Termux RUN_COMMAND contract](https://github.com/termux/termux-app/wiki/RUN_COMMAND-Intent)
+- [Java source-file launch](https://docs.oracle.com/en/java/javase/17/docs/specs/man/java.html#using-source-file-mode-to-launch-single-file-source-code-programs)
+- [Python command-line execution](https://docs.python.org/3/using/cmdline.html)
+- [GDB MI breakpoint commands](https://sourceware.org/gdb/current/onlinedocs/gdb.html/GDB_002fMI-Breakpoint-Commands.html)

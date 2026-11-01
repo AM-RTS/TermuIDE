@@ -1,28 +1,7 @@
-<vector xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:aapt="http://schemas.android.com/aapt"
-    android:width="108dp"
-    android:height="108dp"
-    android:viewportWidth="108"
-    android:viewportHeight="108">
-    <path android:pathData="M108,107.99999 85.5,108 31.5,54 45,40.5 64.35,59.85 70.2,54 h 6.3 L 108,85.5z">
-        <aapt:attr name="android:fillColor">
-            <gradient
-                android:endX="94.5"
-                android:endY="90"
-                android:startX="48.150002"
-                android:startY="43.650002"
-                android:type="linear">
-                <item
-                    android:color="#44000000"
-                    android:offset="0.0" />
-                <item
-                    android:color="#00000000"
-                    android:offset="1.0" />
-            </gradient>
-        </aapt:attr>
-    </path>
-    <path
-        android:fillColor="#FFFFFF"
-        android:fillType="nonZero"
-        android:pathData="M48.15,64.35 37.8,54 48.15,43.65 45,40.5 31.5,54 45,67.5Zm11.7,0 L70.2,54 59.85,43.65 63,40.5 76.5,54 63,67.5z"/>
-</vector>
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Keep the original composition in the adaptive icon's central two-thirds. -->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:insetLeft="16.666667%" android:insetTop="16.666667%"
+    android:insetRight="16.666667%" android:insetBottom="16.666667%">
+    <bitmap android:src="@drawable/launcher_artwork" android:gravity="fill" android:filter="true" />
+</inset>

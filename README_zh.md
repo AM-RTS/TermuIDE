@@ -1,38 +1,41 @@
 # TermuIDE
 
-[English README](README.md) · [许可证](LICENSE.md) · [致谢](NOTICE.md)
+**Android 上的 IDE，由 Termux 提供工具运行环境。**
 
-TermuIDE 是由 AM-RTS 和贡献者维护的独立分支，基于 RainbowC0 和贡献者开发的 [TermuC](https://github.com/RainbowC0/TermuC)。它通过 Termux 提供 C/C++ IDE 功能，并加入基本的 Python 3、Java 控制台运行支持。它不是 TermuC 或 Termux 的官方版本。
+[English](README.md) · [下载](https://github.com/AM-RTS/TermuIDE/releases) · [使用指南（英文）](docs/usage.md) · [构建说明（英文）](docs/building.md)
 
-## 此分支的变化
+TermuIDE 是 [TermuC](https://github.com/RainbowC0/TermuC) 的独立分支，由 AM-RTS 和贡献者维护，提供 C/C++ IDE 功能及基本 Python、Java 控制台运行支持。它不是 TermuC 或 Termux 的官方版本。最低系统版本为 **Android 8.1 / API 27**。
 
-- 应用名为 **TermuIDE**，包名为 **`amrts.termuide`**。
-- 使用 Material 3 和 Jetpack Compose 界面、自适应文件浏览器、无障碍标签及可恢复的表单/对话框状态。
-- 使用 Sora 0.24.4 编辑器，复用原有文档、撤销、词法分析和 clangd 集成。
-- 增加未保存文档的持久恢复、后台保存、修订检查、可选自动保存以及中断保护。
-- 共享运行配置支持入口文件、逐项传递的程序参数及工作目录。
-- 简化项目/标签页协调，并修复 GDB 浮动控件及调试信息更新问题。
-- 在“设置 → 关于 → 关于 TermuIDE”中提供致谢、源码链接与离线许可证全文。
-- 点击顶部文件名可切换或关闭已打开文件；未保存的修改仍使用保存/丢弃/取消提示。底部提供诊断、撤销、重做和保存按钮；诊断面板只在点击后打开，显示各文件的消息、诊断代码和当前执行状态/退出码，点击消息可跳转到对应位置。行号区域的留白不会修改源文件缩进。
+## 此分支新增或改进
 
-Python/Java 提供基本控制台运行功能。Python 自动补全使用单独安装的 pylsp，Java 补全和诊断使用单独安装的 TermuIDE Java 工具包及 Termux JDK 25（安装步骤见[英文说明](README.md#optional-java-completion-and-diagnostics)），Java 导航、格式化和重命名暂未启用；Python/Java 调试器、依赖管理和 Maven/Gradle 集成仍未实现。C/C++ 继续使用 clangd 和 GDB。
+- Material 3 Compose 界面、自适应文件浏览器、无障碍标签及可恢复的表单状态。
+- Sora 编辑器，保留原有文档、撤销和词法分析工具。
+- 未保存文档的持久恢复、后台保存和可选自动保存。
+- Python pylsp 集成及可选 Java 补全/诊断。
+- 顶部文件切换/关闭菜单、按需打开的诊断面板、底部撤销/重做/保存操作。
+- 入口文件、参数和工作目录配置，以及更新后的 GDB 浮动控件。
 
-Python 自动补全：在 Termux 中运行 `pkg install python` 和 `python -m pip install python-lsp-server`，确认 `pylsp --help` 可用；在 TermuIDE 的分析设置中选择语言服务器并打开 `.py` 文件。安装后可在 **⋮ → Language tools** 查看状态与错误，并点击 **Restart** 重试。不同语言/文件夹或项目使用独立会话和端口，同一范围的标签页共享服务器。诊断、格式化等功能取决于安装的 pylsp 插件；可在 Language tools 指定已有虚拟环境文件夹（如 `.venv`），相对路径以显示的项目根目录或源文件夹为准；留空使用 Termux 默认 Python。执行与 pylsp 共用该环境的 `bin/python`，也须在其中安装 python-lsp-server。Apply 保存并重启相关 Python 会话；环境缺失时会报错，不会回退到全局 Python。项目命令继承 VIRTUAL_ENV 和 PATH，独立 C/C++、Java 运行不受影响。创建环境和安装依赖仍由用户完成。工具启动会先排除工作区和 PYTHONPATH 的模块搜索路径，再加载已安装的软件包；正常脚本执行仍保留原有环境。
+实际应用截图见[英文首页](README.md#screenshots)。
 
-未保存或恢复的文本直接同步给服务器，不会为了补全写入源文件。补全修改支持撤销和原有持久恢复；服务器不可用时仍可编辑和恢复。GitHub 预发行流程使用真实 pylsp 检查兄弟模块补全，但不代表已验证手机或 Termux 传输。
+## 开始使用
 
-## 安装与项目
+1. 安装本分支 APK 和 Termux（需要支持 RUN_COMMAND 返回结果的版本，0.109+）。
+2. 授予存储、Termux 命令权限并启用 Termux 外部应用访问；GDB 浮动控件还需悬浮窗权限。
+3. 打开 **⋮ → Language tools → Install / Repair**，在 Termux 中确认安装。Java 需要与应用匹配的已发布工具包；[手动安装说明](docs/usage.md#java)也可使用。
+4. 在分析设置中选择语言服务器，打开源码后点击运行。
 
-最低系统版本为 Android 8.1（API 27），目标 API 为 34；构建需要 JDK 17。请使用[本分支发布页](https://github.com/AM-RTS/TermuIDE/releases)中的 APK 或从源码构建。上游 F-Droid 软件包仍是 TermuC。
+C/C++ 使用 clangd 和 GDB。Python 补全使用 pylsp，诊断和格式化取决于插件。Java 单文件运行需要完整 JDK 11+；补全/诊断另需 JDK 25 和 TermuIDE Java 工具包。Python/Java 调试、依赖管理、Maven/Gradle 项目导入及 Android APK 开发暂不支持。
 
-新包名会单独安装，不会自动导入旧 TermuC/测试版的私有设置、权限、运行配置和恢复草稿。卸载旧应用前应先保存或导出未保存内容，并重新授予 TermuIDE 存储、Termux 命令和悬浮窗权限。
+项目配置为 `termuide.json`，不自动识别旧 `termuc.json`。已有项目继续使用其配置命令；选择 Python/Java 标签不会替换这些命令。
 
-项目配置文件改为 **`termuide.json`**，不再自动识别 `termuc.json`。旧项目可手动重命名配置文件并检查命令和路径，或重新创建项目。
+## 保存和恢复
 
-新建项目需要使用尚不存在的目标文件夹，以免模板覆盖已有文件。创建失败会保留当前项目和未保存文档；存储错误可能留下不完整的新文件夹，请先检查其内容，再使用新名称重试。
+未保存内容会保存在私有恢复草稿中，重启后恢复，不覆盖源文件。关闭脏标签会提供保存/丢弃/取消。自动保存默认关闭，可在编辑器设置中开启。
+
+恢复不能保证最近一次检查点之前的输入。卸载或清除应用数据会删除私有草稿。新包名 `amrts.termuide` 不会导入旧应用的设置、权限或草稿；卸载旧应用前先保存或导出未保存内容。
 
 ## 致谢与许可证
 
-本应用保留 [GNU GPL v3](LICENSE.md) 许可证。感谢 TermuC（RainbowC0 及贡献者）、CodeEditor（MrIkso 及贡献者）、TextWarrior（Tah Wei Hoon 及贡献者）、Sora（Rosemoe 及贡献者）、AndroidX、Material、Kotlin 和 Termux 社区。Sora 使用 LGPL 2.1 或更新版本；带有原始声明的 TextWarrior 文件以及 AndroidX/Kotlin 使用 Apache 2.0。各组件保留其原始版权和许可证声明；详见 [NOTICE.md](NOTICE.md)。软件不提供担保。
+感谢 TermuC（RainbowC0 及贡献者）、CodeEditor（MrIkso 及贡献者）、TextWarrior（Tah Wei Hoon 及贡献者）、Sora（Rosemoe 及贡献者）、AndroidX、Compose Material 3、Kotlin、Termux 和 Java 语言服务器社区。
 
-更名后的 TermuIDE、关于/许可证界面和工作区重构已通过 [GitHub Actions 签名发布构建](https://github.com/AM-RTS/TermuIDE/actions/runs/40169775316)。预发行流程现在要求 JVM/Robolectric 回归测试通过，失败会阻止构建、签名和发布，并保留已生成的测试报告。覆盖工作区选择、恢复后的关闭提示、保存/丢弃、持久草稿和项目创建。本地 Gradle/构建/测试、手机和模拟器检查仍跳过；主机测试不能代替真机验证。每次推送到 master 会在检查成功后发布带有签名 APK、校验值和变更记录的预发行版，详见 [自动发布说明](README.md#automated-prereleases)。
+应用保留 [GNU GPL v3](LICENSE.md)；Sora 使用 LGPL 2.1 或更新版本，带有原始声明的 TextWarrior 文件以及 AndroidX/Kotlin 使用 Apache 2.0。详见 [NOTICE.md](NOTICE.md)。完整许可证也可在应用“设置 → 关于 → 关于 TermuIDE”中离线阅读。分发时须保留声明并提供对应版本源码与构建说明。软件不提供担保。
