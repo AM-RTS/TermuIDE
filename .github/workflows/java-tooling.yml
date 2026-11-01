@@ -59,8 +59,8 @@ jobs:
           TERMUIDE_JAVA_LSP_BUNDLE: ${{ runner.temp }}/java-lsp/termuide-java-lsp
           TERMUIDE_TEST_JAVA_HOME: ${{ steps.java25.outputs.path }}
         run: bash ./gradlew :app:testDebugUnitTest --no-daemon --stacktrace
-      - name: Compile Android debug APK
-        run: bash ./gradlew :app:assembleDebug --no-daemon --stacktrace
+      - name: Compile debug and device regression APKs
+        run: bash ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon --stacktrace
       - uses: actions/upload-artifact@v6
         with:
           name: termuide-debug-apk
