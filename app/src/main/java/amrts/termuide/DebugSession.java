@@ -24,17 +24,39 @@ final class DebugSession implements AutoCloseable {
         final boolean connected, exited;
         final List<Variable> variables;
         final List<String> frames;
-        final String console, debug;
         Snapshot(int status, int hitBreakpoint, boolean connected, boolean exited,
-                Collection<Variable> variables, List<String> frames, String console, String debug) {
+                Collection<Variable> variables, List<String> frames) {
             this.status = status; this.hitBreakpoint = hitBreakpoint;
             this.connected = connected; this.exited = exited;
             this.variables = Collections.unmodifiableList(new ArrayList<>(variables));
             this.frames = Collections.unmodifiableList(new ArrayList<>(frames));
-            this.console = console; this.debug = debug;
         }
-        static Snapshot empty() { return new Snapshot(IDLE, 0, false, false, Collections.emptyList(), Collections.emptyList(), "", ""); }
+        static Snapshot empty() { return new Snapshot(IDLE, 0, false, false, Collections.emptyList(), Collections.emptyList()); }
     }
+    static final int OUTPUT_LIMIT = 64 * 1024;
+    private static final String TRUNCATED = "[Earlier output omitted]\n";
+    static final class Output {
+        final String console, debug;
+        Output(String console, String debug) { this.console = console; this.debug = debug; }
+        static Output empty() { return new Output("", ""); }
+    }
+    private final Consumer<Output> outputChanged;
+    private boolean outputDirty;
+    private void append(StringBuilder target, String text) {
+        target.append(text);
+        if (target.length() > OUTPUT_LIMIT) {
+            int cut = target.length() - OUTPUT_LIMIT + TRUNCATED.length();
+            if (cut < target.length() && Character.isLowSurrogate(target.charAt(cut))) cut++;
+            target.delete(0, cut).insert(0, TRUNCATED);
+        }
+        outputDirty = true;
+    }
+    private void publishOutput() {
+        if (!outputDirty) return;
+        outputDirty = false;
+        outputChanged.accept(new Output(console.toString(), debug.toString()));
+    }
+
     private static final class PendingVariable {
         final int generation, slot;
         final String expression;
@@ -59,8 +81,12 @@ final class DebugSession implements AutoCloseable {
     private int status, hitBreakpoint, sequence, generation, nextSlot;
     private String argumentsToken, localsToken, framesToken, childrenToken;
 
-    DebugSession(Consumer<Snapshot> changed) { this(48456, changed); }
-    DebugSession(int port, Consumer<Snapshot> changed) { this.port = port; this.changed = changed; }
+    DebugSession(Consumer<Snapshot> changed) { this(48456, changed, output -> {}); }
+    DebugSession(Consumer<Snapshot> changed, Consumer<Output> outputChanged) { this(48456, changed, outputChanged); }
+    DebugSession(int port, Consumer<Snapshot> changed) { this(port, changed, output -> {}); }
+    private DebugSession(int port, Consumer<Snapshot> changed, Consumer<Output> outputChanged) {
+        this.port = port; this.changed = changed; this.outputChanged = outputChanged;
+    }
 
     synchronized void connect(List<String> breakpoints) {
         if (reader != null || closed) return;
@@ -99,7 +125,7 @@ final class DebugSession implements AutoCloseable {
             }
         } catch (Exception error) {
             if (error instanceof InterruptedException) Thread.currentThread().interrupt();
-            synchronized (this) { if (!closed) debug.append(error.toString()).append('\n'); }
+            synchronized (this) { if (!closed) append(debug, error + "\n"); }
         } finally {
             synchronized (this) {
                 if (sender != null) { sender.offer(""); sender = null; }
@@ -120,8 +146,13 @@ final class DebugSession implements AutoCloseable {
         hitBreakpoint = 0;
         try {
             GdbMi record = GdbMi.parse(line);
-            if (record == null) { if (!line.equals("(gdb) ") && !line.equals("(gdb)")) debug.append(line).append('\n'); }
-            else if (record.kind == '~' || record.kind == '@' || record.kind == '&') console.append(record.text);
+            if (record == null) {
+                if (!line.equals("(gdb) ") && !line.equals("(gdb)")) append(debug, line + "\n");
+                publishOutput(); return;
+            }
+            else if (record.kind == '~' || record.kind == '@' || record.kind == '&') {
+                append(console, record.text); publishOutput(); return;
+            }
             else if (record.kind == '*' && record.name.equals("running")) {
                 invalidateInspection(); status = RUNNING;
             }
@@ -132,8 +163,8 @@ final class DebugSession implements AutoCloseable {
                 String number = string(record.values, "bkptno").split("\\.")[0];
                 hitBreakpoint = number.isEmpty() ? 0 : breakpointIds.indexOf(number) + 1;
             } else if (record.kind == '^') result(record);
-            else debug.append(line).append('\n');
-        } catch (IOException | RuntimeException error) { debug.append(line).append('\n').append(error.toString()).append('\n'); }
+            else { append(debug, line + "\n"); publishOutput(); return; }
+        } catch (IOException | RuntimeException error) { append(debug, line + "\n" + error + "\n"); publishOutput(); return; }
         publish();
     }
 
@@ -146,7 +177,7 @@ final class DebugSession implements AutoCloseable {
             } else if (record.token.equals(localsToken)) localsToken = null;
             else if (record.token.equals(framesToken)) framesToken = null;
             else if (record.token.equals(childrenToken)) childrenToken = null;
-            debug.append(string(record.values, "msg")).append('\n');
+            append(debug, string(record.values, "msg") + "\n");
             return;
         }
         if (!record.name.equals("done")) return;
@@ -165,7 +196,7 @@ final class DebugSession implements AutoCloseable {
                     variableRoots.add(id);
                     variables.put(pending.slot, new Variable(record.values, pending.expression));
                 } else send("-var-delete " + id);
-            } else debug.append("Missing GDB variable object name\n");
+            } else append(debug, "Missing GDB variable object name\n");
         } else if (record.token.equals(argumentsToken)) {
             for (Object item : list(record.values.get("stack-args"))) {
                 Map<String, Object> frame = tuple(tuple(item).get("frame"));
@@ -227,13 +258,14 @@ final class DebugSession implements AutoCloseable {
     }
     synchronized void console(String command) {
         if (closed || sender == null || command.isEmpty()) return;
-        console.append("(gdb) ").append(command).append('\n');
-        send("-interpreter-exec console \"" + escape(command) + "\""); publish();
+        append(console, "(gdb) " + command + "\n");
+        send("-interpreter-exec console \"" + escape(command) + "\""); publishOutput();
     }
     private static String escape(String value) { return value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r"); }
     private void publish() {
+        publishOutput();
         changed.accept(new Snapshot(status, hitBreakpoint, sender != null && !closed, exited,
-            variables.values(), frames, console.toString(), debug.toString()));
+            variables.values(), frames));
         hitBreakpoint = 0;
     }
     private static String string(Map<String, Object> fields, String key) { Object value = fields.get(key); return value instanceof String ? (String)value : ""; }

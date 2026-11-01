@@ -59,6 +59,23 @@ public class FileHelper {
 		return new FileItem(icon, n);
 	}
 
+    static final class Source {
+        final String text;
+        final long modified;
+        Source(String text, long modified) { this.text = text; this.modified = modified; }
+    }
+    static Source readSource(File file) throws IOException {
+        SourceWriter.recover(file);
+        long modified = lastModified(file);
+        StringBuilder text = new StringBuilder();
+        try (Reader reader = new InputStreamReader(openInputStream(file), java.nio.charset.StandardCharsets.UTF_8)) {
+            char[] buffer = new char[8192];
+            for (int count; (count = reader.read(buffer)) != -1;) text.append(buffer, 0, count);
+        }
+        if (lastModified(file) != modified) throw new IOException("Source changed while reading");
+        return new Source(text.toString(), modified);
+    }
+
 	public final static InputStream openInputStream(File f) throws IOException {
 		SourceWriter.recover(f);
 		if (!isTermuxFile(f))

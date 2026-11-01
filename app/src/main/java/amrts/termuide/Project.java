@@ -7,7 +7,6 @@ import java.util.concurrent.atomic.AtomicReference;
 
 public class Project
 {
-	private static long lastModified;
 	private static final String 
 	KEY_BUILDCMD = "buildCmd",
 	KEY_COMPILE = "compileCmd",
@@ -15,8 +14,7 @@ public class Project
 	KEY_OUTPUTDIR = "outputDir",
 	KEY_OPENS = "opens";
 	public final static String PROJ = "termuide.json";
-	public static String rootPath, outputDir;
-	public static String buildCmd, compileCmd, runCmd;
+    private static Config current = new Config(null, "build", "", "", "", 0, Collections.emptyList());
 
     public static final class Config {
         public final String rootPath, outputDir, buildCmd, compileCmd, runCmd;
@@ -29,10 +27,7 @@ public class Project
         }
     }
 
-    public static synchronized Config snapshot() {
-        return new Config(rootPath, outputDir == null ? "build" : outputDir, buildCmd == null ? "" : buildCmd,
-            compileCmd == null ? "" : compileCmd, runCmd == null ? "" : runCmd, lastModified, Collections.emptyList());
-    }
+    public static synchronized Config snapshot() { return current; }
 
     public static Config refreshed(Config original) throws IOException {
         if (original.rootPath == null) return original;
@@ -40,10 +35,7 @@ public class Project
         return FileHelper.lastModified(file) == original.modified ? original : read(file);
     }
 
-    public static synchronized void publish(Config config) {
-        rootPath = config.rootPath; outputDir = config.outputDir; buildCmd = config.buildCmd;
-        compileCmd = config.compileCmd; runCmd = config.runCmd; lastModified = config.modified;
-    }
+    public static synchronized void publish(Config config) { current = Objects.requireNonNull(config); }
 
 	public static void load(File conf, List<String> opens) throws IOException {
         Config config = read(conf);
@@ -92,7 +84,7 @@ public class Project
                 Config current = read(file); written.set(current); return encode(current, paths);
             })
             .thenApply(saved -> {
-                if (saved && Objects.equals(rootPath, original.rootPath)) {
+                if (saved && snapshot() == original) {
                     Config current = written.get();
                     publish(new Config(current.rootPath, current.outputDir, current.buildCmd, current.compileCmd,
                         current.runCmd, FileHelper.lastModified(file), paths));
@@ -126,7 +118,7 @@ public class Project
                     || !FileHelper.createFile(new File(f, config.outputDir), true)) return false;
             File file = new File(f, PROJ);
             SourceWriter.write(file, encode(config, null));
-            load(file, null);
+
             return true;
 		} catch (IOException | SecurityException | IllegalArgumentException e) {
 			e.printStackTrace();
@@ -134,26 +126,7 @@ public class Project
 		}
 	}
 
-	public static void close() {
-		rootPath = null;
-	}
-
-	public static long lastModified() {
-		return lastModified;
-	}
-
-	public static void reload() throws IOException {
-        publish(refreshed(snapshot()));
-	}
-	/**
-	 * Local environment variables
-	 * $f  file name
-	 * $e  file name without suffix
-	 * $d  file directory path
-	 * $p  project root path (if in project)
-	 * $o  outputDir
-	 */
-	public static StringBuilder buildEnvironment(File file) {
-        return new StringBuilder(RunCommands.environment(snapshot(), file));
-	}
+    public static synchronized void close() {
+        current = new Config(null, "build", "", "", "", 0, Collections.emptyList());
+    }
 }

@@ -21,6 +21,7 @@ class FileActivity : ComponentActivity(), FileFilter {
         val initial = intent.getStringExtra(FN)?.let { File(it).parentFile } ?: Utils.ROOT
         pwd = savedInstanceState?.getString(PD)?.let(::File) ?: initial
         adapter = FileAdapter(pwd, this)
+        adapter.setOnChanged { directoryRevision++ }
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() = navigateBack()
         })
@@ -40,11 +41,12 @@ class FileActivity : ComponentActivity(), FileFilter {
     fun getDirectoryIcon(index: Int): Int = adapter.getItem(index).icon
 
     fun selectItem(name: String) {
+        if (adapter.isLoading) return
         if (name == "..") {
             pwd = pwd.parentFile ?: pwd
         } else {
             val file = File(pwd, name)
-            if (file.isDirectory) {
+            if (!adapter.containsFile(name)) {
                 pwd = file
             } else {
                 intent.putExtra(FN, file.absolutePath)
@@ -69,6 +71,11 @@ class FileActivity : ComponentActivity(), FileFilter {
     }
 
     override fun onBackPressed() = navigateBack()
+
+    override fun onDestroy() {
+        adapter.release()
+        super.onDestroy()
+    }
 
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putString(PD, pwd.absolutePath)

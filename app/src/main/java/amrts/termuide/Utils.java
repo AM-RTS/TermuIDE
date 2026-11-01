@@ -12,11 +12,11 @@ import cn.rbc.codeeditor.util.*;
 import java.io.*;
 
 public class Utils {
-	public interface ComposeDialogHost {
-		void showTermuxInstallPrompt(boolean showNeverRemind);
-		void showTermuxInitPrompt(boolean showAlreadyInitialized);
-	}
-
+    public interface ComposeDialogHost {
+        TermuxPrompts getTermuxPrompts();
+        default void showTermuxInstallPrompt(boolean reminder) { getTermuxPrompts().showInstall(reminder); }
+        default void showTermuxInitPrompt(boolean reminder) { getTermuxPrompts().showInitialize(reminder); }
+    }
 	public final static File ROOT = Environment.getExternalStorageDirectory();
     public final static String TERMUX = "com.termux";
 	public final static String PREF = "/data/data/" + TERMUX + "/files";
@@ -169,7 +169,7 @@ public class Utils {
                 return false;
             for (String s:temps)
                 dumpFile(am.open(new File(type, s).getPath()), new File(des, s));
-            Project.load(new File(des, Project.PROJ), null);
+
             return true;
         } catch (IOException | SecurityException | IllegalArgumentException ioe) {
             ioe.printStackTrace();

@@ -56,6 +56,7 @@ class ActivityRecoveryTest {
         app.saver = DocumentSaver(freshSessions)
         val activity = launch()
         activity.fragmentManager.executePendingTransactions()
+        drainFileTasks()
         files.forEachIndexed { index, file ->
             val fragment = activity.fragmentManager.findFragmentByTag(file.path) as EditFragment
             assertEquals("draft $index\r\n🧪", fragment.view!!.soraEditor.text.toString())
@@ -70,6 +71,7 @@ class ActivityRecoveryTest {
         val activity = launch()
         activity.openFile(file)
         activity.fragmentManager.executePendingTransactions()
+        drainFileTasks()
         val fragment = activity.fragmentManager.findFragmentByTag(file.path) as EditFragment
         fragment.view!!.paste("unsaved ")
         val draft = fragment.view!!.text.toString()
@@ -87,6 +89,7 @@ class ActivityRecoveryTest {
         val activity = launch()
         activity.openFile(file)
         activity.fragmentManager.executePendingTransactions()
+        drainFileTasks()
         val fragment = activity.fragmentManager.findFragmentByTag(file.path) as EditFragment
         fragment.view!!.paste("prefix\uFFFFsuffix ")
         val text = fragment.view!!.text.toString()
@@ -102,6 +105,7 @@ class ActivityRecoveryTest {
         val activity = launch()
         activity.openFile(file)
         activity.fragmentManager.executePendingTransactions()
+        drainFileTasks()
         val old = activity.editor.soraEditor
         activity.editor.paste("draft ")
         val state = Bundle()
@@ -110,6 +114,7 @@ class ActivityRecoveryTest {
         assertTrue(old.isReleased)
         val restored = launch(state)
         restored.fragmentManager.executePendingTransactions()
+        drainFileTasks()
         assertEquals("draft original", restored.editor.soraEditor.text.toString())
         restored.editor.undo()
         assertEquals("original", restored.editor.soraEditor.text.toString())
@@ -122,6 +127,7 @@ class ActivityRecoveryTest {
         controller!!.visible()
         activity.openFile(file)
         activity.fragmentManager.executePendingTransactions()
+        drainFileTasks()
         val editor = activity.editor
         editor.setSelection(4)
         val item = cn.rbc.codeeditor.view.autocomplete.ListItem().apply { label = "wording" }
@@ -138,6 +144,7 @@ class ActivityRecoveryTest {
         controller!!.visible()
         activity.openFile(file)
         activity.fragmentManager.executePendingTransactions()
+        drainFileTasks()
         val lsp = app.languageServers.session(file, EditFragment.TYPE_C)!!
         val sender = lsp.connectedSender()
         Application.completion = "s"
@@ -171,11 +178,13 @@ class ActivityRecoveryTest {
         val activity = launch()
         activity.openFile(first)
         activity.fragmentManager.executePendingTransactions()
+        drainFileTasks()
         val lsp = app.languageServers.session(first, EditFragment.TYPE_C)!!
         lsp.setSemToks(arrayOf(Lsp.SemToken.TYPE))
         val id = lsp.request(first, Lsp.SEMTOK)
         activity.openFile(second)
         activity.fragmentManager.executePendingTransactions()
+        drainFileTasks()
         val result = org.json.JSONObject().put("id", id).put("result",
             org.json.JSONObject().put("data", org.json.JSONArray("[0,0,3,0,0]")))
         app.hand.handleMessage(android.os.Message.obtain().apply { obj = lsp.incoming(result.toString()) })
@@ -195,6 +204,7 @@ class ActivityRecoveryTest {
         val activity = launch()
         controller!!.visible()
         activity.fragmentManager.executePendingTransactions()
+        drainFileTasks()
         val fragment = activity.fragmentManager.findFragmentByTag(file.path) as EditFragment
         val lsp = fragment.languageServer()
         val sender = lsp.connectedSender()
@@ -231,6 +241,7 @@ class ActivityRecoveryTest {
         controller!!.visible()
         activity.openFile(file)
         activity.fragmentManager.executePendingTransactions()
+        drainFileTasks()
         activity.editor.setSelection(4)
         val lsp = app.languageServers.session(file, EditFragment.TYPE_PYTHON)!!
         val item = cn.rbc.codeeditor.view.autocomplete.ListItem().apply { label = "wording" }
@@ -259,6 +270,7 @@ class ActivityRecoveryTest {
         val activity = launch()
         controller!!.visible()
         activity.fragmentManager.executePendingTransactions()
+        drainFileTasks()
         val fragment = activity.fragmentManager.findFragmentByTag(file.path) as EditFragment
         val lsp = fragment.languageServer()
         Lsp::class.java.getDeclaredField("mRead").apply { isAccessible = true }.set(lsp, app.hand)
@@ -357,6 +369,7 @@ class ActivityRecoveryTest {
         controller!!.visible()
         activity.openFile(file)
         activity.fragmentManager.executePendingTransactions()
+        drainFileTasks()
         val fragment = activity.fragmentManager.findFragmentByTag(file.path) as EditFragment
         val lsp = fragment.languageServer()
         val recoveredHelper = activity.fragmentManager.findFragmentByTag(helper.path) as EditFragment
@@ -426,12 +439,14 @@ class ActivityRecoveryTest {
 
             activity.openFile(helper)
             activity.fragmentManager.executePendingTransactions()
+            drainFileTasks()
             val helperFragment = activity.fragmentManager.findFragmentByTag(helper.path) as EditFragment
             val changedHelper = helperSource.replace("greeting", "farewell")
             activity.editor.replaceText(0, activity.editor.text.length, changedHelper)
             helperFragment.flushLanguageChange()
             activity.selectItem(0)
             activity.fragmentManager.executePendingTransactions()
+            drainFileTasks()
             val changedMain = draft.replace("Helper.gre", "Helper.far")
             activity.editor.replaceText(0, activity.editor.text.length, changedMain)
             fragment.flushLanguageChange()
@@ -473,6 +488,7 @@ class ActivityRecoveryTest {
         app.documents.flush()
         val activity = launch()
         activity.fragmentManager.executePendingTransactions()
+        drainFileTasks()
         val servers = app.languageServers
         val originalJava = servers.session(main, EditFragment.TYPE_JAVA)!!
         originalJava.connectedSender()
@@ -486,6 +502,7 @@ class ActivityRecoveryTest {
         Application.completion = "s"
         try {
             activity.renameFile(helper.path, "Renamed.java")
+            drainFileTasks()
             val renamed = directory.resolve("Renamed.java")
             assertTrue(renamed.isFile)
             val replacement = servers.find(main)!!
@@ -508,6 +525,7 @@ class ActivityRecoveryTest {
             assertSame(other, servers.find(otherFile))
             val beforeCreate = servers.find(main)
             activity.createFile("New.java", false)
+            drainFileTasks()
             assertTrue(directory.resolve("New.java").isFile)
             assertNotSame(beforeCreate, servers.find(main))
             assertSame(native, servers.find(nativeFile))
@@ -527,6 +545,7 @@ class ActivityRecoveryTest {
         controller!!.visible()
         activity.openFile(file)
         activity.fragmentManager.executePendingTransactions()
+        drainFileTasks()
         val fragment = activity.fragmentManager.findFragmentByTag(file.path) as EditFragment
         val lsp = fragment.languageServer()
         lsp.connectedSender()
@@ -541,6 +560,7 @@ class ActivityRecoveryTest {
             val synchronizedVersion = lsp.documentVersion(file)
             val restored = launch(state)
             restored.fragmentManager.executePendingTransactions()
+            drainFileTasks()
             val restoredFragment = restored.fragmentManager.findFragmentByTag(file.path) as EditFragment
             assertTrue(restoredFragment.version >= synchronizedVersion)
             restored.editor.paste("# after rotation\n")
@@ -559,6 +579,7 @@ class ActivityRecoveryTest {
         val activity = launch()
         activity.openFile(file)
         activity.fragmentManager.executePendingTransactions()
+        drainFileTasks()
         val fragment = activity.fragmentManager.findFragmentByTag(file.path) as EditFragment
         val lsp = fragment.languageServer()
         val sender = lsp.connectedSender()
@@ -572,6 +593,7 @@ class ActivityRecoveryTest {
             sender.clear()
             val restored = launch(state)
             restored.fragmentManager.executePendingTransactions()
+            drainFileTasks()
             val request = sender.map { org.json.JSONObject(String(it, Charsets.UTF_8)) }
                 .last { it.getString("method") == "textDocument/semanticTokens/full" }
             val result = org.json.JSONObject().put("id", request.getInt("id")).put("result",
@@ -588,6 +610,7 @@ class ActivityRecoveryTest {
         val activity = launch()
         activity.openFile(file)
         activity.fragmentManager.executePendingTransactions()
+        drainFileTasks()
         val fragment = activity.fragmentManager.findFragmentByTag(file.path) as EditFragment
         val lsp = fragment.languageServer()
         lsp.connectedSender()
@@ -614,8 +637,10 @@ class ActivityRecoveryTest {
         val activity = launch()
         activity.openFile(first)
         activity.fragmentManager.executePendingTransactions()
+        drainFileTasks()
         activity.openFile(second)
         activity.fragmentManager.executePendingTransactions()
+        drainFileTasks()
         val firstFragment = activity.fragmentManager.findFragmentByTag(first.path) as EditFragment
         val secondFragment = activity.fragmentManager.findFragmentByTag(second.path) as EditFragment
         val firstEditor = requireNotNull(firstFragment.view)
@@ -645,6 +670,7 @@ class ActivityRecoveryTest {
         val activity = launch()
         activity.openFile(native)
         activity.fragmentManager.executePendingTransactions()
+        drainFileTasks()
         val nativeFragment = activity.fragmentManager.findFragmentByTag(native.path) as EditFragment
         app.languageServers.session(native, EditFragment.TYPE_C)
         val diagnostics = listOf(Diagnostic().apply { msg = "native warning"; stl = 1; enl = 1; enc = 1 })
@@ -652,6 +678,7 @@ class ActivityRecoveryTest {
         nativeEditor.text.setDiag(diagnostics)
         activity.openFile(python)
         activity.fragmentManager.executePendingTransactions()
+        drainFileTasks()
         val lsp = app.languageServers.session(python, EditFragment.TYPE_PYTHON)!!
         app.hand.handleMessage(android.os.Message.obtain().apply { what = Lsp.ERROR; obj = lsp.incoming(null) })
         assertSame(diagnostics, nativeEditor.text.diag)
@@ -663,6 +690,7 @@ class ActivityRecoveryTest {
         val activity = launch()
         activity.openFile(file)
         activity.fragmentManager.executePendingTransactions()
+        drainFileTasks()
         activity.editor.paste("draft ")
         activity.closeFile(activity.selectedItem)
         val state = Bundle()
@@ -680,6 +708,7 @@ class ActivityRecoveryTest {
         val final = launch(again)
         final.resolveCloseDocuments(false)
         final.fragmentManager.executePendingTransactions()
+        drainFileTasks()
         assertFalse(final.openFilePaths.contains(file.path))
         assertFalse(app.documents.state.value.any { it.path == file.path })
         assertEquals("original", file.readText())
@@ -690,6 +719,7 @@ class ActivityRecoveryTest {
         val activity = launch()
         activity.openFile(file)
         activity.fragmentManager.executePendingTransactions()
+        drainFileTasks()
         activity.editor.paste("draft ")
         activity.closeFile(activity.selectedItem)
         val state = Bundle()
@@ -699,6 +729,7 @@ class ActivityRecoveryTest {
         restored.resolveCloseDocuments(true)
         drainSourceSaves()
         restored.fragmentManager.executePendingTransactions()
+        drainFileTasks()
         assertFalse(restored.openFilePaths.contains(file.path))
         assertEquals("draft original", file.readText())
     }
@@ -708,8 +739,9 @@ class ActivityRecoveryTest {
         val activity = launch()
         activity.openFile(file)
         activity.fragmentManager.executePendingTransactions()
+        drainFileTasks()
         activity.editor.paste("draft ")
-        Project.rootPath = directory.path
+        Project.publish(Project.Config(directory.path, "build", "", "", "", 0, emptyList()))
         activity.performAction(R.id.prj_close)
         val state = Bundle()
         controller!!.saveInstanceState(state).pause().stop().destroy()
@@ -719,6 +751,7 @@ class ActivityRecoveryTest {
         assertEquals(listOf(file.path), restored.pendingClosePaths)
         restored.resolveCloseDocuments(false)
         restored.fragmentManager.executePendingTransactions()
+        drainFileTasks()
         assertTrue(restored.openFilePaths.isEmpty())
         assertEquals("original", file.readText())
     }

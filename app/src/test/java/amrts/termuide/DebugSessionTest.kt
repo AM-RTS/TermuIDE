@@ -12,13 +12,30 @@ import org.junit.Test
 class DebugSessionTest {
     private class Fixture : AutoCloseable {
         val updates = mutableListOf<DebugSession.Snapshot>()
-        val session = DebugSession { updates += it }
+        var output = DebugSession.Output.empty()
+        val session = DebugSession({ updates += it }, { output = it })
         val sender = DebugSession.Sender(Socket())
         init { DebugSession::class.java.getDeclaredField("sender").apply { isAccessible = true }.set(session, sender) }
         fun command(): String = sender.poll(2, TimeUnit.SECONDS) ?: error("Missing GDB command")
         fun token(command: String) = command.takeWhile { it.isDigit() }
         val state get() = updates.last()
         override fun close() = session.close()
+    }
+
+    @Test fun verboseOutputIsBoundedWithoutRepublishingInspectionState() {
+        Fixture().use { f ->
+            val text = "x".repeat(DebugSession.OUTPUT_LIMIT) + "🧪tail"
+            f.session.accept("~\"$text\"")
+            assertTrue(f.output.console.length <= DebugSession.OUTPUT_LIMIT)
+            assertTrue(f.output.console.startsWith("[Earlier output omitted]\n"))
+            assertTrue(f.output.console.endsWith("🧪tail"))
+            assertTrue(f.updates.isEmpty())
+            f.session.accept("*stopped")
+            val stopped = f.state
+            f.session.accept("~\"more\"")
+            assertSame(stopped, f.state)
+            assertTrue(f.output.console.endsWith("more"))
+        }
     }
 
     @Test fun parserHandlesTokensNestedListsAndEscapedStrings() {
@@ -101,7 +118,7 @@ class DebugSessionTest {
             assertEquals(listOf("1", "7"), f.state.variables.map { it.value })
             assertEquals(1, previous.variables.size)
             assertEquals("counter", previous.variables.single().expression)
-            assertEquals("a real newline\n", f.state.console)
+            assertEquals("a real newline\n", f.output.console)
             assertThrows(UnsupportedOperationException::class.java) { (f.state.variables as MutableList).clear() }
         }
     }
@@ -129,9 +146,9 @@ class DebugSessionTest {
             assertEquals(2, f.state.frames.size)
             f.session.console("print \"hello\"")
             assertTrue(f.command().contains("\\\"hello\\\""))
-            assertTrue(f.state.console.contains("(gdb) print \"hello\""))
+            assertTrue(f.output.console.contains("(gdb) print \"hello\""))
             f.session.accept("^error,msg=\"Cannot evaluate expression\"")
-            assertTrue(f.state.debug.contains("Cannot evaluate expression"))
+            assertTrue(f.output.debug.contains("Cannot evaluate expression"))
             f.session.accept("*stopped,reason=\"exited-normally\"")
             assertTrue(f.state.exited)
         }

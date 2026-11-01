@@ -24,10 +24,12 @@ final class EditorTextEdits {
         return caret;
     }
 
-    static void validate(Document document, Collection<Edit> input) {
+    static void validate(Document document, Collection<Edit> input) { validate(document.length() - 1, input); }
+
+    static void validate(int length, Collection<Edit> input) {
         List<Edit> edits = new ArrayList<>(input);
         edits.sort(Comparator.comparingInt((Edit edit) -> edit.start).reversed());
-        int nextStart = document.length() - 1;
+        int nextStart = length;
         for (Edit edit : edits) {
             if (edit.text == null || edit.start < 0 || edit.len < 0 || edit.start > nextStart
                 || edit.len > nextStart - edit.start) throw new IllegalArgumentException("Invalid or overlapping editor edits");

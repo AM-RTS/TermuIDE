@@ -154,8 +154,10 @@ class MainHandlerTest {
         val changes = JSONObject()
             .put(first.toURI().toString(), JSONArray().put(edit(0, 0, 5, "changed")))
             .put(second.toURI().toString(), JSONArray().put(edit(20, 0, 1, "invalid")))
-        try { handler.applyWorkspaceEdit(JSONObject().put("changes", changes)); fail("Invalid edit accepted") }
-        catch (_: IllegalArgumentException) {}
+        val applying = handler.applyWorkspaceEdit(JSONObject().put("changes", changes))
+        drainFileTasks()
+        val error = assertThrows(java.util.concurrent.CompletionException::class.java) { applying.join() }
+        assertTrue(error.cause is IllegalArgumentException)
         assertEquals("first", first.readText())
         assertEquals("second", second.readText())
     }
@@ -205,21 +207,21 @@ class MainHandlerTest {
         val text = "🧪 name"
         val replacement = JSONArray().put(edit(0, 2, 6, "other"))
         val python = app.languageServers.session(directory.resolve("main.py"), EditFragment.TYPE_PYTHON)!!
-        val converted = MainHandler.edits(python, text, replacement).single()
+        val converted = LspResponses.edits(python, text, replacement).single()
         assertEquals(3, converted.start)
         assertEquals(4, converted.len)
-        val native = MainHandler.edits(lsp, text, JSONArray().put(edit(0, 3, 7, "other"))).single()
+        val native = LspResponses.edits(lsp, text, JSONArray().put(edit(0, 3, 7, "other"))).single()
         assertEquals(converted.start, native.start)
         assertEquals(converted.len, native.len)
     }
 
     @Test fun completionPrefixesHandleUnicodeIdentifiersAndWholeFileNames() {
         val identifier = "𐐀name"
-        assertEquals(0, MainHandler.completionStart(identifier, identifier.length, 6))
+        assertEquals(0, LspResponses.completionStart(identifier, identifier.length, 6))
         val path = "open('sub/data-file"
-        assertEquals(path.indexOf("data-file"), MainHandler.completionStart(path, path.length, 17))
+        assertEquals(path.indexOf("data-file"), LspResponses.completionStart(path, path.length, 17))
         val include = "#include <dir-name"
-        assertEquals(include.indexOf("dir-name"), MainHandler.completionStart(include, include.length, 19))
+        assertEquals(include.indexOf("dir-name"), LspResponses.completionStart(include, include.length, 19))
     }
 
     @Test fun workspaceEditCannotOverwriteAnotherServerSession() {

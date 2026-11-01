@@ -38,13 +38,13 @@ class ComposeUiStateTest {
                 }) { saved = it }
             }
         }
-        compose.onNodeWithText("Port").performClick()
+        compose.onNodeWithText("Port").performClick().also { drainFileTasks() }
         compose.onNode(hasSetTextAction()).performTextReplacement("70000")
-        compose.onNodeWithText(Application.getInstance().getString(android.R.string.ok)).performClick()
+        compose.onNodeWithText(Application.getInstance().getString(android.R.string.ok)).performClick().also { drainFileTasks() }
         compose.onNodeWithText("Invalid port").assertIsDisplayed()
         assertNull(saved)
         compose.onNode(hasSetTextAction()).performTextReplacement("48456")
-        compose.onNodeWithText(Application.getInstance().getString(android.R.string.ok)).performClick()
+        compose.onNodeWithText(Application.getInstance().getString(android.R.string.ok)).performClick().also { drainFileTasks() }
         compose.runOnIdle { assertEquals("48456", saved) }
     }
     @get:Rule(order = 0) val snapshots = object : ExternalResource() {
@@ -67,7 +67,7 @@ class ComposeUiStateTest {
             }
         }
         compose.onAllNodes(hasClickAction(), useUnmergedTree = true).assertCountEquals(3)
-        compose.onNodeWithText("Wrap").assertIsOff().assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Switch)).performClick()
+        compose.onNodeWithText("Wrap").assertIsOff().assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Switch)).performClick().also { drainFileTasks() }
         compose.onNodeWithText("Wrap").assertIsOn()
         compose.onNodeWithText("Generate config").assertIsOn().assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Checkbox))
         compose.onNodeWithText("Folder").assertIsSelected().assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton))
@@ -83,8 +83,8 @@ class ComposeUiStateTest {
         val restore = StateRestorationTester(compose)
         restore.setContent { MaterialTheme { NewProjectDialog(activity) {} } }
         compose.onNode(hasSetTextAction()).performTextInput("kept-project")
-        compose.onNodeWithText(activity.getString(R.string.with_clangd)).performClick()
-        compose.onNodeWithText(activity.getString(R.string.with_format)).performClick()
+        compose.onNodeWithText(activity.getString(R.string.with_clangd)).performClick().also { drainFileTasks() }
+        compose.onNodeWithText(activity.getString(R.string.with_format)).performClick().also { drainFileTasks() }
         restore.emulateSavedInstanceStateRestore()
         compose.onNode(hasSetTextAction()).assertTextContains("kept-project")
         compose.onNodeWithText(activity.getString(R.string.with_clangd)).assertIsOn()
@@ -105,7 +105,7 @@ class ComposeUiStateTest {
             }
         }
         listOf("Wrap long source lines", "Generate configuration for this project", "Create a folder inside this directory").forEach {
-            compose.onNodeWithText(it).assertIsDisplayed().performClick()
+            compose.onNodeWithText(it).assertIsDisplayed().performClick().also { drainFileTasks() }
             val bounds = compose.onNodeWithText(it).getUnclippedBoundsInRoot()
             assertTrue(bounds.bottom - bounds.top >= 48.dp)
         }
@@ -117,7 +117,7 @@ class ComposeUiStateTest {
         val restore = StateRestorationTester(compose)
         restore.setContent { MaterialTheme { NewFileDialog(activity) {} } }
         compose.onNode(hasSetTextAction()).performTextInput("kept-folder")
-        compose.onNodeWithText(activity.getString(R.string.folder)).performClick()
+        compose.onNodeWithText(activity.getString(R.string.folder)).performClick().also { drainFileTasks() }
         restore.emulateSavedInstanceStateRestore()
         compose.onNode(hasSetTextAction()).assertTextContains("kept-folder")
         compose.onNodeWithText(activity.getString(R.string.folder)).assertIsSelected()
@@ -127,7 +127,7 @@ class ComposeUiStateTest {
         val restore = StateRestorationTester(compose)
         var saved: String? = null
         restore.setContent { MaterialTheme { TextSetting("Flags", "-Wall", onSave = { saved = it }) } }
-        compose.onNodeWithText("Flags").performClick()
+        compose.onNodeWithText("Flags").performClick().also { drainFileTasks() }
         compose.onNode(hasSetTextAction()).performTextReplacement("-Wall -Wextra")
         restore.emulateSavedInstanceStateRestore()
         compose.onNode(hasSetTextAction()).assertTextContains("-Wall -Wextra")
@@ -143,11 +143,11 @@ class ComposeUiStateTest {
             val activity = Robolectric.buildActivity(SettingsActivity::class.java).get()
             val restore = StateRestorationTester(compose)
             restore.setContent { MaterialTheme { SettingsScreen(activity, prefs) {} } }
-            compose.onNodeWithText(app.getString(R.string.auto_save)).performScrollTo().assertIsOff().performClick()
+            compose.onNodeWithText(app.getString(R.string.auto_save)).performScrollTo().assertIsOff().performClick().also { drainFileTasks() }
             assertTrue(prefs.getBoolean(Application.KEY_AUTOSAVE, false))
             assertTrue(Application.auto_save)
             restore.emulateSavedInstanceStateRestore()
-            compose.onNodeWithText(app.getString(R.string.auto_save)).assertIsOn().performClick()
+            compose.onNodeWithText(app.getString(R.string.auto_save)).assertIsOn().performClick().also { drainFileTasks() }
             assertFalse(prefs.getBoolean(Application.KEY_AUTOSAVE, true))
             assertFalse(Application.auto_save)
         } finally {
@@ -170,11 +170,12 @@ class ComposeUiStateTest {
             val activity = controller.get()
             activity.openFile(file)
             activity.fragmentManager.executePendingTransactions()
+            drainFileTasks()
             activity.editor.paste("draft ")
             val restore = StateRestorationTester(compose)
             restore.setContent { MaterialTheme { SearchDialog(activity, file.path) {} } }
             compose.onNode(hasSetTextAction()).performTextReplacement("original")
-            compose.onNodeWithText(activity.getString(R.string.replace)).performClick()
+            compose.onNodeWithText(activity.getString(R.string.replace)).performClick().also { drainFileTasks() }
             compose.onAllNodes(hasSetTextAction())[1].performTextInput("replacement")
             restore.emulateSavedInstanceStateRestore()
             compose.onAllNodes(hasSetTextAction())[0].assertTextContains("original")
@@ -203,15 +204,15 @@ class ComposeUiStateTest {
         }
         compose.onNodeWithText(app.getString(R.string.run_entry_file)).performTextInput("src/main.py")
         compose.onNodeWithText(app.getString(R.string.run_working_directory)).performTextInput("data")
-        compose.onNodeWithText(app.getString(R.string.run_add_argument)).performScrollTo().performClick()
+        compose.onNodeWithText(app.getString(R.string.run_add_argument)).performScrollTo().performClick().also { drainFileTasks() }
         compose.onNodeWithText(app.getString(R.string.run_argument, 1)).performScrollTo().performTextInput("two words;$(literal)")
-        compose.onNodeWithText(app.getString(R.string.run_add_argument)).performScrollTo().performClick()
+        compose.onNodeWithText(app.getString(R.string.run_add_argument)).performScrollTo().performClick().also { drainFileTasks() }
         restore.emulateSavedInstanceStateRestore()
         compose.onNodeWithText(app.getString(R.string.run_entry_file)).performScrollTo().assertTextContains("src/main.py")
         compose.onNodeWithText(app.getString(R.string.run_argument, 1)).performScrollTo().assertTextContains("two words;$(literal)")
         compose.onNodeWithText(app.getString(R.string.run_argument, 2)).performScrollTo().assertTextContains("")
         assertNull(saved)
-        compose.onNodeWithText(app.getString(R.string.save)).performClick()
+        compose.onNodeWithText(app.getString(R.string.save)).performClick().also { drainFileTasks() }
         assertEquals(RunConfiguration("src/main.py", listOf("two words;$(literal)", ""), "data"), saved)
         assertTrue(dismissed)
     }
@@ -226,9 +227,9 @@ class ComposeUiStateTest {
                     onSave = { attempted = it; false }, onDismiss = { dismissed = true })
             }
         }
-        compose.onNodeWithText(app.getString(R.string.run_use_defaults)).performScrollTo().performClick()
+        compose.onNodeWithText(app.getString(R.string.run_use_defaults)).performScrollTo().performClick().also { drainFileTasks() }
         assertNull(attempted)
-        compose.onNodeWithText(app.getString(R.string.save)).performClick()
+        compose.onNodeWithText(app.getString(R.string.save)).performClick().also { drainFileTasks() }
         assertEquals(RunConfiguration(pythonEnvironment = ".venv"), attempted)
         compose.onNodeWithText(app.getString(R.string.run_config_save_failed)).performScrollTo().assertIsDisplayed()
         assertFalse(dismissed)
@@ -249,8 +250,8 @@ class ComposeUiStateTest {
         val remove = compose.onNodeWithContentDescription(app.getString(R.string.run_remove_argument, 8)).performScrollTo()
         val bounds = remove.getUnclippedBoundsInRoot()
         assertTrue(bounds.bottom - bounds.top >= 48.dp)
-        remove.performClick()
-        compose.onNodeWithText(app.getString(R.string.save)).assertIsDisplayed().performClick()
+        remove.performClick().also { drainFileTasks() }
+        compose.onNodeWithText(app.getString(R.string.save)).assertIsDisplayed().performClick().also { drainFileTasks() }
         assertEquals(List(7) { "value $it" }, saved!!.arguments)
     }
     @Test fun languageToolsInstallNeedsConfirmationAndRetainsSelectionOnRecreation() {
@@ -266,10 +267,10 @@ class ComposeUiStateTest {
                 onStopWaiting = { setup.value = setup.value.copy(stage = LanguageToolInstaller.Stage.CANCELLED,
                     detail = app.getString(R.string.tools_setup_stopped_waiting)) }) }
         }
-        compose.onNodeWithTag("tools-install-java").performScrollTo().performClick()
+        compose.onNodeWithTag("tools-install-java").performScrollTo().performClick().also { drainFileTasks() }
         assertNull(installed)
         restore.emulateSavedInstanceStateRestore()
-        compose.onNodeWithTag("tools-install-confirm").assertIsDisplayed().performClick()
+        compose.onNodeWithTag("tools-install-confirm").assertIsDisplayed().performClick().also { drainFileTasks() }
         assertEquals("java", installed)
         compose.onNodeWithTag("python-environment").performScrollTo().performTextInput(".venv")
         compose.onNodeWithTag("tools-install-pylsp").performScrollTo().assertIsNotEnabled()
@@ -277,7 +278,7 @@ class ComposeUiStateTest {
         compose.runOnIdle { setup.value = LanguageToolInstaller.Status(LanguageToolInstaller.Stage.INSTALLING, "java", "/another-project") }
         compose.onNodeWithTag("tools-install-java").performScrollTo().assertIsNotEnabled()
         compose.onNodeWithTag("tools-setup-status").performScrollTo().assertTextEquals(app.getString(R.string.tools_setup_installing))
-        compose.onNodeWithTag("tools-stop-waiting").performScrollTo().performClick()
+        compose.onNodeWithTag("tools-stop-waiting").performScrollTo().performClick().also { drainFileTasks() }
         compose.onNodeWithTag("tools-install-java").performScrollTo().assertIsEnabled()
         compose.onNodeWithTag("tools-setup-status").performScrollTo().assertTextEquals(app.getString(R.string.tools_setup_stopped_waiting))
         compose.onNodeWithTag("tools-stop-waiting").assertDoesNotExist()
@@ -298,20 +299,20 @@ class ComposeUiStateTest {
             MaterialTheme { LanguageToolsDialog("/project", "", statuses,
                 onSave = { saved = it; succeed }, onRestart = { restarts++ }, onDismiss = {}, initialError = configurationError.value) }
         }
-        compose.onNodeWithTag("lsp-restart-pylsp").performScrollTo().performClick()
+        compose.onNodeWithTag("lsp-restart-pylsp").performScrollTo().performClick().also { drainFileTasks() }
         assertEquals(1, restarts)
         compose.onNodeWithTag("python-environment").performScrollTo().performTextInput(".venv")
         restore.emulateSavedInstanceStateRestore()
         compose.onNodeWithTag("python-environment").performScrollTo().assertTextContains(".venv")
         compose.onNodeWithTag("lsp-restart-pylsp").performScrollTo().assertIsNotEnabled()
         compose.onNodeWithText(app.getString(R.string.language_tools_java)).performScrollTo().assertIsDisplayed()
-        compose.onNodeWithTag("lsp-restart-java").performScrollTo().assertIsEnabled().performClick()
+        compose.onNodeWithTag("lsp-restart-java").performScrollTo().assertIsEnabled().performClick().also { drainFileTasks() }
         assertEquals(2, restarts)
-        compose.onNodeWithTag("python-environment-apply").performClick()
+        compose.onNodeWithTag("python-environment-apply").performClick().also { drainFileTasks() }
         assertEquals(".venv", saved)
         compose.onNodeWithText(app.getString(R.string.run_config_save_failed)).performScrollTo().assertIsDisplayed()
         succeed = true
-        compose.onNodeWithTag("python-environment-apply").performClick()
+        compose.onNodeWithTag("python-environment-apply").performClick().also { drainFileTasks() }
         compose.onNodeWithTag("python-environment-apply").assertIsNotEnabled()
         compose.onNodeWithTag("lsp-restart-pylsp").performScrollTo().assertIsEnabled()
         compose.runOnIdle { configurationError.value = "Unreadable Python configuration" }

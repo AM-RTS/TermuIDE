@@ -11,10 +11,8 @@ class SettingsActivity : ComponentActivity(), Utils.ComposeDialogHost {
     private lateinit var prefs: android.content.SharedPreferences
     private var originalValues: Map<String, *> = emptyMap<String, Any>()
     private var uiRefresh: Runnable? = null
-    private var installPrompt = false
-    private var installPromptNoRemind = false
-    private var initPrompt = false
-    private var initPromptNoRemind = false
+    private val prompts = TermuxPrompts { uiRefresh?.run() }
+    override fun getTermuxPrompts() = prompts
 
     override fun onCreate(savedInstanceState: Bundle?) {
         Utils.setNightMode(this, Application.theme)
@@ -23,10 +21,7 @@ class SettingsActivity : ComponentActivity(), Utils.ComposeDialogHost {
         @Suppress("UNCHECKED_CAST", "DEPRECATION")
         val restoredValues = savedInstanceState?.getSerializable("originalValues") as? HashMap<String, *>
         originalValues = restoredValues ?: HashMap(prefs.all)
-        installPrompt = savedInstanceState?.getBoolean("installPrompt") ?: false
-        installPromptNoRemind = savedInstanceState?.getBoolean("installPromptNoRemind") ?: false
-        initPrompt = savedInstanceState?.getBoolean("initPrompt") ?: false
-        initPromptNoRemind = savedInstanceState?.getBoolean("initPromptNoRemind") ?: false
+        prompts.restore(savedInstanceState)
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() = finishSettings()
         })
@@ -58,37 +53,6 @@ class SettingsActivity : ComponentActivity(), Utils.ComposeDialogHost {
 
     fun setUiRefresh(callback: Runnable?) { uiRefresh = callback }
 
-    override fun showTermuxInstallPrompt(showNeverRemind: Boolean) {
-        installPrompt = true
-        installPromptNoRemind = showNeverRemind
-        uiRefresh?.run()
-    }
-
-    override fun showTermuxInitPrompt(showAlreadyInitialized: Boolean) {
-        initPrompt = true
-        initPromptNoRemind = showAlreadyInitialized
-        uiRefresh?.run()
-    }
-
-    fun isInstallPromptOpen() = installPrompt
-    fun isInstallPromptNoRemind() = installPromptNoRemind
-    fun isInitPromptOpen() = initPrompt
-    fun isInitPromptNoRemind() = initPromptNoRemind
-
-    fun resolveInstallPrompt(launchInstaller: Boolean, neverRemind: Boolean) {
-        installPrompt = false
-        if (launchInstaller) Utils.startTermuxInstall(this)
-        else if (neverRemind) Utils.skipTermuxInstallReminder(this)
-        uiRefresh?.run()
-    }
-
-    fun resolveInitPrompt(initialize: Boolean, alreadyInitialized: Boolean) {
-        initPrompt = false
-        if (initialize) Utils.copyJump(this)
-        else if (alreadyInitialized) Utils.skipTermuxInitReminder(this)
-        uiRefresh?.run()
-    }
-
     fun finishSettings() {
         if (::prefs.isInitialized) {
             val themeChanged = originalValues[Application.KEY_THEME] != prefs.getString(Application.KEY_THEME, "l")
@@ -108,10 +72,7 @@ class SettingsActivity : ComponentActivity(), Utils.ComposeDialogHost {
 
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putSerializable("originalValues", HashMap(originalValues))
-        outState.putBoolean("installPrompt", installPrompt)
-        outState.putBoolean("installPromptNoRemind", installPromptNoRemind)
-        outState.putBoolean("initPrompt", initPrompt)
-        outState.putBoolean("initPromptNoRemind", initPromptNoRemind)
+        prompts.save(outState)
         super.onSaveInstanceState(outState)
     }
 

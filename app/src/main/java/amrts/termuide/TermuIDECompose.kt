@@ -63,6 +63,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -383,7 +384,7 @@ private fun DebugDetails(panel: DebugPanel, state: DebugSession.Snapshot, revisi
                     }
                 }
                 3 -> {
-                    Text(state.console, Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp), style = CodeTextStyle)
+                    Text(panel.output.console, Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp), style = CodeTextStyle)
                     Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                         OutlinedTextField(
                             value = command,
@@ -397,7 +398,7 @@ private fun DebugDetails(panel: DebugPanel, state: DebugSession.Snapshot, revisi
                         TextButton(onClick = { panel.sendConsole(command); onCommand("") }) { Text(context.getString(R.string.send_command)) }
                     }
                 }
-                else -> Text(state.debug, Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp), style = MaterialTheme.typography.bodySmall)
+                else -> Text(panel.output.debug, Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp), style = MaterialTheme.typography.bodySmall)
             }
         }
     }
@@ -446,7 +447,7 @@ private fun MainScreen(activity: MainActivity, editorHost: FrameLayout) {
     val documents by Application.getInstance().documents.state.collectAsState()
     val execution by Application.getInstance().runs.state.collectAsState()
     val toolSetup by Application.getInstance().toolInstaller.state.collectAsState()
-    var revision by remember { mutableIntStateOf(0) }
+    val ui by activity.uiState.collectAsState()
     var browserOpen by rememberSaveable { mutableStateOf(false) }
     var wideBrowserOpen by rememberSaveable { mutableStateOf(true) }
     val browserListState = rememberLazyListState()
@@ -462,24 +463,17 @@ private fun MainScreen(activity: MainActivity, editorHost: FrameLayout) {
     var diagnosticsOpen by rememberSaveable { mutableStateOf(false) }
 
     DisposableEffect(activity) {
-        activity.setUiRefresh { revision++ }
         activity.setSearchUi { searchPath = activity.selectedFilePath; searchOpen = true }
         onDispose {
-            activity.setUiRefresh(null)
             activity.setSearchUi(null)
         }
     }
 
-    if (revision < 0) return@BoxWithConstraints
-        val paths = activity.openFilePaths
+        val paths = ui.paths
         val dirtyPaths = documents.filter { it.dirty }.map { it.path }.toSet()
         val labels = paths.map { path -> (if (path in dirtyPaths) "*" else "") + java.io.File(path).name }
-        val selected = activity.selectedItem
-        val diagnostics = paths.flatMap { path ->
-            val fragment = activity.fragmentManager.findFragmentByTag(path) as? EditFragment
-            fragment?.view?.text?.diag.orEmpty().filter { diagnosticIsCurrent(it, fragment) }
-                .map { path to it }
-        }
+        val selected = ui.selected
+        val diagnostics = ui.diagnostics
         val editorColors = MaterialTheme.colorScheme
         SideEffect {
             paths.forEach { path ->
@@ -491,13 +485,13 @@ private fun MainScreen(activity: MainActivity, editorHost: FrameLayout) {
                 )
             }
         }
-        val projectPrompt = activity.pendingProjectPath
-        val reloadPrompt = activity.pendingReload
-        val renamePrompt = activity.pendingRename
-        val runVisible = activity.isRunVisible
-        val hasProject = activity.hasProject()
-        val canDebug = activity.canDebug()
-        val canCompile = activity.canCompile()
+        val projectPrompt = ui.projectPrompt
+        val reloadPrompt = ui.reloadPath
+        val renamePrompt = ui.renamePath
+        val runVisible = ui.runVisible
+        val hasProject = ui.project
+        val canDebug = ui.debug
+        val canCompile = ui.compile
         val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         val coroutineScope = rememberCoroutineScope()
         val context = LocalContext.current
@@ -506,7 +500,7 @@ private fun MainScreen(activity: MainActivity, editorHost: FrameLayout) {
             topBar = {
                 TopAppBar(
                     title = {
-                        OpenFilesTitle(activity, paths, labels, dirtyPaths, selected)
+                        OpenFilesTitle(activity, paths, labels, dirtyPaths, selected, ui.savingClose || ui.fileBusy)
                     },
                     navigationIcon = {
                         IconButton(onClick = { if (wide) wideBrowserOpen = !wideBrowserOpen else browserOpen = true }) {
@@ -618,10 +612,10 @@ private fun MainScreen(activity: MainActivity, editorHost: FrameLayout) {
                             TextButton(onClick = { diagnosticsOpen = true }, modifier = Modifier.weight(1f).testTag("diagnostics-button")) {
                                 Text(context.getString(R.string.diagnostics_count, diagnostics.size), maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
-                            IconButton(enabled = activity.editor?.text?.canUndo() == true, onClick = { activity.performAction(R.id.undo) }) {
+                            IconButton(enabled = ui.undo, onClick = { activity.performAction(R.id.undo) }) {
                                 Icon(painterResource(R.drawable.ic_undo_24), context.getString(R.string.undo))
                             }
-                            IconButton(enabled = activity.editor?.text?.canRedo() == true, onClick = { activity.performAction(R.id.redo) }) {
+                            IconButton(enabled = ui.redo, onClick = { activity.performAction(R.id.redo) }) {
                                 Icon(painterResource(R.drawable.ic_redo_24), context.getString(R.string.redo))
                             }
                             IconButton(enabled = selected >= 0, onClick = { activity.performAction(R.id.save) }) {
@@ -650,7 +644,7 @@ private fun MainScreen(activity: MainActivity, editorHost: FrameLayout) {
             Row(Modifier.fillMaxSize().padding(padding)) {
                 if (wide && wideBrowserOpen) {
                     Surface(Modifier.width(320.dp).fillMaxHeight().testTag("browser-pane"), tonalElevation = 1.dp) {
-                        FileBrowserContent(activity, revision, browserListState,
+                        FileBrowserContent(activity, ui, browserListState,
                             onDismiss = { wideBrowserOpen = false },
                             onOpen = { activity.onFileSelected(it); browserOpen = false },
                             onNewFile = { newFileOpen = true }, onNewProject = { newProjectOpen = true },
@@ -666,6 +660,15 @@ private fun MainScreen(activity: MainActivity, editorHost: FrameLayout) {
                     },
                     modifier = Modifier.fillMaxSize()
                 )
+                if (ui.sourceLoading) LinearProgressIndicator(Modifier.fillMaxWidth().align(Alignment.TopCenter))
+                if (ui.sourceUnavailable) Surface(Modifier.align(Alignment.BottomCenter).fillMaxWidth(), tonalElevation = 3.dp) {
+                    Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(context.getString(R.string.source_unavailable), Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                        TextButton(enabled = !ui.fileBusy, onClick = {
+                            paths.getOrNull(selected)?.let { activity.fragmentManager.findFragmentByTag(it) as? EditFragment }?.let(activity::requestReload)
+                        }) { Text(context.getString(R.string.reload_source)) }
+                    }
+                }
                 if (paths.isEmpty()) {
                     Text(
                         text = context.getString(R.string.no_open_files),
@@ -681,7 +684,7 @@ private fun MainScreen(activity: MainActivity, editorHost: FrameLayout) {
         if (browserOpen && !wide) {
             FileBrowserSheet(
                 activity = activity,
-                revision = revision,
+                ui = ui,
                 state = sheetState,
                 listState = browserListState,
                 onDismiss = { browserOpen = false },
@@ -702,7 +705,7 @@ private fun MainScreen(activity: MainActivity, editorHost: FrameLayout) {
         if (diagnosticsOpen) DiagnosticsSheet(diagnostics, execution, onDismiss = { diagnosticsOpen = false }) { path, diagnostic ->
             val index = activity.openFilePaths.indexOf(path)
             val fragment = activity.fragmentManager.findFragmentByTag(path) as? EditFragment
-            if (!diagnosticIsCurrent(diagnostic, fragment)) return@DiagnosticsSheet
+            if (!WorkspacePresentation.current(diagnostic, fragment)) return@DiagnosticsSheet
             if (index >= 0) {
                 activity.selectItem(index)
                 activity.editor?.let { editor ->
@@ -719,7 +722,7 @@ private fun MainScreen(activity: MainActivity, editorHost: FrameLayout) {
         languageToolsScope?.let { scope ->
             key(scope) {
                 val loaded = remember(scope) { runCatching { RunConfiguration.load(context, scope) } }
-                LanguageToolsDialog(scope, loaded.getOrDefault(RunConfiguration()).pythonEnvironment, activity.languageServerStatus,
+                LanguageToolsDialog(scope, loaded.getOrDefault(RunConfiguration()).pythonEnvironment, ui.servers,
                     onSave = { activity.savePythonEnvironment(scope, it) },
                     onRestart = { activity.restartLanguageServer(scope, it) }, onDismiss = { languageToolsScope = null },
                     onInstall = { activity.installLanguageTools(scope, it) }, setup = toolSetup,
@@ -738,22 +741,22 @@ private fun MainScreen(activity: MainActivity, editorHost: FrameLayout) {
         renameTarget?.let { target -> RenameDialog(activity, target) { renameTarget = null } }
         deleteTarget?.let { target -> DeleteDialog(activity, target) { deleteTarget = null } }
         if (searchOpen) searchPath?.let { path -> SearchDialog(activity, path) { searchOpen = false } }
-        SetupDialogs(activity, revision)
-        if (activity.pendingClosePaths.isNotEmpty()) {
+        SetupDialogs(activity.getTermuxPrompts(), ui.installPrompt, ui.installReminder, ui.initPrompt, ui.initReminder)
+        if (ui.closing.isNotEmpty()) {
             AlertDialog(
                 onDismissRequest = { activity.cancelCloseDocuments() },
                 title = { Text(context.getString(R.string.unsaved_changes)) },
                 text = {
                     Text(
-                        context.getString(R.string.save_before_close, activity.pendingClosePaths.joinToString("\n") { java.io.File(it).name }),
+                        context.getString(R.string.save_before_close, ui.closing.joinToString("\n") { java.io.File(it).name }),
                         Modifier.verticalScroll(rememberScrollState())
                     )
                 },
-                confirmButton = { TextButton(enabled = !activity.isSavingClose, onClick = { activity.resolveCloseDocuments(true) }) { Text(context.getString(if (activity.isSavingClose) R.string.saving else R.string.save)) } },
+                confirmButton = { TextButton(enabled = !ui.savingClose, onClick = { activity.resolveCloseDocuments(true) }) { Text(context.getString(if (ui.savingClose) R.string.saving else R.string.save)) } },
                 dismissButton = {
                     FlowRow {
-                        TextButton(enabled = !activity.isSavingClose, onClick = { activity.resolveCloseDocuments(false) }) { Text(context.getString(R.string.discard)) }
-                        TextButton(enabled = !activity.isSavingClose, onClick = { activity.cancelCloseDocuments() }) { Text(context.getString(android.R.string.cancel)) }
+                        TextButton(enabled = !ui.savingClose, onClick = { activity.resolveCloseDocuments(false) }) { Text(context.getString(R.string.discard)) }
+                        TextButton(enabled = !ui.savingClose, onClick = { activity.cancelCloseDocuments() }) { Text(context.getString(android.R.string.cancel)) }
                     }
                 }
             )
@@ -761,14 +764,14 @@ private fun MainScreen(activity: MainActivity, editorHost: FrameLayout) {
         reloadPrompt?.let { fragment ->
             AlertDialog(
                 onDismissRequest = { activity.dismissReload() },
-                title = { Text(fragment.file.name) },
-                text = { Text(context.getString(R.string.file_modified, fragment.file.name)) },
+                title = { Text(java.io.File(fragment).name) },
+                text = { Text(context.getString(R.string.reload_source_confirm, java.io.File(fragment).name)) },
                 confirmButton = { TextButton(onClick = { activity.confirmReload() }) { Text(context.getString(android.R.string.ok)) } },
                 dismissButton = { TextButton(onClick = { activity.dismissReload() }) { Text(context.getString(android.R.string.cancel)) } }
             )
         }
         renamePrompt?.let {
-            key(it.file.absolutePath) { SymbolRenameDialog(activity, activity.pendingRenameText ?: "") }
+            key(it) { SymbolRenameDialog(activity, ui.renameText ?: "") }
         }
         projectPrompt?.let { path ->
             AlertDialog(
@@ -965,7 +968,7 @@ internal fun LanguageToolsDialog(
 }
 
 @Composable
-private fun OpenFilesTitle(activity: MainActivity, paths: List<String>, labels: List<String>, dirtyPaths: Set<String>, selected: Int) {
+private fun OpenFilesTitle(activity: MainActivity, paths: List<String>, labels: List<String>, dirtyPaths: Set<String>, selected: Int, busy: Boolean) {
     val context = LocalContext.current
     var expanded by remember { mutableStateOf(false) }
     Box {
@@ -999,7 +1002,7 @@ private fun OpenFilesTitle(activity: MainActivity, paths: List<String>, labels: 
                     },
                     leadingIcon = { if (active) Icon(Icons.Filled.Check, contentDescription = null) },
                     trailingIcon = {
-                        IconButton(enabled = !activity.isSavingClose, onClick = {
+                        IconButton(enabled = !busy, onClick = {
                             expanded = false
                             activity.closeFile(activity.openFilePaths.indexOf(path))
                         }) {
@@ -1012,9 +1015,6 @@ private fun OpenFilesTitle(activity: MainActivity, paths: List<String>, labels: 
         }
     }
 }
-
-private fun diagnosticIsCurrent(diagnostic: cn.rbc.codeeditor.util.ErrSpan, fragment: EditFragment?): Boolean =
-    fragment != null && (diagnostic !is Diagnostic || diagnostic.documentVersion < 0 || diagnostic.documentVersion == fragment.version)
 
 private fun executionMessage(context: Context, execution: RunController.Status): String = when (execution.stage) {
     RunController.Stage.CHECKING -> context.getString(R.string.runtime_checking)
@@ -1084,7 +1084,7 @@ private fun ActionMenuItem(label: String, enabled: Boolean, onClick: () -> Unit)
 @Composable
 private fun FileBrowserSheet(
     activity: MainActivity,
-    revision: Int,
+    ui: WorkspacePresentation.State,
     state: SheetState,
     listState: LazyListState,
     onDismiss: () -> Unit,
@@ -1096,7 +1096,7 @@ private fun FileBrowserSheet(
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = state) {
         Box(Modifier.fillMaxWidth().fillMaxHeight(0.85f)) {
-            FileBrowserContent(activity, revision, listState, onDismiss, onOpen, onNewFile, onNewProject, onRename, onDelete)
+            FileBrowserContent(activity, ui, listState, onDismiss, onOpen, onNewFile, onNewProject, onRename, onDelete)
         }
     }
 }
@@ -1104,7 +1104,7 @@ private fun FileBrowserSheet(
 @Composable
 private fun FileBrowserContent(
     activity: MainActivity,
-    revision: Int,
+    ui: WorkspacePresentation.State,
     listState: LazyListState,
     onDismiss: () -> Unit,
     onOpen: (String) -> Unit,
@@ -1114,14 +1114,15 @@ private fun FileBrowserContent(
     onDelete: (String) -> Unit
 ) {
     val context = LocalContext.current
-    val path = remember(revision) { activity.directoryPath }
-    val names = remember(revision) { activity.directoryItems }
+    val path = ui.directory
+    val names = ui.entries.map { it.name }
     var storageMenu by remember { mutableStateOf(false) }
     var previousPath by rememberSaveable { mutableStateOf(path) }
     LaunchedEffect(path) {
         if (previousPath != path) { listState.scrollToItem(0); previousPath = path }
     }
     Column(Modifier.fillMaxSize().padding(bottom = 8.dp).semantics { paneTitle = context.getString(R.string.file_browser) }) {
+        if (ui.directoryLoading) LinearProgressIndicator(Modifier.fillMaxWidth())
         LazyColumn(Modifier.fillMaxWidth().weight(1f).testTag("browser-list"), state = listState) {
             item(key = "browser-header") {
             Row(
@@ -1157,11 +1158,11 @@ private fun FileBrowserContent(
                 itemsIndexed(names, key = { _, name -> "$path/$name" }) { index, name ->
                     var actions by remember(name) { mutableStateOf(false) }
                     Row(
-                        Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(role = Role.Button) { onOpen(name) }.padding(start = 16.dp, end = 8.dp),
+                        Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(enabled = !ui.directoryLoading && !ui.fileBusy, role = Role.Button) { onOpen(name) }.padding(start = 16.dp, end = 8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
-                            painterResource(activity.getDirectoryIcon(index)),
+                            painterResource(ui.entries[index].icon),
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(28.dp)
@@ -1242,7 +1243,7 @@ internal fun NewProjectDialog(activity: MainActivity, onDismiss: () -> Unit) {
             }
         },
         confirmButton = {
-            TextButton(onClick = { if (activity.createProject(name.trim(), template, clangd, format)) onDismiss() }) { Text(context.getString(android.R.string.ok)) }
+            TextButton(onClick = { activity.createProject(name.trim(), template, clangd, format).thenAccept { if (it) onDismiss() } }) { Text(context.getString(android.R.string.ok)) }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text(context.getString(android.R.string.cancel)) } }
     )
@@ -1488,7 +1489,7 @@ internal fun SettingsScreen(activity: SettingsActivity, prefs: android.content.S
         }
     }
     if (showAbout) AboutDialog { showAbout = false }
-    SetupDialogs(activity, revision)
+    SetupDialogs(activity.getTermuxPrompts(), activity.getTermuxPrompts().install, activity.getTermuxPrompts().installNoRemind, activity.getTermuxPrompts().initialize, activity.getTermuxPrompts().initNoRemind)
 }
 
 @Composable
@@ -1552,43 +1553,18 @@ private fun AboutDialog(onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun SetupDialogs(activity: MainActivity, revision: Int) {
-    if (revision == Int.MIN_VALUE) return
+private fun SetupDialogs(prompts: TermuxPrompts, install: Boolean, installReminder: Boolean, initialize: Boolean, initReminder: Boolean) {
     val context = LocalContext.current
-    if (activity.isInstallPromptOpen) {
-        InstallPromptDialog(
-            activity.isInstallPromptNoRemind,
-            onDismiss = { activity.resolveInstallPrompt(false, false) },
-            onInstall = { activity.resolveInstallPrompt(true, false) },
-            onNever = { activity.resolveInstallPrompt(false, true) }
-        )
-    } else if (activity.isInitPromptOpen) {
-        InitPromptDialog(
-            activity.isInitPromptNoRemind,
-            onDismiss = { activity.resolveInitPrompt(false, false) },
-            onInitialize = { activity.resolveInitPrompt(true, false) },
-            onAlready = { activity.resolveInitPrompt(false, true) }
-        )
-    }
-}
-
-@Composable
-private fun SetupDialogs(activity: SettingsActivity, revision: Int) {
-    if (revision == Int.MIN_VALUE) return
-    if (activity.isInstallPromptOpen()) {
-        InstallPromptDialog(
-            activity.isInstallPromptNoRemind(),
-            onDismiss = { activity.resolveInstallPrompt(false, false) },
-            onInstall = { activity.resolveInstallPrompt(true, false) },
-            onNever = { activity.resolveInstallPrompt(false, true) }
-        )
-    } else if (activity.isInitPromptOpen()) {
-        InitPromptDialog(
-            activity.isInitPromptNoRemind(),
-            onDismiss = { activity.resolveInitPrompt(false, false) },
-            onInitialize = { activity.resolveInitPrompt(true, false) },
-            onAlready = { activity.resolveInitPrompt(false, true) }
-        )
+    if (install) {
+        InstallPromptDialog(installReminder,
+            onDismiss = { prompts.resolveInstall(context, false, false) },
+            onInstall = { prompts.resolveInstall(context, true, false) },
+            onNever = { prompts.resolveInstall(context, false, true) })
+    } else if (initialize) {
+        InitPromptDialog(initReminder,
+            onDismiss = { prompts.resolveInitialize(context, false, false) },
+            onInitialize = { prompts.resolveInitialize(context, true, false) },
+            onAlready = { prompts.resolveInitialize(context, false, true) })
     }
 }
 

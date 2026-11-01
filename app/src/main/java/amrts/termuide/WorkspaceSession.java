@@ -2,7 +2,6 @@ package amrts.termuide;
 
 import android.os.Bundle;
 import java.io.File;
-import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 
@@ -16,6 +15,32 @@ final class WorkspaceSession extends HeaderAdapter {
     boolean savingClose;
     CompletableFuture<Void> sourceClose;
     ProjectClose projectClose;
+
+    final WorkspacePresentation presentation = new WorkspacePresentation();
+    CompletableFuture<FileResult> fileOperation;
+    private Runnable fileListener;
+    void setFileListener(Runnable listener) { fileListener = listener; }
+    static final class FileResult {
+        final File[] changed;
+        final Project.Config previous, created;
+        final int message;
+        List<String> openingTabs;
+        List<DocumentSession> openingRevisions;
+        Set<String> openingDiscards;
+        String retainedPath;
+        File originDirectory;
+        FileResult(int message, Project.Config previous, Project.Config created, File... changed) {
+            this.message = message; this.previous = previous; this.created = created; this.changed = changed;
+        }
+    }
+    CompletableFuture<FileResult> startFileOperation(java.util.concurrent.Callable<FileResult> task) {
+        if (fileOperation != null) throw new IllegalStateException("A file operation is already running");
+        Application.getInstance().getRuns().cancelPreparation();
+        CompletableFuture<FileResult> pending = Application.getInstance().fileTask(task);
+        fileOperation = pending;
+        pending.whenComplete((result, error) -> { if (fileListener != null) fileListener.run(); });
+        return pending;
+    }
 
     static final class CloseRequest {
         final int kind;
@@ -39,7 +64,7 @@ final class WorkspaceSession extends HeaderAdapter {
             this.discards = discards; this.result = result;
         }
         boolean isCurrent(WorkspaceSession workspace, DocumentSessions documents, DocumentSaver saver) {
-            return Objects.equals(root, Project.rootPath) && tabs.equals(workspace)
+            return Objects.equals(root, Project.snapshot().rootPath) && tabs.equals(workspace)
                 && tabs.stream().noneMatch(saver::isSaving)
                 && revisions.equals(documentState(documents, tabs));
         }
@@ -99,15 +124,9 @@ final class WorkspaceSession extends HeaderAdapter {
         else documents.closeDocument(path);
     }
 
-    List<String> openProject(File configuration) throws IOException {
-        List<String> opens = new ArrayList<>();
-        Project.load(configuration, opens);
-        return opens;
-    }
-
     void beginProjectClose(DocumentSessions documents) {
         List<String> tabs = new ArrayList<>(this);
-        projectClose = new ProjectClose(Project.rootPath, tabs, documentState(documents, tabs),
+        projectClose = new ProjectClose(Project.snapshot().rootPath, tabs, documentState(documents, tabs),
             new HashSet<>(approvedDiscards), Project.save(tabs));
         savingClose = true;
     }

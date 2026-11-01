@@ -12,14 +12,16 @@ Implemented: shared C/C++/Python/Java execution, per-language LSP sessions, Pyth
 | `RunCommands` | Immutable command plans, required tools, literal arguments and working directories |
 | `RunController` / `RunResultReceiver` | Preparation, probes, cancellation, correlated Termux results and observable execution status |
 | `Utils.run` | Existing RUN_COMMAND transport for execution, language servers, debugging and setup |
-| `WorkspaceSession` / `HeaderAdapter` | Path-based selection, tab order, project transitions and pending close operations |
+| `WorkspaceSession` / `HeaderAdapter` | Path-based selection, tab order, retained file operations, project transitions and pending closes |
+| `WorkspacePresentation` | Observable workspace snapshots for tabs, diagnostics, prompts, browser entries and action availability |
 | `MainActivity` / `EditFragment` | Android lifecycle, editor hosting, user actions and presentation of results |
 | `DocumentSessions` / `DraftStore` | Dirty revisions, document ownership and durable private checkpoints |
 | `DocumentSaver` / `SourceWriter` | Serialized background writes, revision-aware completion and source publication |
-| `Project` / `RunConfiguration` | Project commands/snapshots and private per-scope run/environment overrides |
-| `LanguageServers` / `Lsp` / `MainHandler` | Server sessions, protocol messages, capability/revision guards and editor updates |
+| `Project` / `RunConfiguration` | One immutable current project configuration and private per-scope run/environment overrides |
+| `LanguageServers` / `Lsp` / `LspResponses` / `MainHandler` | Server sessions/transport, view-independent response decoding, revision guards and editor updates |
 | `DebugSession` / `DebugPanel` | GDB transport/MI state and Compose overlay presentation |
 | `LanguageToolInstaller` | Explicit setup confirmation, pending callbacks and post-install verification |
+| `TermuxPrompts` | Shared Activity-owned install/initialization prompts, actions and saved state |
 
 Sora supplies rendering/input; inherited `codeeditor` utilities retain document, undo, lexer and completion behavior. No separate runtime module, embedded terminal, DI framework or plugin framework is required.
 
@@ -36,6 +38,12 @@ Run configuration is private per project root or browser folder. Relative overri
 The Application-owned controller survives Activity recreation and distinguishes preparation, dispatch, completion, failure and unknown status. Probes have bounded waits; interactive programs may run indefinitely. Cancellation stops preparation, not a dispatched Termux process. After app process death, pending-status metadata reports uncertainty rather than replaying execution.
 
 Workspace close completion waits for a resumed host and mutable FragmentManager state. Project-save failure keeps the project open; changed tab/session revisions cancel closing. Auto-save pauses throughout closing, and a later explicit save cancels the pending close. Rotation can retain a confirmed decision; process-death restoration recreates prompts without replaying an in-memory Discard approval.
+
+## Background file work
+
+One Application-owned file executor handles directory listings, source/reload reads, closed-file LSP edit preparation, browser mutations and project parsing/template extraction. The save and checkpoint workers retain their existing responsibilities. Directory generations reject stale listings; source reads validate view identity, document revision and source timestamps before applying. Loading disables source input, saves await it, and failed reads retain the source-load guard.
+
+Browser-operation results live in the retained workspace. Only the current resumed host consumes them; a destroyed Activity is never called to refresh its cleared adapter. Project opening rechecks captured tabs/revisions/selection before applying a saved Discard decision. Project creation checks its original configuration and browser directory before activation. Process death does not persist/replay a Discard approval or a filesystem request.
 
 ## Durable recovery and source saves
 
@@ -81,11 +89,11 @@ Java setup preserves the registered runtime selection and detects incompatible o
 
 `DebugSession` parses GDB MI into immutable snapshots independently of the Activity. Token-correlated replies tolerate interleaved async events and out-of-order responses. Stop/run transitions invalidate stale variable/frame requests; variable objects are cleaned up. Breakpoint controls use GDB-assigned IDs and quoted MI arguments.
 
-`DebugPanel` renders snapshots on the main thread, ignores closed-session callbacks, resets compact sizing and creates a fresh overlay per connection. The console enables IME focus only while visible, including when detached. System input routing still needs physical-device evidence; direct Compose touch tests alone cannot establish it.
+`DebugPanel` renders snapshots on the main thread, ignores closed-session callbacks, resets compact sizing and creates a fresh overlay per connection. The console enables IME focus only while visible, including when detached. System input routing still needs physical-device evidence; direct Compose touch tests alone cannot establish it. Console/debug output is streamed separately from inspection snapshots, with coalesced UI updates. Each visible channel retains up to 64 Ki UTF-16 code units and marks omitted history; variable/frame/control snapshots do not copy that history.
 
 ## Verification records
 
-These are historical checkpoints, not assertions that later assets/docs were tested.
+These are historical checkpoints, not assertions that later changes were tested. The November 1 architecture follow-up adds source regressions for retained file operations, guarded background reads, observable workspace controls, shared prompts, immutable project state and bounded debugger output. These changes and adapted fixtures have not been compiled or executed: local Gradle/builds/tests, CI and device checks were explicitly skipped.
 
 - [App CI 41276363192](https://github.com/AM-RTS/TermuIDE/actions/runs/41276363192), `4c7c8b9` (November 1, 2026): 276 app host tests, zero failures/errors/skips; 14 installer and four launcher checks; debug/minified release builds and v2/v3 signature verification passed. Includes cleanup/rollback failure, checkpoint recovery, revision-aware saving, project close, LSP, installer callbacks and real pip isolation. Numerical branch coverage, mutation strength and repeated-run flake rates remain unmeasured.
 - [Server CI 40939268982](https://github.com/AM-RTS/java-language-server/actions/runs/40939268982), `917d14ff`: 253 tests, zero failures/errors, ten existing skips; focused regressions and parser/pruner benchmarks passed. Benchmarks do not measure the all-open-document diagnostic workload.

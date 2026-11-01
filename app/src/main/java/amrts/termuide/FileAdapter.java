@@ -10,8 +10,12 @@ import java.util.List;
 
 /** File listing model shared by the Compose browser and font picker. */
 public class FileAdapter implements Comparator<FileItem>, FileFilter {
-    private static FileItem parent;
-    private List<FileItem> data;
+    private static final FileItem parent = new FileItem(R.drawable.ic_folder_24, "..");
+    private List<FileItem> data = Collections.emptyList();
+    private long generation;
+    private boolean loading, closed;
+    private File path, projectDirectory;
+    private Runnable changed;
     private boolean hasParent;
     private final FileFilter filter;
 
@@ -29,17 +33,49 @@ public class FileAdapter implements Comparator<FileItem>, FileFilter {
 
     public int getCount() { return hasParent ? data.size() + 1 : data.size(); }
 
-    public void setPath(File path) {
-        if (FileHelper.isTermuxFile(path)) {
-            Uri uri = Application.getInstance().treeUri;
-            String root = uri == null ? path.getAbsolutePath() : DocumentsContract.getTreeDocumentId(uri);
-            hasParent = !root.equals(path.getAbsolutePath());
-        } else {
-            hasParent = !Utils.ROOT.equals(path);
-        }
-        if (parent == null && hasParent) parent = new FileItem(R.drawable.ic_folder_24, "..");
-        data = FileHelper.lists(path, this);
-        Collections.sort(data, this);
+    public void setOnChanged(Runnable listener) { changed = listener; }
+    public boolean isLoading() { return loading; }
+    public File getProjectDirectory() { return projectDirectory; }
+    public boolean containsFile(String name) {
+        for (FileItem item : data) if (item.name.equals(name)) return item.icon != R.drawable.ic_folder_24;
+        return false;
+    }
+    public void release() { closed = true; generation++; changed = null; }
+
+    public void setPath(File directory) {
+        long expected = ++generation;
+        if (!directory.equals(path)) { data = Collections.emptyList(); hasParent = false; projectDirectory = null; }
+        path = directory;
+        loading = true;
+        Application.getInstance().fileTask(() -> {
+            boolean parentVisible;
+            File root = Utils.ROOT;
+            if (FileHelper.isTermuxFile(directory)) {
+                Uri uri = Application.getInstance().treeUri;
+                root = uri == null ? directory : new File(DocumentsContract.getTreeDocumentId(uri));
+            }
+            parentVisible = !root.equals(directory);
+            List<FileItem> entries = FileHelper.lists(directory, this);
+            Collections.sort(entries, this);
+            File project = null;
+            for (File folder = directory; folder != null && !folder.equals(root); folder = folder.getParentFile()) {
+                if (FileHelper.isFile(new File(folder, Project.PROJ))) { project = folder; break; }
+            }
+            return new Listing(entries, parentVisible, project);
+        }).whenComplete((listing, error) -> {
+            if (closed || expected != generation) return;
+            loading = false;
+            if (error == null) { data = listing.entries; hasParent = listing.parent; projectDirectory = listing.project; }
+            else { data = Collections.emptyList(); hasParent = false; projectDirectory = null; }
+            if (changed != null) changed.run();
+        });
+    }
+
+    private static final class Listing {
+        final List<FileItem> entries;
+        final boolean parent;
+        final File project;
+        Listing(List<FileItem> entries, boolean parent, File project) { this.entries = entries; this.parent = parent; this.project = project; }
     }
 
     @Override

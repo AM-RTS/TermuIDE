@@ -22,6 +22,7 @@ public class DebugPanel implements Runnable {
     private DebugSession session;
     private DebugSession.Snapshot state = DebugSession.Snapshot.empty();
     private long generation;
+    private DebugSession.Output output = DebugSession.Output.empty();
     private final ArrayList<String> breakpoints = new ArrayList<>();
     private final ArrayList<Boolean> breakpointEnabled = new ArrayList<>();
     private boolean detailsOpen;
@@ -58,9 +59,18 @@ public class DebugPanel implements Runnable {
         // A detached overlay's window recomposer belongs to its previous window.
         ctrlr = TermuIDECompose.debugView((androidx.activity.ComponentActivity)mCtx, this);
         final long expected = ++generation;
+        java.util.concurrent.atomic.AtomicReference<DebugSession.Output> pendingOutput = new java.util.concurrent.atomic.AtomicReference<>();
+        Runnable showOutput = () -> {
+            DebugSession.Output latest = pendingOutput.getAndSet(null);
+            if (generation == expected && latest != null) { output = latest; notifyUiChanged(); }
+        };
         session = new DebugSession(update -> main.post(() -> {
             if (generation == expected) applyState(update);
-        }));
+        }), update -> {
+            pendingOutput.set(update);
+            main.removeCallbacks(showOutput);
+            main.post(showOutput);
+        });
         session.connect(breakpoints);
     }
 
@@ -83,6 +93,8 @@ public class DebugPanel implements Runnable {
         notifyUiChanged();
     }
 
+    DebugSession.Output getOutput() { return output; }
+
     private void send(String command) { if (session != null) session.send(command); }
 
     public void hide() {
@@ -93,11 +105,11 @@ public class DebugPanel implements Runnable {
         setDetailsWindow(false);
         breakpoints.clear(); breakpointEnabled.clear();
         state = new DebugSession.Snapshot(DebugSession.IDLE, 0, false, false,
-            state.variables, state.frames, state.console, state.debug);
+            state.variables, state.frames);
         notifyUiChanged();
     }
 
-    public void clean() { hide(); state = DebugSession.Snapshot.empty(); notifyUiChanged(); }
+    public void clean() { hide(); state = DebugSession.Snapshot.empty(); output = DebugSession.Output.empty(); notifyUiChanged(); }
 
     void show() {
         Intent it = new Intent(Intent.ACTION_MAIN);

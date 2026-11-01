@@ -49,12 +49,14 @@ class AdaptiveUiTest {
     @Test @Config(qualifiers = "w1000dp-h800dp-land")
     fun wideBrowserStaysAlongsideTheEditorAfterOpeningAFile() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            drainFileTasks()
             compose.onNodeWithTag("browser-pane").assertIsDisplayed()
-            compose.onNodeWithText("first.txt").performClick()
+            compose.onNodeWithText("first.txt").performClick().also { drainFileTasks() }
             compose.onNodeWithTag("browser-pane").assertIsDisplayed()
             compose.onNodeWithTag("editor-pane").assertIsDisplayed()
             scenario.onActivity { activity ->
                 activity.fragmentManager.executePendingTransactions()
+                drainFileTasks()
                 activity.editor.paste("draft ")
                 assertEquals("draft original", activity.editor.text.toString())
                 assertTrue(app.documents.isDirty(activity.selectedFilePath))
@@ -70,9 +72,9 @@ class AdaptiveUiTest {
     fun compactBrowserUsesASheetAndClosesAfterOpeningAFile() {
         ActivityScenario.launch(MainActivity::class.java).use {
             compose.onNodeWithTag("browser-pane").assertDoesNotExist()
-            compose.onNodeWithContentDescription(app.getString(R.string.browse_files)).performClick()
+            compose.onNodeWithContentDescription(app.getString(R.string.browse_files)).performClick().also { drainFileTasks() }
             compose.onNodeWithText(app.getString(R.string.file_browser)).assertIsDisplayed()
-            compose.onNodeWithText("first.txt").performClick()
+            compose.onNodeWithText("first.txt").performClick().also { drainFileTasks() }
             compose.onNodeWithText(app.getString(R.string.file_browser)).assertDoesNotExist()
             compose.onNodeWithTag("editor-pane").assertIsDisplayed()
         }
@@ -85,7 +87,7 @@ class AdaptiveUiTest {
         resources.updateConfiguration(configuration, resources.displayMetrics)
         ActivityScenario.launch(MainActivity::class.java).use {
             compose.onNodeWithTag("browser-list").performScrollToNode(hasText("first.txt"))
-            compose.onNodeWithText("first.txt").assertIsDisplayed().performClick()
+            compose.onNodeWithText("first.txt").assertIsDisplayed().performClick().also { drainFileTasks() }
             compose.onNodeWithTag("browser-pane").assertIsDisplayed()
             compose.onNodeWithTag("editor-pane").assertIsDisplayed()
         }
@@ -96,28 +98,31 @@ class AdaptiveUiTest {
         val first = temporary.root.resolve("first.txt")
         val second = temporary.newFile("second.txt").apply { writeText("second original") }
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            drainFileTasks()
             scenario.onActivity { activity ->
                 activity.openFile(first)
                 activity.fragmentManager.executePendingTransactions()
+                drainFileTasks()
                 activity.openFile(second)
                 activity.fragmentManager.executePendingTransactions()
+                drainFileTasks()
                 activity.editor.paste("draft ")
             }
-            compose.onNodeWithContentDescription(app.getString(R.string.open_files)).performClick()
-            compose.onNodeWithContentDescription(app.getString(R.string.close_file, first.path)).performClick()
+            compose.onNodeWithContentDescription(app.getString(R.string.open_files)).performClick().also { drainFileTasks() }
+            compose.onNodeWithContentDescription(app.getString(R.string.close_file, first.path)).performClick().also { drainFileTasks() }
             scenario.onActivity { activity ->
                 assertEquals(listOf(second.path), activity.openFilePaths)
                 assertEquals(second.path, activity.selectedFilePath)
                 assertTrue(app.documents.isDirty(second.path))
             }
-            compose.onNodeWithContentDescription(app.getString(R.string.open_files)).performClick()
-            compose.onNodeWithContentDescription(app.getString(R.string.close_file, second.path)).performClick()
+            compose.onNodeWithContentDescription(app.getString(R.string.open_files)).performClick().also { drainFileTasks() }
+            compose.onNodeWithContentDescription(app.getString(R.string.close_file, second.path)).performClick().also { drainFileTasks() }
             compose.onNodeWithText(app.getString(R.string.unsaved_changes)).assertIsDisplayed()
-            compose.onNodeWithText(app.getString(android.R.string.cancel)).performClick()
+            compose.onNodeWithText(app.getString(android.R.string.cancel)).performClick().also { drainFileTasks() }
             scenario.onActivity { assertEquals(listOf(second.path), it.openFilePaths) }
-            compose.onNodeWithContentDescription(app.getString(R.string.open_files)).performClick()
-            compose.onNodeWithContentDescription(app.getString(R.string.close_file, second.path)).performClick()
-            compose.onNodeWithText(app.getString(R.string.discard)).performClick()
+            compose.onNodeWithContentDescription(app.getString(R.string.open_files)).performClick().also { drainFileTasks() }
+            compose.onNodeWithContentDescription(app.getString(R.string.close_file, second.path)).performClick().also { drainFileTasks() }
+            compose.onNodeWithText(app.getString(R.string.discard)).performClick().also { drainFileTasks() }
             scenario.onActivity { activity ->
                 app.documents.flush()
                 assertTrue(activity.openFilePaths.isEmpty())
@@ -133,21 +138,24 @@ class AdaptiveUiTest {
         val first = temporary.newFolder("one").resolve("same.c").apply { writeText("first original") }
         val second = temporary.newFolder("two").resolve("same.c").apply { writeText("second original") }
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            drainFileTasks()
             scenario.onActivity { activity ->
                 activity.openFile(first)
                 activity.fragmentManager.executePendingTransactions()
+                drainFileTasks()
                 activity.editor.paste("draft ")
                 activity.openFile(second)
                 activity.fragmentManager.executePendingTransactions()
+                drainFileTasks()
             }
-            compose.onNodeWithContentDescription(app.getString(R.string.open_files)).performClick()
+            compose.onNodeWithContentDescription(app.getString(R.string.open_files)).performClick().also { drainFileTasks() }
             compose.onNodeWithContentDescription(app.getString(R.string.close_file, second.path)).assertIsDisplayed()
-            compose.onNodeWithContentDescription(app.getString(R.string.close_file, first.path)).performClick()
+            compose.onNodeWithContentDescription(app.getString(R.string.close_file, first.path)).performClick().also { drainFileTasks() }
             scenario.onActivity { activity ->
                 assertEquals(listOf(first.path), activity.pendingClosePaths)
                 assertEquals(second.path, activity.selectedFilePath)
             }
-            compose.onNodeWithText(app.getString(R.string.discard)).performClick()
+            compose.onNodeWithText(app.getString(R.string.discard)).performClick().also { drainFileTasks() }
             scenario.onActivity { activity ->
                 assertEquals(listOf(second.path), activity.openFilePaths)
                 assertEquals(second.path, activity.selectedFilePath)
@@ -163,17 +171,19 @@ class AdaptiveUiTest {
     fun savingFromThePickerCannotCloseOrLoseTheDraftWhenWritingFails() {
         val source = temporary.root.resolve("first.txt")
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            drainFileTasks()
             scenario.onActivity { activity ->
                 activity.openFile(source)
                 activity.fragmentManager.executePendingTransactions()
+                drainFileTasks()
                 activity.editor.paste("keep this draft ")
                 app.saver.shutdown()
                 app.saver = DocumentSaver(app.documents) { _, _ -> throw java.io.IOException("simulated write failure") }
             }
             try {
-                compose.onNodeWithContentDescription(app.getString(R.string.open_files)).performClick()
-                compose.onNodeWithContentDescription(app.getString(R.string.close_file, source.path)).performClick()
-                compose.onNodeWithText(app.getString(R.string.save)).performClick()
+                compose.onNodeWithContentDescription(app.getString(R.string.open_files)).performClick().also { drainFileTasks() }
+                compose.onNodeWithContentDescription(app.getString(R.string.close_file, source.path)).performClick().also { drainFileTasks() }
+                compose.onNodeWithText(app.getString(R.string.save)).performClick().also { drainFileTasks() }
                 scenario.onActivity { activity ->
                     drainSourceSaves()
                     assertEquals(listOf(source.path), activity.openFilePaths)
@@ -201,14 +211,16 @@ class AdaptiveUiTest {
         val values = JSONArray().put(warning)
         var oldVersion = -1
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            drainFileTasks()
             scenario.onActivity { activity ->
                 activity.openFile(source)
                 activity.fragmentManager.executePendingTransactions()
+                drainFileTasks()
                 val fragment = activity.fragmentManager.findFragmentByTag(source.path) as EditFragment
                 oldVersion = fragment.version
                 publishDiagnostics(source, values, oldVersion)
             }
-            compose.onNodeWithTag("diagnostics-button").performClick()
+            compose.onNodeWithTag("diagnostics-button").performClick().also { drainFileTasks() }
             compose.onNodeWithText("old diagnostic").assertIsDisplayed()
             scenario.onActivity { activity ->
                 activity.editor.paste("draft ")
@@ -230,16 +242,18 @@ class AdaptiveUiTest {
     fun bottomActionsUndoRedoAndSaveTheActiveDocument() {
         val first = temporary.root.resolve("first.txt")
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            drainFileTasks()
             scenario.onActivity { activity ->
                 activity.openFile(first)
                 activity.fragmentManager.executePendingTransactions()
+                drainFileTasks()
                 activity.editor.paste("draft ")
             }
-            compose.onNodeWithContentDescription(app.getString(R.string.undo)).assertIsEnabled().performClick()
+            compose.onNodeWithContentDescription(app.getString(R.string.undo)).assertIsEnabled().performClick().also { drainFileTasks() }
             scenario.onActivity { assertEquals("original", it.editor.text.toString()) }
-            compose.onNodeWithContentDescription(app.getString(R.string.redo)).assertIsEnabled().performClick()
+            compose.onNodeWithContentDescription(app.getString(R.string.redo)).assertIsEnabled().performClick().also { drainFileTasks() }
             scenario.onActivity { assertEquals("draft original", it.editor.text.toString()) }
-            compose.onNodeWithContentDescription(app.getString(R.string.save)).performClick()
+            compose.onNodeWithContentDescription(app.getString(R.string.save)).performClick().also { drainFileTasks() }
             scenario.onActivity {
                 drainSourceSaves()
                 assertFalse(app.documents.isDirty(first.path))
@@ -258,23 +272,26 @@ class AdaptiveUiTest {
                 .put("start", JSONObject().put("line", 1).put("character", 0))
                 .put("end", JSONObject().put("line", 1).put("character", 1)))
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            drainFileTasks()
             scenario.onActivity { activity ->
                 activity.openFile(source)
                 activity.fragmentManager.executePendingTransactions()
+                drainFileTasks()
                 activity.openFile(other)
                 activity.fragmentManager.executePendingTransactions()
+                drainFileTasks()
                 publishDiagnostics(source, JSONArray().put(diagnostic("sample warning", 2)))
                 assertTrue(activity.editor.soraEditor.lineNumberMarginLeft > 0)
                 assertTrue(activity.editor.soraEditor.dividerMarginRight > 0)
             }
             compose.onNodeWithText("sample warning").assertDoesNotExist()
-            compose.onNodeWithTag("diagnostics-button").assertTextContains(app.getString(R.string.diagnostics_count, 1)).performClick()
+            compose.onNodeWithTag("diagnostics-button").assertTextContains(app.getString(R.string.diagnostics_count, 1)).performClick().also { drainFileTasks() }
             compose.onNodeWithText("sample warning").assertIsDisplayed()
             compose.onNodeWithText("example-code", substring = true).assertIsDisplayed()
             scenario.onActivity { publishDiagnostics(source, JSONArray()) }
             compose.onNodeWithText(app.getString(R.string.no_diagnostics)).assertIsDisplayed()
             scenario.onActivity { publishDiagnostics(source, JSONArray().put(diagnostic("sample error", 1))) }
-            compose.onNodeWithText("sample error").performClick()
+            compose.onNodeWithText("sample error").performClick().also { drainFileTasks() }
             compose.onNodeWithText(app.getString(R.string.no_diagnostics)).assertDoesNotExist()
             scenario.onActivity { activity ->
                 assertEquals(source.path, activity.selectedFilePath)
@@ -296,13 +313,14 @@ class AdaptiveUiTest {
 
     @Test fun runConfigurationMenuRestoresUnconfirmedValuesAndEnablesTheConfiguredEntry() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
-            compose.onNodeWithContentDescription(app.getString(R.string.more_options)).performClick()
-            compose.onNodeWithText(app.getString(R.string.run_configuration)).performClick()
+            drainFileTasks()
+            compose.onNodeWithContentDescription(app.getString(R.string.more_options)).performClick().also { drainFileTasks() }
+            compose.onNodeWithText(app.getString(R.string.run_configuration)).performClick().also { drainFileTasks() }
             compose.onNodeWithText(app.getString(R.string.run_entry_file)).performTextInput("main.py")
             scenario.recreate()
             compose.onNodeWithText(app.getString(R.string.run_entry_file)).assertTextContains("main.py")
             scenario.onActivity { assertEquals(RunConfiguration(), it.runConfiguration) }
-            compose.onNodeWithText(app.getString(R.string.save)).performClick()
+            compose.onNodeWithText(app.getString(R.string.save)).performClick().also { drainFileTasks() }
             compose.onNodeWithContentDescription(app.getString(R.string.run)).assertIsEnabled()
             scenario.onActivity { assertEquals("main.py", it.runConfiguration.entryFile) }
         }

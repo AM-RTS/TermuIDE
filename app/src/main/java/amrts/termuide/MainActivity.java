@@ -29,16 +29,15 @@ public class MainActivity extends androidx.activity.ComponentActivity implements
 	private WorkspaceSession workspace;
 	private FileAdapter adp;
 	private EditFragment lastFrag = null;
-	private boolean runVisible, deleting;
-    private File pwd, prj, root;
+	private boolean runVisible;
+    private File pwd;
     private TextEditor codeEditor;
     private DebugPanel panel;
     private int reqCode;
-    private Runnable uiRefresh;
     private Runnable searchUi;
     private EditFragment pendingReload, pendingRename;
     private String pendingRenameText;
-    private boolean installPrompt, installPromptNoRemind, initPrompt, initPromptNoRemind;
+    private final TermuxPrompts termuxPrompts = new TermuxPrompts(this::notifyUiChanged);
     private boolean runtimeHostReady;
 
 
@@ -46,17 +45,6 @@ public class MainActivity extends androidx.activity.ComponentActivity implements
 		pwd = new File(pref.getString(PWD, Utils.ROOT.getPath()));
 		Application app = Application.getInstance();
         if (FileHelper.isTermuxFile(pwd) && app.treeUri == null) pwd = Utils.ROOT;
-		if (app.treeUri != null && FileHelper.isTermuxFile(pwd)) {
-			root = new File(DocumentsContract.getTreeDocumentId(app.treeUri));
-		} else {
-			root = Utils.ROOT;
-		}
-		for (File f = pwd; f != null && !f.equals(root); f = f.getParentFile()) {
-			if (FileHelper.isFile(new File(f, Project.PROJ))) {
-				prj = f;
-				break;
-			}
-		}
 		if (app.hand == null) {
             app.hand = new MainHandler(this);
         } else
@@ -92,7 +80,9 @@ public class MainActivity extends androidx.activity.ComponentActivity implements
         }
         super.onCreate(savedInstanceState);
 		workspace.setOnChangedListener(this);
+        workspace.setFileListener(this::finishFileOperation);
 		adp = new FileAdapter(pwd);
+        adp.setOnChanged(this::notifyUiChanged);
         panel = new DebugPanel(this);
 		setContentView(TermuIDECompose.mainView(this));
 		final int sdk = android.os.Build.VERSION.SDK_INT;
@@ -136,16 +126,13 @@ public class MainActivity extends androidx.activity.ComponentActivity implements
             pendingRename = (EditFragment)getFragmentManager().findFragmentByTag(savedInstanceState.getString("pendingRename", ""));
             pendingRenameText = savedInstanceState.getString("pendingRenameText");
             pendingReload = (EditFragment)getFragmentManager().findFragmentByTag(savedInstanceState.getString("pendingReload", ""));
-            installPrompt = savedInstanceState.getBoolean("installPrompt");
-            installPromptNoRemind = savedInstanceState.getBoolean("installPromptNoRemind");
-            initPrompt = savedInstanceState.getBoolean("initPrompt");
-            initPromptNoRemind = savedInstanceState.getBoolean("initPromptNoRemind");
+            termuxPrompts.restore(savedInstanceState);
             notifyUiChanged();
         }
         runtimeHostReady = true;
         observePendingClose();
         getLifecycle().addObserver((androidx.lifecycle.LifecycleEventObserver)(source, event) -> {
-            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) finishPendingClose();
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) { finishPendingClose(); finishFileOperation(); }
         });
         Application.getInstance().getRuns().onHostReady();
     }
@@ -169,14 +156,13 @@ public class MainActivity extends androidx.activity.ComponentActivity implements
 		notifyUiChanged();
     }
 
-	void notifyUiChanged() {
-		Runnable listener = uiRefresh;
-		if (listener != null) listener.run();
-	}
+    void notifyUiChanged() {
+        if (workspace != null && !isDestroyed()) workspace.presentation.publish(this);
+    }
 
-	void setUiRefresh(Runnable listener) {
-		uiRefresh = listener;
-	}
+    public kotlinx.coroutines.flow.StateFlow<WorkspacePresentation.State> getUiState() {
+        return workspace.presentation.getState();
+    }
 
 	public void setSearchUi(Runnable listener) {
 		searchUi = listener;
@@ -226,59 +212,30 @@ public class MainActivity extends androidx.activity.ComponentActivity implements
 		notifyUiChanged();
 	}
 
-	@Override public void showTermuxInstallPrompt(boolean showNeverRemind) {
-		installPrompt = true;
-		installPromptNoRemind = showNeverRemind;
-		notifyUiChanged();
-	}
-	@Override public void showTermuxInitPrompt(boolean showAlreadyInitialized) {
-		initPrompt = true;
-		initPromptNoRemind = showAlreadyInitialized;
-		notifyUiChanged();
-	}
-	public boolean isInstallPromptOpen() { return installPrompt; }
-	public boolean isInstallPromptNoRemind() { return installPromptNoRemind; }
-	public boolean isInitPromptOpen() { return initPrompt; }
-	public boolean isInitPromptNoRemind() { return initPromptNoRemind; }
-	public void resolveInstallPrompt(boolean launchInstaller, boolean neverRemind) {
-		installPrompt = false;
-		if (launchInstaller) Utils.startTermuxInstall(this);
-		else if (neverRemind) Utils.skipTermuxInstallReminder(this);
-		notifyUiChanged();
-	}
-	public void resolveInitPrompt(boolean initialize, boolean alreadyInitialized) {
-		initPrompt = false;
-		if (initialize) Utils.copyJump(this);
-		else if (alreadyInitialized) Utils.skipTermuxInitReminder(this);
-		notifyUiChanged();
-	}
+    @Override public TermuxPrompts getTermuxPrompts() { return termuxPrompts; }
 
-	public void onFileSelected(String _it) {
-		if ("..".equals(_it)) {
-			if (FileHelper.isFile(new File(pwd, Project.PROJ)))
-				prj = null;
-			pwd = pwd.getParentFile();
-		} else {
-			File f = new File(pwd, _it);
-			if (FileHelper.isFile(f)) {
-				openFile(f);
-				if (Project.rootPath == null && prj!=null)
-					workspace.pendingProjectPath = prj.getAbsolutePath();
-				if (workspace.pendingProjectPath != null) notifyUiChanged();
-				return;
-			}
-			File trj = new File(f, Project.PROJ);
-			if (FileHelper.isFile(trj))
-				prj = f;
-			pwd = f;
-		}
-		refresh();
-	}
+    public void onFileSelected(String name) {
+        if (adp.isLoading() || isDeleting()) return;
+        if ("..".equals(name)) {
+            pwd = pwd.getParentFile() == null ? pwd : pwd.getParentFile();
+        } else {
+            File file = new File(pwd, name);
+            if (adp.containsFile(name)) {
+                openFile(file);
+                File project = adp.getProjectDirectory();
+                if (Project.snapshot().rootPath == null && project != null) workspace.pendingProjectPath = project.getAbsolutePath();
+                notifyUiChanged(); return;
+            }
+            pwd = file;
+        }
+        refresh();
+    }
 
     public void performAction(int id) {
         RunCommands.Action action = id == R.id.run ? RunCommands.Action.RUN : id == R.id.debug ? RunCommands.Action.DEBUG
             : id == R.id.build ? RunCommands.Action.BUILD : id == R.id.compile ? RunCommands.Action.COMPILE : null;
         if (action != null) {
+            if (isDeleting()) { toast(getString(R.string.saving)); return; }
             if (action == RunCommands.Action.DEBUG && !canDebug()) return;
             RunConfiguration configuration = new RunConfiguration();
             if (action == RunCommands.Action.RUN || action == RunCommands.Action.DEBUG) {
@@ -325,12 +282,12 @@ public class MainActivity extends androidx.activity.ComponentActivity implements
     int matchRunContext(RunCommands.Request request) {
         if (!runtimeHostReady) return 0;
         return Objects.equals(request.getPath(), getSelectedFilePath())
-            && Objects.equals(request.getProject().rootPath, Project.rootPath)
+            && Objects.equals(request.getProject().rootPath, Project.snapshot().rootPath)
             && Objects.equals(request.getDirectory(), pwd.getAbsolutePath()) && matchesRunConfiguration(request) && matchesPythonEnvironment(request) ? 1 : -1;
     }
 
     public String getRunConfigurationScope() {
-        return Project.rootPath != null ? Project.rootPath : pwd.getAbsolutePath();
+        return Project.snapshot().rootPath != null ? Project.snapshot().rootPath : pwd.getAbsolutePath();
     }
 
     public RunConfiguration getRunConfiguration() {
@@ -352,7 +309,7 @@ public class MainActivity extends androidx.activity.ComponentActivity implements
     }
 
     public String getLanguageToolsScope() {
-        if (Project.rootPath != null) return LanguageServers.path(new File(Project.rootPath));
+        if (Project.snapshot().rootPath != null) return LanguageServers.path(new File(Project.snapshot().rootPath));
         String selected = getSelectedFilePath();
         return selected == null ? LanguageServers.path(pwd) : LanguageServers.root(new File(selected));
     }
@@ -415,8 +372,7 @@ public class MainActivity extends androidx.activity.ComponentActivity implements
 
     private void performSavedAction(int id) {
         if (id == R.id.exstorage) {
-			pwd = root = Utils.ROOT;
-			prj = null;
+			pwd = Utils.ROOT;
 			refresh();
 			return;
 		} else if (id == R.id.tmxstorage) {
@@ -425,9 +381,8 @@ public class MainActivity extends androidx.activity.ComponentActivity implements
 				Intent it = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
 				startActivityForResult(it, REQ_FOLDER);
 			} else {
-				pwd = root = new File(DocumentsContract.getTreeDocumentId(u));
-				prj = null;
-				refresh();
+				pwd = new File(DocumentsContract.getTreeDocumentId(u));
+					refresh();
 			}
 			return;
 		} else if (id == R.id.undo && codeEditor != null) {
@@ -438,9 +393,9 @@ public class MainActivity extends androidx.activity.ComponentActivity implements
 			if (searchUi != null && codeEditor != null) searchUi.run();
 		} else if (id == R.id.close && getSelectedItem() >= 0) {
 			closeFile(getSelectedItem());
-		} else if (id == R.id.prj_attr && Project.rootPath != null) {
-			openFile(new File(Project.rootPath, Project.PROJ));
-		} else if (id == R.id.prj_close && Project.rootPath != null) {
+		} else if (id == R.id.prj_attr && Project.snapshot().rootPath != null) {
+			openFile(new File(Project.snapshot().rootPath, Project.PROJ));
+		} else if (id == R.id.prj_close && Project.snapshot().rootPath != null) {
             closeProject();
 		} else if (id == R.id.settings) {
 			startActivityForResult(new Intent(this, SettingsActivity.class), SETTING);
@@ -450,8 +405,8 @@ public class MainActivity extends androidx.activity.ComponentActivity implements
     private void closeProject() {
         if (requestCloseIfDirty(new ArrayList<>(workspace), WorkspaceSession.CLOSE_PROJECT, null)) return;
         // A restored close prompt can outlive the process-local project configuration.
-        if (Project.rootPath == null) { finishProjectClose(); return; }
-        String configuration = new File(Project.rootPath, Project.PROJ).getAbsolutePath();
+        if (Project.snapshot().rootPath == null) { finishProjectClose(); return; }
+        String configuration = new File(Project.snapshot().rootPath, Project.PROJ).getAbsolutePath();
         if (Application.getInstance().saver.isSaving(configuration)) { toast(getString(R.string.saving)); return; }
         workspace.beginProjectClose(Application.getInstance().getDocuments());
         notifyUiChanged();
@@ -515,7 +470,7 @@ public class MainActivity extends androidx.activity.ComponentActivity implements
     }
 
 	void setFileRunnable(boolean exec) {
-		runVisible = Project.rootPath == null ? exec : true;
+		runVisible = Project.snapshot().rootPath == null ? exec : true;
 		notifyUiChanged();
 	}
 
@@ -566,28 +521,27 @@ public class MainActivity extends androidx.activity.ComponentActivity implements
         return true;
     }
 
-	public void confirmOpenProject() {
-		String projectPath = workspace.pendingProjectPath;
-		workspace.pendingProjectPath = null;
-		if (projectPath == null) return;
+    public void confirmOpenProject() {
+        if (fileOperationBlocked()) return;
+        String path = workspace.pendingProjectPath;
+        if (path == null) return;
         List<String> closing = new ArrayList<>(workspace);
         closing.remove(getSelectedFilePath());
-        if (requestCloseIfDirty(closing, WorkspaceSession.OPEN_PROJECT, projectPath)) return;
-		File config = new File(projectPath, Project.PROJ);
-		if (!FileHelper.isFile(config)) {
-			toast(getString(R.string.open_failed));
-			return;
-		}
-		try {
-            List<String> opens = workspace.openProject(config);
-            openProjFiles(opens, getSelectedFilePath());
-			setFileRunnable(true);
-		} catch (IOException e) {
-			e.printStackTrace();
-			toast(getString(R.string.open_failed));
-		}
-		notifyUiChanged();
-	}
+        workspace.pendingProjectPath = null;
+        if (requestCloseIfDirty(closing, WorkspaceSession.OPEN_PROJECT, path)) return;
+        File config = new File(path, Project.PROJ);
+        Project.Config previous = Project.snapshot();
+        List<String> tabs = new ArrayList<>(workspace);
+        List<DocumentSession> revisions = new ArrayList<>(Application.getInstance().getDocuments().getState().getValue());
+        Set<String> discards = new HashSet<>(workspace.approvedDiscards);
+        String selected = getSelectedFilePath();
+        workspace.startFileOperation(() -> {
+            WorkspaceSession.FileResult result = new WorkspaceSession.FileResult(0, previous, Project.read(config));
+            result.openingTabs = tabs; result.openingRevisions = revisions; result.openingDiscards = discards; result.retainedPath = selected;
+            return result;
+        });
+        notifyUiChanged();
+    }
 
     private void openProjFiles(List<String> opens, String retainedPath) {
         FragmentManager manager = getFragmentManager();
@@ -659,7 +613,7 @@ public class MainActivity extends androidx.activity.ComponentActivity implements
     }
 
     private boolean requestCloseIfDirty(List<String> paths, int kind, String target) {
-        if (workspace.savingClose) { toast(getString(R.string.saving)); return true; }
+        if (workspace.savingClose || isDeleting()) { toast(getString(R.string.saving)); return true; }
         for (String path : paths) if (Application.getInstance().saver.isSaving(path)) {
             toast(getString(R.string.saving)); return true;
         }
@@ -733,6 +687,7 @@ public class MainActivity extends androidx.activity.ComponentActivity implements
     }
 
     public List<String> getDirectoryItems() {
+        if (adp == null) return Collections.emptyList();
         ArrayList<String> items = new ArrayList<>(adp.getCount());
         for (int i = 0; i < adp.getCount(); i++) items.add(adp.getItem(i).name);
         return items;
@@ -740,8 +695,10 @@ public class MainActivity extends androidx.activity.ComponentActivity implements
 
 	public boolean isOpenableFile(String name) {
 		File file = new File(pwd, name);
-		return FileHelper.isFile(file) && EditFragment.fileType(file) >= 0;
+		return adp.containsFile(name);
 	}
+
+    public boolean isDirectoryLoading() { return adp != null && adp.isLoading(); }
 
     public int getDirectoryIcon(int index) {
         return adp.getItem(index).icon;
@@ -760,7 +717,7 @@ public class MainActivity extends androidx.activity.ComponentActivity implements
     }
 
     public boolean hasProject() {
-        return Project.rootPath != null;
+        return Project.snapshot().rootPath != null;
     }
 
     public boolean canDebug() {
@@ -782,92 +739,115 @@ public class MainActivity extends androidx.activity.ComponentActivity implements
         catch (IllegalArgumentException error) { return false; }
     }
 
-    public boolean isDeleting() {
-        return deleting;
+    public boolean isDeleting() { return workspace != null && workspace.fileOperation != null; }
+
+    private boolean fileOperationBlocked() {
+        if (workspace.fileOperation != null || workspace.savingClose || Application.getInstance().saver.isSaving()) {
+            toast(getString(R.string.saving)); return true;
+        }
+        return false;
+    }
+
+    private void finishFileOperation() {
+        CompletableFuture<WorkspaceSession.FileResult> pending = workspace.fileOperation;
+        if (pending == null || !pending.isDone() || isDestroyed() || isFinishing()
+            || !getLifecycle().getCurrentState().isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)
+            || getFragmentManager().isStateSaved()) return;
+        workspace.fileOperation = null;
+        try {
+            WorkspaceSession.FileResult result = pending.join();
+            // Partial deletion can still change Java's index.
+            if (result.changed.length > 0) Application.getInstance().languageServers.javaWorkspaceChanged(this, result.changed);
+            if (result.created != null) {
+                boolean current = Project.snapshot() == result.previous
+                    && (result.originDirectory == null || result.originDirectory.equals(pwd));
+                if (result.openingTabs != null) current &= result.openingTabs.equals(workspace)
+                    && Objects.equals(result.retainedPath, getSelectedFilePath())
+                    && result.openingRevisions.equals(Application.getInstance().getDocuments().getState().getValue());
+                if (!current) { toast(getString(R.string.save_newer_changes)); refresh(); return; }
+                if (result.openingTabs != null) {
+                    workspace.approvedDiscards = result.openingDiscards;
+                    try {
+                        Project.publish(result.created);
+                        openProjFiles(result.created.opens, result.retainedPath);
+                    } finally { workspace.approvedDiscards = Collections.emptySet(); }
+                } else {
+                    Project.publish(result.created);
+                    pwd = new File(result.created.rootPath);
+                }
+                setFileRunnable(true);
+            }
+            if (result.message != 0) toast(getString(result.message));
+        } catch (CompletionException error) {
+            Log.e("Files", "File operation failed", error); toast(getString(R.string.open_failed));
+        }
+        refresh();
     }
 
     public void renameFile(String from, String to) {
-        if (Application.getInstance().saver.isSaving()) { toast(getString(R.string.saving)); return; }
-        File source = new File(from);
-        if (!source.isAbsolute()) source = new File(pwd, from);
-        if (!to.isEmpty() && FileHelper.rename(source, to)) {
-            Application.getInstance().languageServers.javaWorkspaceChanged(this, source, new File(source.getParentFile(), to));
-            refresh();
-        }
-        else toast(getString(R.string.rename_failed));
+        if (fileOperationBlocked()) return;
+        File source = new File(from).isAbsolute() ? new File(from) : new File(pwd, from);
+        workspace.startFileOperation(() -> {
+            boolean renamed = !to.isEmpty() && FileHelper.rename(source, to);
+            return new WorkspaceSession.FileResult(renamed ? 0 : R.string.rename_failed, null, null,
+                renamed ? new File[]{source, new File(source.getParentFile(), to)} : new File[0]);
+        });
+        notifyUiChanged();
     }
 
     public void deleteBrowserEntry(String name) {
-        if (Application.getInstance().saver.isSaving()) { toast(getString(R.string.saving)); return; }
-        final File target = new File(name).isAbsolute() ? new File(name) : new File(pwd, name);
-        deleting = true;
+        if (fileOperationBlocked()) return;
+        File target = new File(name).isAbsolute() ? new File(name) : new File(pwd, name);
+        workspace.startFileOperation(() -> {
+            boolean removed;
+            try { removed = FileHelper.removeFiles(target); }
+            catch (RuntimeException error) { Log.e("Files", "Deletion failed", error); removed = false; }
+            return new WorkspaceSession.FileResult(removed ? R.string.deleted : R.string.open_failed, null, null, target);
+        });
         notifyUiChanged();
-        new Thread(new Runnable() {
-            @Override public void run() {
-                final boolean removed = FileHelper.removeFiles(target);
-                runOnUiThread(new Runnable() {
-                    @Override public void run() {
-                        deleting = false;
-                        // A failed directory deletion may still have removed some children.
-                        Application.getInstance().languageServers.javaWorkspaceChanged(MainActivity.this, target);
-                        if (removed) {
-                            toast(getText(R.string.deleted));
-                            refresh();
-                        } else notifyUiChanged();
-                    }
-                });
-            }
-        }).start();
     }
 
     public void createFile(String name, boolean directory) {
-        if (name.isEmpty()) {
-            toast(getText(R.string.empty_name));
-            return;
-        }
-        try {
-            File created = new File(pwd, name);
-            FileHelper.createFile(created, directory);
-            Application.getInstance().languageServers.javaWorkspaceChanged(this, created);
-            refresh();
-        } catch (IOException e) {
-            e.printStackTrace();
-            toast(e.getMessage());
-        }
+        if (fileOperationBlocked()) return;
+        if (name.isEmpty()) { toast(getString(R.string.empty_name)); return; }
+        File target = new File(pwd, name);
+        workspace.startFileOperation(() -> {
+            if (!FileHelper.createFile(target, directory)) throw new IOException("File already exists or could not be created");
+            return new WorkspaceSession.FileResult(0, null, null, target);
+        });
+        notifyUiChanged();
     }
 
-    public boolean createProject(String name, String template, boolean withClangd, boolean withFormat) {
-        if (workspace.savingClose) { toast(getString(R.string.saving)); return false; }
-        if (name.isEmpty()) {
-            toast(getText(R.string.empty_name));
-            return false;
-        }
-        File directory = new File(pwd, name);
+    public CompletableFuture<Boolean> createProject(String name, String template, boolean withClangd, boolean withFormat) {
+        if (fileOperationBlocked()) return CompletableFuture.completedFuture(false);
+        if (name.isEmpty()) { toast(getString(R.string.empty_name)); return CompletableFuture.completedFuture(false); }
+        File originDirectory = pwd;
+        File directory = new File(originDirectory, name);
         Project.Config previous = Project.snapshot();
-        if (!Utils.extractTemplate(this, template, directory)) {
-            toast(getString(R.string.project_create_failed));
-            return false;
-        }
-        try {
-            if (withClangd) Utils.dumpFile(getAssets().open("cld"), new File(directory, ".clangd"));
-            if (withFormat) Utils.dumpFile(getAssets().open("fmt"), new File(directory, ".clang-format"));
-        } catch (IOException | SecurityException | IllegalArgumentException e) {
-            Project.publish(previous);
-            e.printStackTrace();
-            toast(getString(R.string.project_create_failed));
-            return false;
-        }
-        pwd = prj = directory;
-        setFileRunnable(true);
-        refresh();
-        return true;
+        android.content.Context context = getApplicationContext();
+        CompletableFuture<WorkspaceSession.FileResult> pending = workspace.startFileOperation(() -> {
+            try {
+                if (!Utils.extractTemplate(context, template, directory))
+                    return new WorkspaceSession.FileResult(R.string.project_create_failed, previous, null);
+                if (withClangd) Utils.dumpFile(context.getAssets().open("cld"), new File(directory, ".clangd"));
+                if (withFormat) Utils.dumpFile(context.getAssets().open("fmt"), new File(directory, ".clang-format"));
+                WorkspaceSession.FileResult result = new WorkspaceSession.FileResult(0, previous, Project.read(new File(directory, Project.PROJ)), directory);
+                result.originDirectory = originDirectory;
+                return result;
+            } catch (IOException | RuntimeException error) {
+                Log.e("Files", "Project creation failed", error);
+                return new WorkspaceSession.FileResult(R.string.project_create_failed, previous, null);
+            }
+        });
+        notifyUiChanged();
+        return pending.thenApply(result -> result.created != null);
     }
 
     @Override
     protected void onRestoreInstanceState(Bundle bundle) {
         super.onRestoreInstanceState(bundle);
         pwd = new File(bundle.getString(PWD));
-        adp.setPath(pwd);
+        refresh();
         if (!(getLastCustomNonConfigurationInstance() instanceof WorkspaceSession)) workspace.restore(bundle);
         if (!workspace.isEmpty()) selectItem(workspace.getSelectedIndex());
 		notifyUiChanged();
@@ -880,10 +860,7 @@ public class MainActivity extends androidx.activity.ComponentActivity implements
         bundle.putString("pendingRename", pendingRename == null ? null : pendingRename.getFile().getAbsolutePath());
         bundle.putString("pendingRenameText", pendingRenameText);
         bundle.putString("pendingReload", pendingReload == null ? null : pendingReload.getFile().getAbsolutePath());
-        bundle.putBoolean("installPrompt", installPrompt);
-        bundle.putBoolean("installPromptNoRemind", installPromptNoRemind);
-        bundle.putBoolean("initPrompt", initPrompt);
-        bundle.putBoolean("initPromptNoRemind", initPromptNoRemind);
+        termuxPrompts.save(bundle);
         super.onSaveInstanceState(bundle);
     }
 
@@ -982,11 +959,12 @@ public class MainActivity extends androidx.activity.ComponentActivity implements
         runtimeHostReady = false;
         if (isFinishing()) Application.getInstance().getRuns().cancelPreparation();
         workspace.clearOnChangedListener(this);
+        workspace.setFileListener(null);
         panel.clean();
         panel = null;
+        adp.release();
         adp = null;
         codeEditor = null;
-        uiRefresh = null;
         searchUi = null;
         Application.getInstance().hand.updateActivity(null);
         super.onDestroy();
@@ -1043,7 +1021,7 @@ public class MainActivity extends androidx.activity.ComponentActivity implements
                     if (codeEditor != null && searchUi != null) action = R.id.search;
                     break;
                 case KeyEvent.KEYCODE_R:
-                    if (runVisible && (lastFrag != null || Project.rootPath != null)) action = R.id.run;
+                    if (runVisible && (lastFrag != null || Project.snapshot().rootPath != null)) action = R.id.run;
                     break;
             }
         }

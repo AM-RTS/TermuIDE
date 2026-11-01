@@ -18,7 +18,7 @@ class DebugPanelStateTest {
         DebugSession::class.java.getDeclaredField("sender").apply { isAccessible = true }.set(session, sender)
         DebugPanel::class.java.getDeclaredField("session").apply { isAccessible = true }.set(panel, session)
         DebugPanel::class.java.getDeclaredField("state").apply { isAccessible = true }.set(panel,
-            DebugSession.Snapshot(DebugSession.RUNNING, 0, true, false, emptyList(), emptyList(), "", ""))
+            DebugSession.Snapshot(DebugSession.RUNNING, 0, true, false, emptyList(), emptyList()))
         try {
             session.accept("*running")
             panel.onAction("more")
@@ -42,7 +42,7 @@ class DebugPanelStateTest {
         DebugPanel::class.java.getDeclaredField("detailsOpen").apply { isAccessible = true }.setBoolean(panel, true)
         try {
             panel.applyState(DebugSession.Snapshot(DebugSession.IDLE, 0, false, true,
-                emptyList(), emptyList(), "", ""))
+                emptyList(), emptyList()))
             assertFalse(panel.isDetailsOpen)
             assertEquals(android.view.WindowManager.LayoutParams.WRAP_CONTENT, params.width)
             assertEquals(android.view.WindowManager.LayoutParams.WRAP_CONTENT, params.height)

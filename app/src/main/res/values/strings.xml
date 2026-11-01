@@ -303,4 +303,7 @@
     <string name="tools_setup_ready">Tools verified. Open a supported file to use them.</string>
     <string name="tools_setup_unknown">Setup may still be running in Termux. Check its terminal before retrying; a second setup cannot run concurrently.</string>
     <string name="tools_setup_failed">Setup failed (exit %1$d). Read the messages in Termux, then retry.</string>
+    <string name="source_unavailable">Source could not be read. Saving is blocked until a successful reload.</string>
+    <string name="reload_source">Reload</string>
+    <string name="reload_source_confirm">Reload %s from disk? Unsaved changes in this file will be discarded.</string>
 </resources>

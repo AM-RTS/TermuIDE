@@ -35,6 +35,12 @@ final class LanguageServers {
         Info(Server server, State state, String detail, boolean restartable) {
             this.server = server; this.state = state; this.detail = detail; this.restartable = restartable;
         }
+        @Override public boolean equals(Object other) {
+            if (!(other instanceof Info)) return false;
+            Info info = (Info)other;
+            return server == info.server && state == info.state && restartable == info.restartable && Objects.equals(detail, info.detail);
+        }
+        @Override public int hashCode() { return Objects.hash(server, state, detail, restartable); }
     }
     private static final class Probe {
         final Lsp session;
@@ -50,7 +56,7 @@ final class LanguageServers {
 
     static String path(File file) { return file.getAbsoluteFile().toPath().normalize().toString(); }
     static String root(File file) {
-        String project = Project.rootPath;
+        String project = Project.snapshot().rootPath;
         java.nio.file.Path path = file.getAbsoluteFile().toPath().normalize();
         if (project != null && path.startsWith(new File(project).getAbsoluteFile().toPath().normalize()))
             return path(new File(project));
@@ -61,7 +67,7 @@ final class LanguageServers {
         Server server = Server.forType(type);
         if (server == null) return null;
         String root = root(file), path = path(file);
-        String configurationScope = Project.rootPath == null ? root : path(new File(Project.rootPath));
+        String configurationScope = Project.snapshot().rootPath == null ? root : path(new File(Project.snapshot().rootPath));
         String environment = null, configurationError = null;
         try { if (server == Server.PYTHON) environment = RunConfiguration.load(Application.getInstance(), configurationScope).pythonEnvironmentPath(configurationScope); }
         catch (IllegalArgumentException error) { configurationError = error.getMessage(); }
@@ -184,7 +190,7 @@ final class LanguageServers {
     }
 
     void restartPythonEnvironment(Context context, String scope) {
-        boolean project = Project.rootPath != null && scope.equals(path(new File(Project.rootPath)));
+        boolean project = Project.snapshot().rootPath != null && scope.equals(path(new File(Project.snapshot().rootPath)));
         restartMatching(context, value -> value.server == Server.PYTHON && (project || scope.equals(value.root)));
     }
 

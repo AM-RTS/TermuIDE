@@ -49,6 +49,7 @@ class ProjectSaveTest {
         val source = File(directory, "main.c").apply { writeText("int main(void) { return 0; }") }
         activity.openFile(source)
         activity.fragmentManager.executePendingTransactions()
+        drainFileTasks()
         return activity to activity.fragmentManager.findFragmentByTag(source.path) as EditFragment
     }
 
@@ -69,11 +70,13 @@ class ProjectSaveTest {
             val file = File(directory, "extra$index.c").apply { writeText("int extra$index;") }
             activity.openFile(file)
             activity.fragmentManager.executePendingTransactions()
+            drainFileTasks()
         }
         val retained = activity.selectedFilePath!!
         MainActivity::class.java.getDeclaredMethod("openProjFiles", List::class.java, String::class.java)
             .apply { isAccessible = true }.invoke(activity, listOf(retained), retained)
         activity.fragmentManager.executePendingTransactions()
+        drainFileTasks()
         assertEquals(listOf(retained), activity.openFilePaths)
         assertEquals(0, activity.selectedItem)
         assertArrayEquals(intArrayOf(0, 0), app.hand.selection(retained))
@@ -88,10 +91,12 @@ class ProjectSaveTest {
         val occupied = File(directory, "occupied").apply { mkdir() }
         val marker = File(occupied, Project.PROJ).apply { writeText("existing project data") }
         for (template in listOf("Clang", "Clang++", "CMake", "Makefile")) {
-            assertFalse(template, activity.createProject(occupied.name, template, true, true))
-            assertEquals(before.rootPath, Project.rootPath)
-            assertEquals(before.buildCmd, Project.buildCmd)
-            assertEquals(before.runCmd, Project.runCmd)
+            val creating = activity.createProject(occupied.name, template, true, true)
+            drainFileTasks()
+            assertFalse(template, creating.join())
+            assertEquals(before.rootPath, Project.snapshot().rootPath)
+            assertEquals(before.buildCmd, Project.snapshot().buildCmd)
+            assertEquals(before.runCmd, Project.snapshot().runCmd)
             assertEquals(fragment.file.path, activity.selectedFilePath)
             assertEquals(listOf(fragment.file.path), activity.openFilePaths)
             assertEquals("existing project data", marker.readText())
@@ -111,8 +116,10 @@ class ProjectSaveTest {
         val draft = fragment.view!!.text.toString()
         for ((index, template) in listOf("Clang", "Clang++", "CMake", "Makefile").withIndex()) {
             val project = File(directory, "new-$index")
-            assertTrue(template, activity.createProject(project.name, template, false, false))
-            assertEquals(project.path, Project.rootPath)
+            val creating = activity.createProject(project.name, template, false, false)
+            drainFileTasks()
+            assertTrue(template, creating.join())
+            assertEquals(project.path, Project.snapshot().rootPath)
             assertTrue(File(project, "termuide.json").isFile)
             assertFalse(File(project, "termuc.json").exists())
             assertTrue(Project.read(File(project, Project.PROJ)).buildCmd.isNotEmpty())
@@ -230,6 +237,7 @@ class ProjectSaveTest {
         assertTrue("Do not discard sessions or commit fragments after state saving", activity.openFilePaths.isNotEmpty())
         host!!.restart().start().resume()
         activity.fragmentManager.executePendingTransactions()
+        drainFileTasks()
         assertTrue(activity.openFilePaths.isEmpty())
         assertFalse(activity.hasProject())
     }
@@ -249,6 +257,7 @@ class ProjectSaveTest {
         release.countDown()
         drainSourceSaves()
         restored.fragmentManager.executePendingTransactions()
+        drainFileTasks()
         assertTrue(restored.openFilePaths.isEmpty())
         assertFalse(restored.hasProject())
     }

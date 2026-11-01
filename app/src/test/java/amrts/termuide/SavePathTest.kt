@@ -56,6 +56,7 @@ class SavePathTest {
         val activity = launch()
         activity.openFile(file)
         activity.fragmentManager.executePendingTransactions()
+        drainFileTasks()
         return file to activity.fragmentManager.findFragmentByTag(file.path) as EditFragment
     }
 
@@ -136,6 +137,7 @@ class SavePathTest {
         release.countDown()
         drainSourceSaves()
         activity.fragmentManager.executePendingTransactions()
+        drainFileTasks()
         assertTrue(activity.openFilePaths.contains(file.path))
         assertFalse(activity.isSavingClose)
         assertTrue(activity.pendingClosePaths.contains(file.path))
@@ -152,6 +154,7 @@ class SavePathTest {
         controller = null
         val activity = launch(state)
         activity.fragmentManager.executePendingTransactions()
+        drainFileTasks()
         release.countDown()
         drainSourceSaves()
         assertTrue(saving.join())
@@ -177,6 +180,7 @@ class SavePathTest {
         release.countDown()
         drainSourceSaves()
         restored.fragmentManager.executePendingTransactions()
+        drainFileTasks()
         assertEquals("saved before closing original", file.readText())
         assertFalse(restored.isSavingClose)
         assertTrue(restored.pendingClosePaths.isEmpty())
@@ -196,6 +200,7 @@ class SavePathTest {
         activity.resolveCloseDocuments(true)
         drainSourceSaves()
         activity.fragmentManager.executePendingTransactions()
+        drainFileTasks()
         assertTrue(activity.openFilePaths.contains(file.path))
         assertEquals("original", file.readText())
         assertTrue(fragment.view!!.isEdited)

@@ -76,11 +76,12 @@ class ComposeRegressionTest {
     @Test
     fun activityRecreationRestoresOpenFileDialogAndName() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
-            compose.onNodeWithContentDescription(context.getString(R.string.more_options)).performClick()
-            compose.onNodeWithText(context.getString(R.string.new_f)).performClick()
+            compose.onNodeWithContentDescription(context.getString(R.string.more_options)).performClick().also { awaitFiles() }
+            compose.onNodeWithText(context.getString(R.string.new_f)).performClick().also { awaitFiles() }
             compose.onNode(hasSetTextAction()).performTextInput("kept-folder")
-            compose.onNodeWithText(context.getString(R.string.folder)).performClick()
+            compose.onNodeWithText(context.getString(R.string.folder)).performClick().also { awaitFiles() }
             scenario.recreate()
+            awaitFiles()
             compose.onNode(hasSetTextAction()).assertTextContains("kept-folder")
             compose.onNodeWithText(context.getString(R.string.folder)).assertIsSelected()
             assertFalse(File(directory, "kept-folder").exists())
@@ -91,16 +92,16 @@ class ComposeRegressionTest {
     fun searchFieldsRestoreWithoutChangingTheRecoveredDocument() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             compose.waitForIdle()
+            openSource(scenario, "first.txt")
             scenario.onActivity { activity ->
-                activity.openFile(File(directory, "first.txt"))
-                activity.fragmentManager.executePendingTransactions()
                 activity.editor.paste("draft ")
                 activity.performAction(R.id.search)
             }
             compose.onNode(hasSetTextAction()).performTextReplacement("document")
-            compose.onNodeWithText(context.getString(R.string.replace)).performClick()
+            compose.onNodeWithText(context.getString(R.string.replace)).performClick().also { awaitFiles() }
             compose.onAllNodes(hasSetTextAction())[1].performTextInput("replacement")
             scenario.recreate()
+            awaitFiles()
             compose.onAllNodes(hasSetTextAction())[0].assertTextContains("document")
             compose.onAllNodes(hasSetTextAction())[1].assertTextContains("replacement")
             scenario.onActivity { assertEquals("draft first document", it.editor.text.toString()) }
@@ -113,9 +114,8 @@ class ComposeRegressionTest {
         lateinit var oldEditor: io.github.rosemoe.sora.widget.CodeEditor
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             compose.waitForIdle()
+            openSource(scenario, "first.txt")
             scenario.onActivity { activity ->
-                activity.openFile(File(directory, "first.txt"))
-                activity.fragmentManager.executePendingTransactions()
                 val editor = activity.editor
                 oldEditor = editor.soraEditor
                 editor.setSelection(0)
@@ -132,6 +132,7 @@ class ComposeRegressionTest {
                 assertTrue(editor.isEdited)
             }
             scenario.recreate()
+            awaitFiles()
             scenario.onActivity { activity ->
                 assertTrue(oldEditor.isReleased)
                 assertEquals("🧪 draft\nfirst document", activity.editor.soraEditor.text.toString())
@@ -144,9 +145,8 @@ class ComposeRegressionTest {
     fun soraCompletionPreservesAdditionalEditsCaretAndUndo() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             compose.waitForIdle()
+            openSource(scenario, "first.txt")
             scenario.onActivity { activity ->
-                activity.openFile(File(directory, "first.txt"))
-                activity.fragmentManager.executePendingTransactions()
                 val editor = activity.editor
                 editor.setSelection(5)
                 val primary = cn.rbc.codeeditor.view.autocomplete.Edit().apply {
@@ -173,15 +173,14 @@ class ComposeRegressionTest {
     @Test
     fun recreationKeepsBothEditorViewsAndUnsavedText() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            openSource(scenario, "first.txt")
+            openSource(scenario, "second.txt")
             scenario.onActivity { activity ->
-                activity.openFile(File(directory, "first.txt"))
-                activity.fragmentManager.executePendingTransactions()
-                activity.openFile(File(directory, "second.txt"))
-                activity.fragmentManager.executePendingTransactions()
                 activity.editor.paste("unsaved ")
             }
             compose.waitForIdle()
             scenario.recreate()
+            awaitFiles()
             compose.waitForIdle()
             scenario.onActivity { activity ->
                 val host = activity.findViewById<ViewGroup>(R.id.editFrag)
@@ -237,13 +236,13 @@ class ComposeRegressionTest {
     fun fontPickerRefreshesAfterSystemAndToolbarBack() {
         val intent = Intent(context, FileActivity::class.java).putExtra(FileActivity.FN, File(directory, "font.ttf").path)
         ActivityScenario.launch<FileActivity>(intent).use { scenario ->
-            compose.onNodeWithText("nested.c").performClick()
+            compose.onNodeWithText("nested.c").performClick().also { awaitFiles() }
             compose.onNodeWithText(File(directory, "nested.c").path).assertExists()
             scenario.onActivity { it.onBackPressedDispatcher.onBackPressed() }
             compose.onNodeWithText(directory.path).assertExists()
             compose.onNodeWithText("font.ttf").assertIsDisplayed()
-            compose.onNodeWithText("nested.c").performClick()
-            compose.onNodeWithContentDescription(context.getString(R.string.back)).performClick()
+            compose.onNodeWithText("nested.c").performClick().also { awaitFiles() }
+            compose.onNodeWithContentDescription(context.getString(R.string.back)).performClick().also { awaitFiles() }
             compose.onNodeWithText(directory.path).assertIsDisplayed()
         }
     }
@@ -251,13 +250,13 @@ class ComposeRegressionTest {
     @Test
     fun browserStaysOpenForFoldersAndClosesForFiles() {
         ActivityScenario.launch(MainActivity::class.java).use {
-            compose.onNodeWithContentDescription(context.getString(R.string.browse_files)).performClick()
-            compose.onNodeWithText("nested.c").performClick()
+            compose.onNodeWithContentDescription(context.getString(R.string.browse_files)).performClick().also { awaitFiles() }
+            compose.onNodeWithText("nested.c").performClick().also { awaitFiles() }
             compose.onNodeWithText(context.getString(R.string.file_browser)).assertIsDisplayed()
             compose.onNodeWithText(File(directory, "nested.c").path).assertExists()
-            compose.onNodeWithText("..").performClick()
+            compose.onNodeWithText("..").performClick().also { awaitFiles() }
             compose.onNodeWithText(directory.path).assertExists()
-            compose.onNodeWithText("first.txt").performClick()
+            compose.onNodeWithText("first.txt").performClick().also { awaitFiles() }
             compose.onNodeWithText(directory.path).assertDoesNotExist()
         }
     }
@@ -266,9 +265,8 @@ class ComposeRegressionTest {
     fun hardwareShortcutsSaveUndoRedoFindAndReplace() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             compose.waitForIdle()
+            openSource(scenario, "first.txt")
             scenario.onActivity { activity ->
-                activity.openFile(File(directory, "first.txt"))
-                activity.fragmentManager.executePendingTransactions()
                 activity.editor.requestFocus()
                 activity.editor.paste("change ")
                 val edited = activity.editor.text.toString()
@@ -282,7 +280,7 @@ class ComposeRegressionTest {
                 assertTrue(shortcut(activity, KeyEvent.KEYCODE_F))
             }
             compose.onNodeWithText(context.getString(R.string.find_)).assertIsDisplayed()
-            compose.onNode(hasSetTextAction()).performClick().performKeyInput {
+            compose.onNode(hasSetTextAction()).performClick().also { awaitFiles() }.performKeyInput {
                 withKeyDown(Key.CtrlLeft) { pressKey(Key.H) }
             }
             compose.onAllNodes(hasSetTextAction()).assertCountEquals(2)
@@ -295,7 +293,7 @@ class ComposeRegressionTest {
             val label = context.getString(R.string.show_hidden)
             compose.onNode(hasScrollAction()).performScrollToNode(hasText(label))
             val before = compose.onNodeWithText(label).fetchSemanticsNode().positionInRoot.y
-            compose.onNodeWithText(label).performClick()
+            compose.onNodeWithText(label).performClick().also { awaitFiles() }
             compose.onNodeWithText(label).assertIsDisplayed()
             val after = compose.onNodeWithText(label).fetchSemanticsNode().positionInRoot.y
             assertEquals(before, after, 1f)
@@ -344,9 +342,8 @@ class ComposeRegressionTest {
         assertEquals(Build.VERSION_CODES.O_MR1, context.applicationInfo.minSdkVersion)
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             compose.waitForIdle()
+            openSource(scenario, "first.txt")
             scenario.onActivity { activity ->
-                activity.openFile(File(directory, "first.txt"))
-                activity.fragmentManager.executePendingTransactions()
                 activity.editor.requestFocus()
                 val panel = amrts.termuide.ClipboardPanel(activity.editor)
                 var actionMode: ActionMode? = null
@@ -397,21 +394,20 @@ class ComposeRegressionTest {
     @Test
     fun closingDirtyTabRequiresSaveDiscardOrCancel() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            openSource(scenario, "first.txt")
             scenario.onActivity { activity ->
-                activity.openFile(File(directory, "first.txt"))
-                activity.fragmentManager.executePendingTransactions()
                 activity.editor.paste("unsaved ")
                 activity.closeFile(activity.selectedItem)
                 assertFalse(activity.pendingClosePaths.isEmpty())
             }
             compose.onNodeWithText(context.getString(R.string.unsaved_changes)).assertIsDisplayed()
-            compose.onNodeWithText(context.getString(android.R.string.cancel)).performClick()
+            compose.onNodeWithText(context.getString(android.R.string.cancel)).performClick().also { awaitFiles() }
             scenario.onActivity { activity ->
                 assertEquals(1, activity.itemCount)
                 assertTrue(activity.editor.isEdited)
                 activity.closeFile(activity.selectedItem)
             }
-            compose.onNodeWithText(context.getString(R.string.discard)).performClick()
+            compose.onNodeWithText(context.getString(R.string.discard)).performClick().also { awaitFiles() }
             scenario.onActivity { assertEquals(0, it.itemCount) }
             assertEquals("first document", File(directory, "first.txt").readText())
             Application.getInstance().documents.flush()
@@ -459,16 +455,18 @@ class ComposeRegressionTest {
         File(broken, "readme.txt").writeText("project file")
         try {
             ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                openSource(scenario, "first.txt")
                 scenario.onActivity { activity ->
-                    activity.openFile(File(directory, "first.txt"))
-                    activity.fragmentManager.executePendingTransactions()
                     activity.editor.paste("unsaved ")
                     activity.onFileSelected("broken")
+                }
+                awaitFiles()
+                scenario.onActivity { activity ->
                     activity.onFileSelected("readme.txt")
                     activity.fragmentManager.executePendingTransactions()
                 }
-                compose.onNodeWithText(context.getString(R.string.cont)).performClick()
-                compose.onNodeWithText(context.getString(R.string.discard)).performClick()
+                compose.onNodeWithText(context.getString(R.string.cont)).performClick().also { awaitFiles() }
+                compose.onNodeWithText(context.getString(R.string.discard)).performClick().also { awaitFiles() }
                 scenario.onActivity { activity ->
                     assertEquals(2, activity.itemCount)
                     assertTrue(Application.getInstance().documents.isDirty(File(directory, "first.txt").path))
@@ -480,6 +478,26 @@ class ComposeRegressionTest {
             File(broken, "readme.txt").delete()
             broken.delete()
         }
+    }
+
+    private fun awaitFiles() {
+        val worker = Application::class.java.getDeclaredField("fileWorker").apply { isAccessible = true }
+            .get(Application.getInstance()) as java.util.concurrent.ThreadPoolExecutor
+        repeat(30) {
+            val submitted = worker.taskCount
+            worker.submit {}.get(10, java.util.concurrent.TimeUnit.SECONDS)
+            instrumentation.waitForIdleSync()
+            if (worker.taskCount == submitted + 1) return
+        }
+        error("Workspace file tasks did not settle")
+    }
+
+    private fun openSource(scenario: ActivityScenario<MainActivity>, name: String) {
+        scenario.onActivity { activity ->
+            activity.openFile(File(directory, name))
+            activity.fragmentManager.executePendingTransactions()
+        }
+        awaitFiles()
     }
 
     private fun shortcut(activity: MainActivity, code: Int, modifiers: Int = 0): Boolean =

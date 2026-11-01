@@ -81,3 +81,5 @@ Tap the top filename/path to switch or close open files. Dirty files offer Save/
 Private drafts checkpoint at roughly 500 ms intervals while editing and flush when the app backgrounds. Restoring a draft does not itself trigger auto-save. Auto-save pauses for external source changes and pending close/reload prompts; failed saves keep dirty drafts. If a source could not be fully read, saving remains blocked until a successful reload.
 
 Source saves run in the background; edits made during saving remain dirty. Local publication uses synced staging and atomic replacement. Termux document providers must support rename; interrupted publication uses a backup/journal for restoration on the next open. A failed project save keeps its project and tabs open. Recovery cannot guarantee edits before a checkpoint or survive clearing app data/uninstallation; drafts are excluded from Android backup.
+
+The GDB console and debug-log panels keep the most recent 64 Ki UTF-16 code units per channel. An omission marker appears when older output is dropped; these panels are not a full-session log archive.

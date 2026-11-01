@@ -50,6 +50,7 @@ class AutoSaveTest {
     private fun open(activity: MainActivity, file: File): TextEditor {
         activity.openFile(file)
         activity.fragmentManager.executePendingTransactions()
+        drainFileTasks()
         return activity.editor
     }
 
@@ -134,6 +135,7 @@ class AutoSaveTest {
         assertFalse(activity.pendingClosePaths.isEmpty())
         activity.resolveCloseDocuments(false)
         activity.fragmentManager.executePendingTransactions()
+        drainFileTasks()
         idle()
         assertEquals("original", file.readText())
         assertFalse(app.documents.state.value.any { it.path == file.path })

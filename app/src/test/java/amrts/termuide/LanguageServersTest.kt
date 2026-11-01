@@ -40,7 +40,7 @@ class LanguageServersTest {
         val file = File("/workspace/src/main.py")
         val loose = servers.session(file, EditFragment.TYPE_PYTHON)!!
         val pending = loose.incoming("{}")
-        Project.rootPath = "/workspace"
+        Project.publish(Project.Config("/workspace", "build", "", "", "", 0, emptyList()))
         val project = servers.session(file, EditFragment.TYPE_PYTHON)!!
         assertNotSame(loose, project)
         assertFalse(pending.isCurrent)

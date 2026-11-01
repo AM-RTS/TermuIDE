@@ -52,6 +52,7 @@ class RuntimeActivityTest {
         host.create().start().postCreate(null).resume().visible()
         host.get().openFile(source)
         host.get().fragmentManager.executePendingTransactions()
+        drainFileTasks()
     }
 
     private fun idle() {
@@ -167,6 +168,7 @@ class RuntimeActivityTest {
         val activity = host.get()
         activity.openFile(configFile)
         activity.fragmentManager.executePendingTransactions()
+        drainFileTasks()
         activity.editor.paste("draft ")
         val config = RunConfiguration("main.c", listOf("--extra"), "data")
         assertTrue(activity.saveRunConfiguration(activity.runConfigurationScope, config))
@@ -244,6 +246,7 @@ class RuntimeActivityTest {
         app.saver = DocumentSaver(restored)
         host = Robolectric.buildActivity(MainActivity::class.java).create().start().postCreate(null).resume().visible()
         host.get().fragmentManager.executePendingTransactions()
+        drainFileTasks()
         host.get().performAction(R.id.run)
         idle()
         assertNull(shadowOf(app).nextStartedService)
@@ -281,6 +284,7 @@ class RuntimeActivityTest {
         source = File(directory, name).apply { writeText("original") }
         host.get().openFile(source)
         host.get().fragmentManager.executePendingTransactions()
+        drainFileTasks()
     }
 
     @Test fun pythonAndJavaRunThroughTheExistingSaveAndTerminalFlowWithoutNativeDebug() {
@@ -358,6 +362,7 @@ class RuntimeActivityTest {
         val other = File(directory, "other.c").apply { writeText("int other;") }
         host.get().openFile(other)
         host.get().fragmentManager.executePendingTransactions()
+        drainFileTasks()
         reply(probe)
         assertNull(shadowOf(app).nextStartedService)
         assertEquals(RunController.Stage.CANCELLED, app.runs.state.value.stage)
@@ -383,6 +388,7 @@ class RuntimeActivityTest {
         Project.load(config, null)
         host.get().openFile(config)
         host.get().fragmentManager.executePendingTransactions()
+        drainFileTasks()
         val editor = host.get().editor
         editor.setSelection(0, editor.text.length - 1)
         editor.paste("""{"runCmd":"new-command"}""")
@@ -408,6 +414,7 @@ class RuntimeActivityTest {
         activity.saveRunConfiguration(directory.path, RunConfiguration(arguments = listOf("keep argument")))
         activity.openFile(entry)
         activity.fragmentManager.executePendingTransactions()
+        drainFileTasks()
         assertEquals(directory.path, activity.runConfigurationScope)
         assertEquals(nested.path, activity.languageToolsScope)
         assertTrue(activity.savePythonEnvironment(nested.path, ".venv"))

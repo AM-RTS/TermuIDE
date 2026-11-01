@@ -59,7 +59,7 @@ class DebugOverlayTest {
         DebugSession::class.java.getDeclaredField("sender").apply { isAccessible = true }.set(session, sender)
         DebugPanel::class.java.getDeclaredField("session").apply { isAccessible = true }.set(panel, session)
         DebugPanel::class.java.getDeclaredField("state").apply { isAccessible = true }.set(panel,
-            DebugSession.Snapshot(DebugSession.STOPPED, 0, true, false, emptyList(), emptyList(), "", ""))
+            DebugSession.Snapshot(DebugSession.STOPPED, 0, true, false, emptyList(), emptyList()))
         val view = DebugPanel::class.java.getDeclaredField("ctrlr").apply { isAccessible = true }.get(panel) as View
         val params = DebugPanel::class.java.getDeclaredField("params").apply { isAccessible = true }.get(panel) as WindowManager.LayoutParams
         val wm = activity.applicationContext.getSystemService(WindowManager::class.java)
@@ -108,7 +108,7 @@ class DebugOverlayTest {
             compose.onNodeWithText(activity.getString(R.string.frame)).performTouchInput { click() }
             compose.runOnUiThread {
                 panel.applyState(DebugSession.Snapshot(DebugSession.STOPPED, 0, false, false,
-                    emptyList(), listOf("#0 increment() debug.c:4"), "", ""))
+                    emptyList(), listOf("#0 increment() debug.c:4")))
             }
             compose.onNodeWithText("#0 increment() debug.c:4").assertIsDisplayed()
             compose.runOnUiThread { panel.addBkpt("debug.c", 7) }

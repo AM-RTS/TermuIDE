@@ -40,6 +40,20 @@ public class Application extends android.app.Application {
 	public static String theme, font, syms, cflags, completion, lsp_host;
 	public static int lsp_port, textsize, tabsize;
 
+    private final java.util.concurrent.ThreadPoolExecutor fileWorker = new java.util.concurrent.ThreadPoolExecutor(
+        1, 1, 0L, java.util.concurrent.TimeUnit.MILLISECONDS, new java.util.concurrent.LinkedBlockingQueue<>(), task -> {
+        Thread thread = new Thread(task, "Workspace files"); thread.setDaemon(true); return thread;
+    });
+    <T> java.util.concurrent.CompletableFuture<T> fileTask(java.util.concurrent.Callable<T> task) {
+        java.util.concurrent.CompletableFuture<T> result = new java.util.concurrent.CompletableFuture<>();
+        Handler main = new Handler(Looper.getMainLooper());
+        try { fileWorker.execute(() -> {
+            try { T value = task.call(); main.post(() -> result.complete(value)); }
+            catch (Exception error) { main.post(() -> result.completeExceptionally(error)); }
+        }); } catch (java.util.concurrent.RejectedExecutionException error) { result.completeExceptionally(error); }
+        return result;
+    }
+
     MainHandler hand;
     final LanguageServers languageServers = new LanguageServers();
     Uri treeUri;
@@ -79,6 +93,7 @@ public class Application extends android.app.Application {
 
     @Override
     public void onTerminate() {
+        fileWorker.shutdown();
         runs.shutdown();
         saver.shutdown();
         languageServers.end();
