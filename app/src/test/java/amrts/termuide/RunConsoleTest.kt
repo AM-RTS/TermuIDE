@@ -225,12 +225,27 @@ class RunConsoleTest {
         try {
             console.input("racing input")
             await { failed.get() }
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(4))
             assertTrue(console.state.value.active)
         } finally { field.set(run, original) }
         exit(23)
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(4))
         assertEquals(listOf(23 to null), completions)
         assertEquals(23, console.state.value.exitCode)
+    }
+
+    @Test fun aTermuxCallbackCannotCutOffAnAuthenticatedOutputStream() {
+        authenticate()
+        console.termuxFinished(android.os.Bundle().apply {
+            putInt("err", -1); putInt("exitCode", 0)
+        })
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(4))
+        assertTrue(console.state.value.active)
+        send('O', "last output".toByteArray())
+        await { console.output.after(0) != null }
+        exit(37)
+        assertEquals("last output", console.output.after(0)!!.bytes.toString(Charsets.UTF_8))
+        assertEquals(37, console.state.value.exitCode)
     }
 
     @Test fun rendererSurvivesHostReplacementAndItsBridgeRunsWhileDetached() {

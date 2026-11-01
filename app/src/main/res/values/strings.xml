@@ -20,6 +20,7 @@
     <string name="console_setup">Run here also needs Termux Python: pkg install python. Run in Termux remains available.</string>
     <string name="console_connection_lost">Console connection ended without a confirmed exit status. The runner requests process cleanup; completion is unconfirmed.</string>
     <string name="console_input_limit">Console input is busy or exceeds 16 KiB. Send a smaller amount and try again.</string>
+    <string name="console_input_failed">Input could not be sent. Output is still being monitored; retry input or use Force stop.</string>
     <string name="console_stop_unconfirmed">The console channel was closed to request cleanup. Process termination could not be confirmed.</string>
     <string name="console_renderer_failed">The terminal renderer could not start. Update Android System WebView and retry. The program may still be running; Force stop remains available.</string>
     <string name="console_retry_renderer">Reload terminal display</string>

@@ -40,6 +40,7 @@ class RunConsole(private val context: Context) {
         val token = ByteArray(32).also { SecureRandom().nextBytes(it) }.joinToString("") { "%02x".format(it.toInt() and 255) }
         @Volatile var socket: Socket? = null
         @Volatile var finished = false
+        @Volatile var authenticated = false
         val writes = ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS, ArrayBlockingQueue<Runnable>(16),
             { task -> Thread(task, "Console input").apply { isDaemon = true } })
     }
@@ -121,13 +122,14 @@ class RunConsole(private val context: Context) {
                     }
                     if (!MessageDigest.isEqual(expected, actual)) { peer.close(); continue }
                     if (run.finished) { peer.close(); return }
+                    run.authenticated = true
                     peer.getOutputStream().write("OK\n".toByteArray(Charsets.US_ASCII))
                     peer.soTimeout = 0
                     peer.tcpNoDelay = true
                     accepted = peer
                     break
                 } catch (_: IOException) { peer.close() }
-                finally { if (accepted !== peer) { peer.close(); run.socket = null } }
+                finally { if (accepted !== peer) { peer.close(); run.socket = null; run.authenticated = false } }
             }
             val socket = accepted ?: throw IOException(context.getString(R.string.console_connect_timeout))
             run.socket = socket
@@ -177,6 +179,7 @@ class RunConsole(private val context: Context) {
     }
 
     fun input(text: String) {
+        if (state.value.phase != Phase.RUNNING) return
         if (text == "\u0003") { interrupt(); return }
         if (text.length > 16384) {
             mutableState.value = state.value.copy(detail = context.getString(R.string.console_input_limit))
@@ -227,11 +230,11 @@ class RunConsole(private val context: Context) {
                     out.writeByte(kind.code)
                     out.write(data)
                     out.flush()
-                } catch (error: IOException) {
-                    // An input-side error can race a buffered exit frame; let the reader consume it first.
+                } catch (_: IOException) {
+                    // The reader owns completion; a failed write must not discard buffered output/exit frames.
                     main.post {
-                        if (session === run && !run.finished) {
-                            main.postDelayed({ finish(run, null, error.message) }, 3000)
+                        if (session === run && !run.finished && state.value.phase == Phase.RUNNING) {
+                            mutableState.value = state.value.copy(detail = context.getString(R.string.console_input_failed))
                         }
                     }
                 }
@@ -246,12 +249,13 @@ class RunConsole(private val context: Context) {
     internal fun termuxFinished(result: Bundle?) {
         val run = session ?: return
         if (!state.value.active) return
+        if (run.authenticated) return
         val error = if (result == null || result.get("err") !is Int || result.getInt("err") != -1)
             result?.getString("errmsg")?.take(500) ?: context.getString(R.string.console_connection_lost)
         else if (result.get("exitCode") !is Int || result.getInt("exitCode") != 0)
             result.getString("stderr")?.take(500) ?: context.getString(R.string.console_connection_lost)
         else context.getString(R.string.console_connection_lost)
-        main.postDelayed({ if (session === run && state.value.active) finish(run, null, error) }, 3000)
+        finish(run, null, error)
     }
     private fun finish(run: Session, exit: Int?, error: String?) {
         if (session !== run || run.finished) return
