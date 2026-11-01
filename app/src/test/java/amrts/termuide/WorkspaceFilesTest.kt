@@ -40,6 +40,7 @@ class WorkspaceFilesTest {
     private val app get() = Application.getInstance()
     @Before fun prepare() {
         Application.completion = "n"; Application.auto_save = false
+        Project.close()
         entered = CountDownLatch(1); release = CountDownLatch(1)
         directory = Files.createTempDirectory("workspace-files").toFile()
         controller = Robolectric.buildActivity(MainActivity::class.java)
@@ -55,6 +56,7 @@ class WorkspaceFilesTest {
         app.documents.state.value.forEach { app.documents.discard(it.path) }
         app.documents.flush()
         directory.deleteRecursively()
+        Project.close()
     }
     private fun open(file: File): EditFragment {
         controller.get().openFile(file)
@@ -188,6 +190,31 @@ class WorkspaceFilesTest {
             server.setState(LanguageServers.State.FAILED, "analysis stopped")
             assertSame(failed, controller.get().uiState.value)
         } finally { Application.completion = "n" }
+    }
+
+    @Test fun openingAProjectWaitsForSourceLoadingBeforeCapturingRevisions() {
+        val project = directory.resolve("project").apply { mkdir() }
+        project.resolve(Project.PROJ).writeText("{}")
+        val source = project.resolve("readme.txt").apply { writeText("project readme") }
+        controller.pause().resume()
+        drainFileTasks()
+        val host = controller.get()
+        host.onFileSelected("project")
+        drainFileTasks()
+        val blocked = CountDownLatch(1)
+        app.fileTask { entered.countDown(); check(blocked.await(5, TimeUnit.SECONDS)) }
+        try {
+            assertTrue(entered.await(5, TimeUnit.SECONDS))
+            host.onFileSelected("readme.txt")
+            host.fragmentManager.executePendingTransactions()
+            host.confirmOpenProject()
+            assertFalse(host.hasProject())
+            blocked.countDown()
+            drainFileTasks()
+            assertEquals(project.path, Project.snapshot().rootPath)
+            assertEquals("project readme", host.editor.text.toString())
+            assertFalse(app.documents.isDirty(source.path))
+        } finally { blocked.countDown() }
     }
 
     @Test fun editingWhileProjectParsingIsPendingCannotDiscardThoseEdits() {

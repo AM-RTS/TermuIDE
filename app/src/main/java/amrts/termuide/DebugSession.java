@@ -43,11 +43,18 @@ final class DebugSession implements AutoCloseable {
     private final Consumer<Output> outputChanged;
     private boolean outputDirty;
     private void append(StringBuilder target, String text) {
-        target.append(text);
-        if (target.length() > OUTPUT_LIMIT) {
-            int cut = target.length() - OUTPUT_LIMIT + TRUNCATED.length();
-            if (cut < target.length() && Character.isLowSurrogate(target.charAt(cut))) cut++;
-            target.delete(0, cut).insert(0, TRUNCATED);
+        if (text.length() > OUTPUT_LIMIT) {
+            int cut = text.length() - OUTPUT_LIMIT + TRUNCATED.length();
+            if (Character.isLowSurrogate(text.charAt(cut))) cut++;
+            target.setLength(0);
+            target.append(TRUNCATED).append(text, cut, text.length());
+        } else {
+            target.append(text);
+            if (target.length() > OUTPUT_LIMIT) {
+                int cut = target.length() - OUTPUT_LIMIT + TRUNCATED.length();
+                if (cut < target.length() && Character.isLowSurrogate(target.charAt(cut))) cut++;
+                target.delete(0, cut).insert(0, TRUNCATED);
+            }
         }
         outputDirty = true;
     }

@@ -24,9 +24,11 @@ class DebugSessionTest {
 
     @Test fun verboseOutputIsBoundedWithoutRepublishingInspectionState() {
         Fixture().use { f ->
-            val text = "x".repeat(DebugSession.OUTPUT_LIMIT) + "🧪tail"
+            val text = "x".repeat(DebugSession.OUTPUT_LIMIT * 4) + "🧪tail"
             f.session.accept("~\"$text\"")
             assertTrue(f.output.console.length <= DebugSession.OUTPUT_LIMIT)
+            val buffer = DebugSession::class.java.getDeclaredField("console").apply { isAccessible = true }.get(f.session) as StringBuilder
+            assertTrue("Trimming must release oversized retained capacity", buffer.capacity() <= DebugSession.OUTPUT_LIMIT * 2 + 2)
             assertTrue(f.output.console.startsWith("[Earlier output omitted]\n"))
             assertTrue(f.output.console.endsWith("🧪tail"))
             assertTrue(f.updates.isEmpty())

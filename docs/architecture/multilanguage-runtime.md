@@ -91,6 +91,12 @@ Java setup preserves the registered runtime selection and detects incompatible o
 
 `DebugPanel` renders snapshots on the main thread, ignores closed-session callbacks, resets compact sizing and creates a fresh overlay per connection. The console enables IME focus only while visible, including when detached. System input routing still needs physical-device evidence; direct Compose touch tests alone cannot establish it. Console/debug output is streamed separately from inspection snapshots, with coalesced UI updates. Each visible channel retains up to 64 Ki UTF-16 code units and marks omitted history; variable/frame/control snapshots do not copy that history.
 
+## Architecture review fixes
+
+The review added Activity-typed shared setup actions, a List-based completion boundary, and waiting for pending source loads before capturing project-open revisions. Rotation can restart a confirmed reload only from the retained unchanged document; process-death recovery still requires renewed confirmation before discarding draft text. A failed read exposes an explicit Reload action while saving remains blocked.
+
+Project parsing uses the shared reader, so interrupted provider publication is restored before its timestamp is captured. Oversized debugger records are shortened before appending, preventing the visible-history limit from retaining a much larger backing buffer. Regression fixtures cover these cases alongside file-operation rotation, stale listings, auto-save retry and dirty-draft preservation.
+
 ## Verification records
 
 These are historical checkpoints, not assertions that later changes were tested. The November 1 architecture follow-up adds source regressions for retained file operations, guarded background reads, observable workspace controls, shared prompts, immutable project state and bounded debugger output. These changes and adapted fixtures have not been compiled or executed: local Gradle/builds/tests, CI and device checks were explicitly skipped.

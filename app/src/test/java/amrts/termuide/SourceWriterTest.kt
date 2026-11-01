@@ -230,6 +230,17 @@ class SourceWriterTest {
         assertEquals("original", original.readText())
     }
 
+    @Test fun projectParsingAcceptsTheTimestampOfTheRestoredProviderSource() {
+        val journal = SourceWriter.Journal(path)
+        journal.write()
+        val json = "{\"runCmd\":\"echo recovered\"}"
+        File(directory, journal.backup.name).writeText(json)
+        val recovered = Project.read(path)
+        assertEquals("echo recovered", recovered.runCmd)
+        assertEquals(json, File(directory, path.name).readText())
+        assertEquals(FileHelper.lastModified(path), recovered.modified)
+    }
+
     @Test fun openingAfterAnInterruptedProviderRenameRestoresTheOldSource() {
         val journal = SourceWriter.Journal(path)
         journal.write()

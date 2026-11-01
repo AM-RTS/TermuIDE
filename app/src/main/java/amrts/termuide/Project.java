@@ -44,11 +44,12 @@ public class Project
     }
 
     static Config read(File conf) throws IOException {
-        long modified = FileHelper.lastModified(conf);
+        FileHelper.Source source = FileHelper.readSource(conf);
+        long modified = source.modified;
         String build = "clang $d/$f -o $o/$e -lm -Wall", compile = "clang -c $d/$f -o $o/$e.o -lm -Wall";
         String run = "$x/$e", output = "build";
         List<String> files = new ArrayList<>();
-        try (JsonReader p = new JsonReader(new BufferedReader(new InputStreamReader(FileHelper.openInputStream(conf), java.nio.charset.StandardCharsets.UTF_8)))) {
+        try (JsonReader p = new JsonReader(new StringReader(source.text))) {
 		p.beginObject();
 		while (p.hasNext()) {
 			switch (p.nextName()) {
