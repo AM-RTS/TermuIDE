@@ -741,7 +741,7 @@ private fun MainScreen(activity: MainActivity, editorHost: FrameLayout) {
         renameTarget?.let { target -> RenameDialog(activity, target) { renameTarget = null } }
         deleteTarget?.let { target -> DeleteDialog(activity, target) { deleteTarget = null } }
         if (searchOpen) searchPath?.let { path -> SearchDialog(activity, path) { searchOpen = false } }
-        SetupDialogs(activity.getTermuxPrompts(), ui.installPrompt, ui.installReminder, ui.initPrompt, ui.initReminder)
+        SetupDialogs(activity, activity.getTermuxPrompts(), ui.installPrompt, ui.installReminder, ui.initPrompt, ui.initReminder)
         if (ui.closing.isNotEmpty()) {
             AlertDialog(
                 onDismissRequest = { activity.cancelCloseDocuments() },
@@ -1489,7 +1489,7 @@ internal fun SettingsScreen(activity: SettingsActivity, prefs: android.content.S
         }
     }
     if (showAbout) AboutDialog { showAbout = false }
-    SetupDialogs(activity.getTermuxPrompts(), activity.getTermuxPrompts().install, activity.getTermuxPrompts().installNoRemind, activity.getTermuxPrompts().initialize, activity.getTermuxPrompts().initNoRemind)
+    SetupDialogs(activity, activity.getTermuxPrompts(), activity.getTermuxPrompts().install, activity.getTermuxPrompts().installNoRemind, activity.getTermuxPrompts().initialize, activity.getTermuxPrompts().initNoRemind)
 }
 
 @Composable
@@ -1553,8 +1553,8 @@ private fun AboutDialog(onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun SetupDialogs(prompts: TermuxPrompts, install: Boolean, installReminder: Boolean, initialize: Boolean, initReminder: Boolean) {
-    val context = LocalContext.current
+private fun SetupDialogs(activity: Activity, prompts: TermuxPrompts, install: Boolean, installReminder: Boolean, initialize: Boolean, initReminder: Boolean) {
+    val context = activity
     if (install) {
         InstallPromptDialog(installReminder,
             onDismiss = { prompts.resolveInstall(context, false, false) },

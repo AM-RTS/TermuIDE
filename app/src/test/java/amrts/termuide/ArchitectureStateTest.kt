@@ -42,10 +42,11 @@ class ArchitectureStateTest {
         assertTrue(restored.installNoRemind)
         assertTrue(restored.initialize)
         assertFalse(restored.initNoRemind)
-        restored.resolveInstall(Application.getInstance(), false, false)
+        val activity = org.robolectric.Robolectric.buildActivity(android.app.Activity::class.java).get()
+        restored.resolveInstall(activity, false, false)
         assertFalse(restored.install)
         assertTrue(restored.initialize)
-        restored.resolveInitialize(Application.getInstance(), false, false)
+        restored.resolveInitialize(activity, false, false)
         assertFalse(restored.initialize)
         assertEquals(4, changes)
     }

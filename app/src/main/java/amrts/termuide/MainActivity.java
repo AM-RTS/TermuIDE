@@ -525,6 +525,17 @@ public class MainActivity extends androidx.activity.ComponentActivity implements
         if (fileOperationBlocked()) return;
         String path = workspace.pendingProjectPath;
         if (path == null) return;
+        for (String opened : workspace) {
+            EditFragment fragment = (EditFragment)getFragmentManager().findFragmentByTag(opened);
+            if (fragment != null && fragment.isLoading()) {
+                fragment.whenLoaded().whenComplete((document, error) -> {
+                    if (!isDestroyed() && !isFinishing() && !getFragmentManager().isStateSaved()
+                        && getLifecycle().getCurrentState().isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)
+                        && Objects.equals(workspace.pendingProjectPath, path)) confirmOpenProject();
+                });
+                return;
+            }
+        }
         List<String> closing = new ArrayList<>(workspace);
         closing.remove(getSelectedFilePath());
         workspace.pendingProjectPath = null;

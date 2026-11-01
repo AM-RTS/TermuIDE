@@ -54,9 +54,9 @@ public final class EditorCompletionPanel {
         popup.setInputMethodMode(PopupWindow.INPUT_METHOD_NEEDED);
     }
 
-    public void update(ArrayList<ListItem> values) { update(values, null); }
+    public void update(List<ListItem> values) { update(values, null); }
 
-    void update(ArrayList<ListItem> values, Lsp.Incoming origin) {
+    void update(List<ListItem> values, Lsp.Incoming origin) {
         dismiss();
         this.origin = origin;
         if (values == null || values.isEmpty() || !editor.isAttachedToWindow() || !editor.isShown()) return;
