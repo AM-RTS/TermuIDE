@@ -14,6 +14,7 @@ TermuIDE 是 [TermuC](https://github.com/RainbowC0/TermuC) 的独立分支，由
 - Python pylsp 集成及可选 Java 补全/诊断。
 - 顶部文件切换/关闭菜单、按需打开的诊断面板、底部撤销/重做/保存操作。
 - 入口文件、参数和工作目录配置，以及更新后的 GDB 浮动控件。
+- 应用内交互终端，支持 Ctrl+C、EOF 和强制停止；需要 Termux Python，仍可选择在 Termux 中运行。
 
 实际应用截图见[英文首页](README.md#screenshots)。
 

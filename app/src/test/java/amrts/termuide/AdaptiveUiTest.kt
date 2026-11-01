@@ -321,7 +321,7 @@ class AdaptiveUiTest {
             compose.onNodeWithText(app.getString(R.string.run_entry_file)).assertTextContains("main.py")
             scenario.onActivity { assertEquals(RunConfiguration(), it.runConfiguration) }
             compose.onNodeWithText(app.getString(R.string.save)).performClick().also { drainFileTasks() }
-            compose.onNodeWithContentDescription(app.getString(R.string.run)).assertIsEnabled()
+            compose.onNodeWithContentDescription(app.getString(R.string.run_here)).assertIsEnabled()
             scenario.onActivity { assertEquals("main.py", it.runConfiguration.entryFile) }
         }
     }

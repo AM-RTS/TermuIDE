@@ -446,6 +446,8 @@ private fun MainScreen(activity: MainActivity, editorHost: FrameLayout) {
     val narrowToolbar = maxWidth < 360.dp
     val documents by Application.getInstance().documents.state.collectAsState()
     val execution by Application.getInstance().runs.state.collectAsState()
+    val console = Application.getInstance().runs.console
+    val consoleState by console.state.collectAsState()
     val toolSetup by Application.getInstance().toolInstaller.state.collectAsState()
     val ui by activity.uiState.collectAsState()
     var browserOpen by rememberSaveable { mutableStateOf(false) }
@@ -509,10 +511,10 @@ private fun MainScreen(activity: MainActivity, editorHost: FrameLayout) {
                     },
                     actions = {
                         IconButton(
-                            enabled = runVisible && !execution.preparing,
-                            onClick = { activity.performAction(R.id.run) }
+                            enabled = consoleState.active || (runVisible && !execution.preparing),
+                            onClick = { if (consoleState.active) console.show() else activity.performAction(R.id.run_here) }
                         ) {
-                            Icon(painterResource(R.drawable.ic_play_24), context.getString(R.string.run))
+                            Icon(painterResource(R.drawable.ic_play_24), context.getString(if (consoleState.active) R.string.run_console else R.string.run_here))
                         }
                         if (!narrowToolbar) IconButton(
                             enabled = selected >= 0,
@@ -535,13 +537,19 @@ private fun MainScreen(activity: MainActivity, editorHost: FrameLayout) {
                                     activity.performAction(R.id.redo); menuOpen = false
                                 }
                                 HorizontalDivider()
-                                ActionMenuItem(context.getString(R.string.debug), canDebug && !execution.preparing) {
+                                ActionMenuItem(context.getString(R.string.run_in_termux), runVisible && !execution.preparing && !consoleState.active) {
+                                    activity.performAction(R.id.run); menuOpen = false
+                                }
+                                ActionMenuItem(context.getString(R.string.run_console), consoleState.id.isNotEmpty()) {
+                                    console.show(); menuOpen = false
+                                }
+                                ActionMenuItem(context.getString(R.string.debug), canDebug && !execution.preparing && !consoleState.active) {
                                     activity.performAction(R.id.debug); menuOpen = false
                                 }
-                                ActionMenuItem(context.getString(R.string.build), hasProject && !execution.preparing) {
+                                ActionMenuItem(context.getString(R.string.build), hasProject && !execution.preparing && !consoleState.active) {
                                     activity.performAction(R.id.build); menuOpen = false
                                 }
-                                ActionMenuItem(context.getString(R.string.compile), hasProject && canCompile && !execution.preparing) {
+                                ActionMenuItem(context.getString(R.string.compile), hasProject && canCompile && !execution.preparing && !consoleState.active) {
                                     activity.performAction(R.id.compile); menuOpen = false
                                 }
                                 ActionMenuItem(context.getString(R.string.run_configuration), true) {
@@ -701,6 +709,7 @@ private fun MainScreen(activity: MainActivity, editorHost: FrameLayout) {
                 onDelete = { deleteTarget = java.io.File(activity.directoryPath, it).absolutePath }
             )
         }
+        RunConsoleScreen(console)
         if (newFileOpen) NewFileDialog(activity, onDismiss = { newFileOpen = false })
         if (diagnosticsOpen) DiagnosticsSheet(diagnostics, execution, onDismiss = { diagnosticsOpen = false }) { path, diagnostic ->
             val index = activity.openFilePaths.indexOf(path)
@@ -1500,7 +1509,9 @@ private fun AboutDialog(onDismiss: () -> Unit) {
         R.string.acknowledgements to "NOTICE.txt",
         R.string.license_gpl to "GPL-3.0.txt",
         R.string.license_lgpl to "LGPL-2.1.txt",
-        R.string.license_apache to "Apache-2.0.txt"
+        R.string.license_apache to "Apache-2.0.txt",
+        R.string.license_xterm to "xterm-MIT.txt",
+        R.string.license_xterm_fit to "xterm-fit-MIT.txt"
     )
     val document = documents.getOrNull(selectedDocument)
     if (document != null) {

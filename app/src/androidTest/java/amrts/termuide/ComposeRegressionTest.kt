@@ -304,7 +304,7 @@ class ComposeRegressionTest {
     @Test
     fun runButtonUpdatesWhenAvailabilityChanges() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
-            val run = compose.onNodeWithContentDescription(context.getString(R.string.run))
+            val run = compose.onNodeWithContentDescription(context.getString(R.string.run_here))
             run.assertIsNotEnabled()
             scenario.onActivity { it.setFileRunnable(true) }
             run.assertIsEnabled()

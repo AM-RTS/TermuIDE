@@ -50,13 +50,16 @@ class RunController @JvmOverloads constructor(
     private val main = Handler(Looper.getMainLooper())
     private val worker = Executors.newSingleThreadExecutor { task -> Thread(task, "Runtime preparation").apply { isDaemon = true } }
     private val mutableState = MutableStateFlow(if (history.contains("pending"))
-        Status(Stage.UNKNOWN, detail = app.getString(R.string.runtime_result_unknown)) else Status())
+        Status(Stage.UNKNOWN, detail = app.getString(if (history.getBoolean("pending_console", false))
+            R.string.console_connection_lost else R.string.runtime_result_unknown)) else Status())
     val state: StateFlow<Status> = mutableState.asStateFlow()
+    val console = RunConsole(app)
     private val toolCache = mutableMapOf<String, String>()
     private var current: Job? = null
 
     fun start(request: RunCommands.Request) {
         check(Looper.myLooper() == Looper.getMainLooper())
+        if (console.state.value.active) { console.show(); return }
         current?.let(::clearCallback)
         val job = Job(request.copy(breakpoints = request.breakpoints.toList()))
         current = job
@@ -143,10 +146,25 @@ class RunController @JvmOverloads constructor(
             status(job, Stage.DISPATCHED)
         }
         try {
-            transport.send(plan, result)
-            if (!probe) history.edit().putString("pending", job.id).apply()
+            val outgoing = if (!probe && job.request.inAppConsole) {
+                console.prepare(plan, toolCache.getValue("python")) { exit, error ->
+                    if (current === job && !job.cancelled) {
+                        clearCallback(job)
+                        if (exit != null && history.getString("pending", null) == job.id) history.edit().remove("pending").apply()
+                        if (exit == 127) toolCache.clear()
+                        mutableState.value = Status(if (exit == null) Stage.UNKNOWN else Stage.FINISHED,
+                            job.request.path, error, exit)
+                    }
+                }
+            } else plan
+            transport.send(outgoing, result)
+            if (!probe) history.edit().putString("pending", job.id).putBoolean("pending_console", job.request.inAppConsole).apply()
             if (!probe && job.request.action == RunCommands.Action.DEBUG) debug.accept(job.request)
-        } catch (error: RuntimeException) { fail(job, error.message ?: app.getString(R.string.runtime_setup_required)) }
+        } catch (error: Exception) {
+            val message = error.message ?: app.getString(R.string.runtime_setup_required)
+            if (!probe && job.request.inAppConsole) console.transportFailed(message)
+            fail(job, message)
+        }
     }
 
     fun receive(token: String, result: Bundle?) {
@@ -159,10 +177,16 @@ class RunController @JvmOverloads constructor(
     private fun handleResult(job: Job, result: Bundle?) {
         val probing = job.probe
         clearCallback(job)
+        if (!probing && job.request.inAppConsole) { console.termuxFinished(result); return }
         if (probing) {
             val outcome = readProbeResult(app, result, RunCommands.requiredTools(job.request))
             val resolved = outcome.tools
-            if (resolved == null) { fail(job, outcome.message, if (outcome.unknown) Stage.UNKNOWN else Stage.FAILED); return }
+            if (resolved == null) {
+                val message = if (job.request.inAppConsole && outcome.missing)
+                    outcome.message.orEmpty() + "\n" + app.getString(R.string.console_setup) else outcome.message
+                fail(job, message, if (outcome.unknown) Stage.UNKNOWN else Stage.FAILED)
+                return
+            }
             toolCache.putAll(resolved)
             withHost(job) {
                 if (!validDocument(job)) fail(job, app.getString(R.string.runtime_changed))
@@ -224,6 +248,7 @@ class RunController @JvmOverloads constructor(
         current?.let(::clearCallback)
         current = null
         worker.shutdownNow()
+        console.shutdown()
     }
 
     data class ProbeResult(val tools: Map<String, String>?, val message: String? = null, val unknown: Boolean = false, val missing: Boolean = false)

@@ -10,11 +10,12 @@ Application and inherited editor code
 
 Bundled libraries
 
+- xterm.js 5.5.0 and fit addon 0.10.0 — xterm.js authors and contributors: offline terminal rendering. MIT licenses, with original notices in xterm-MIT.txt and xterm-fit-MIT.txt (readable below in About). Source: https://github.com/xtermjs/xterm.js/tree/5.5.0 . Bundled distribution files are unchanged; versions and package SHA-256 hashes are in tools/console/README.md.
 - Sora editor 0.24.4 — Rosemoe and contributors: editor rendering and input. Copyright (C) 2020-2024 Rosemoe. GNU Lesser General Public License version 2.1 or, at your option, any later version. Pinned source: https://github.com/Rosemoe/sora-editor/tree/0.24.4 . License: https://github.com/Rosemoe/sora-editor/blob/0.24.4/LICENSE . Used as the published dependency; the fork supplies its own integration instead of a modified Sora library.
 - AndroidX, Jetpack Compose and Material Components — Android Open Source Project and contributors: application lifecycle and Material 3 interface. Apache License 2.0. Source: https://android.googlesource.com/platform/frameworks/support/ .
 - Kotlin and kotlinx.coroutines — JetBrains and contributors: language/runtime and observable state. Apache License 2.0. Sources: https://github.com/JetBrains/kotlin and https://github.com/Kotlin/kotlinx.coroutines .
 
-Full GPL v3, LGPL v2.1 and Apache 2.0 texts are bundled in app/src/main/assets/licenses/ and readable offline through Settings > About > About TermuIDE. Existing component copyright and license notices remain applicable.
+Full GPL v3, LGPL v2.1, Apache 2.0 and MIT texts are bundled in app/src/main/assets/licenses/ and readable offline through Settings > About > About TermuIDE. Existing component copyright and license notices remain applicable.
 
 External tools
 

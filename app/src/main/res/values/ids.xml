@@ -11,6 +11,7 @@
 	<item type="id" name="exstorage"/>
 	<item type="id" name="tmxstorage"/>
 	<item type="id" name="run"/>
+    <item type="id" name="run_here"/>
 	<item type="id" name="undo"/>
 	<item type="id" name="redo"/>
 	<item type="id" name="save"/>

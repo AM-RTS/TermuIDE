@@ -232,9 +232,13 @@ public class MainActivity extends androidx.activity.ComponentActivity implements
     }
 
     public void performAction(int id) {
-        RunCommands.Action action = id == R.id.run ? RunCommands.Action.RUN : id == R.id.debug ? RunCommands.Action.DEBUG
+        RunCommands.Action action = id == R.id.run || id == R.id.run_here ? RunCommands.Action.RUN : id == R.id.debug ? RunCommands.Action.DEBUG
             : id == R.id.build ? RunCommands.Action.BUILD : id == R.id.compile ? RunCommands.Action.COMPILE : null;
         if (action != null) {
+            if (Application.getInstance().getRuns().getConsole().getState().getValue().getActive()) {
+                Application.getInstance().getRuns().getConsole().show();
+                return;
+            }
             if (isDeleting()) { toast(getString(R.string.saving)); return; }
             if (action == RunCommands.Action.DEBUG && !canDebug()) return;
             RunConfiguration configuration = new RunConfiguration();
@@ -262,7 +266,7 @@ public class MainActivity extends androidx.activity.ComponentActivity implements
             try {
                 Application.getInstance().getRuns().start(new RunCommands.Request(action,
                     getSelectedFilePath(), lastFrag == null ? EditFragment.TYPE_TXT : lastFrag.type,
-                    pwd.getAbsolutePath(), Project.snapshot(), Application.cflags, Collections.unmodifiableList(marks), configuration, getPythonEnvironment()));
+                    pwd.getAbsolutePath(), Project.snapshot(), Application.cflags, Collections.unmodifiableList(marks), configuration, getPythonEnvironment(), id == R.id.run_here));
             } catch (IllegalArgumentException error) { toast(getString(R.string.run_config_invalid)); }
             return;
         }

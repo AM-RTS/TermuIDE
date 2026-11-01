@@ -21,6 +21,24 @@ class RunCommandsTest {
 
     @After fun clean() { Project.close() }
 
+    @Test fun inAppRunsKeepTheSameArgumentsEnvironmentAndPreparationWithoutATerminalPause() {
+        for (type in listOf(EditFragment.TYPE_C, EditFragment.TYPE_CPP, EditFragment.TYPE_PYTHON, EditFragment.TYPE_JAVA)) {
+            val request = request(type = type).copy(inAppConsole = true,
+                configuration = RunConfiguration(arguments = listOf("", "two words", "$(literal);'quoted'")))
+            val tools = RunCommands.requiredTools(request).associateWith { "/bin/$it" }
+            assertTrue("python" in tools)
+            val plan = RunCommands.build(request, tools)
+            assertEquals(request.configuration.arguments, plan.arguments.takeLast(3))
+            assertFalse(plan.arguments[1].contains("Press any key"))
+            assertFalse(plan.background) // The bridge wraps this plan; it alone owns background dispatch.
+            if (type == EditFragment.TYPE_C || type == EditFragment.TYPE_CPP) {
+                assertTrue(plan.arguments[1].contains("\$TERMUIDE_RUN_DIR/program"))
+            }
+            val external = request.copy(inAppConsole = false)
+            assertTrue(RunCommands.build(external, tools).arguments[1].contains("Press any key"))
+        }
+    }
+
     @Test fun languageLookupPreservesLegacyTypesAndSeparatesExecutionFromHighlighting() {
         assertEquals(EditFragment.TYPE_CPP, Languages.fileType("main.cc"))
         assertEquals(EditFragment.TYPE_CPP or EditFragment.TYPE_HEADER, Languages.fileType("main.hpp"))

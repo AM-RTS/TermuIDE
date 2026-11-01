@@ -33,6 +33,7 @@ Added or changed in TermuIDE:
 - **Python and Java:** console execution, Python pylsp integration, and optional Java completion/diagnostics.
 - **Workspace controls:** open-file picker with close prompts, an on-demand diagnostics sheet, and bottom Undo/Redo/Save actions.
 - **Run configurations and debugging:** entry file, arguments and working directory settings; updated GDB controls and inspection panels.
+- **In-app run console:** interactive terminal backed by Termux, with Ctrl+C, EOF and force-stop controls. Requires Termux Python; **Run in Termux** remains available.
 
 ## Language support
 
@@ -70,4 +71,4 @@ Pushes to `master` run regression checks and, on success, publish a signed prere
 
 TermuIDE builds on **TermuC** by RainbowC0 and contributors, **CodeEditor** by MrIkso and contributors, **TextWarrior** by Tah Wei Hoon and contributors, and **Sora** by Rosemoe and contributors. Thanks also to the AndroidX, Compose Material 3, Kotlin, Termux, and Java language-server communities.
 
-The app retains [GNU GPL v3](LICENSE.md). Sora uses LGPL 2.1 or later; attributed TextWarrior files and AndroidX/Kotlin use Apache 2.0. Component notices and source links are in [NOTICE.md](NOTICE.md); full licenses are available offline in **Settings → About → About TermuIDE**. Redistribution must retain notices and provide corresponding source and build instructions for the exact release. There is no warranty; see the licenses.
+The app retains [GNU GPL v3](LICENSE.md). Sora uses LGPL 2.1 or later; attributed TextWarrior files and AndroidX/Kotlin use Apache 2.0; xterm.js and its fit addon use MIT. Component notices and source links are in [NOTICE.md](NOTICE.md); full licenses are available offline in **Settings → About → About TermuIDE**. Redistribution must retain notices and provide corresponding source and build instructions for the exact release. There is no warranty; see the licenses.

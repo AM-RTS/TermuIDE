@@ -1,0 +1,22 @@
+# Run console
+
+`app/src/main/assets/console/runner.py` runs under Termux Python using only its standard library. The Android controller owns the authenticated socket; xterm.js renders bytes offline inside a Material 3 screen. See [runtime architecture](../../docs/architecture/multilanguage-runtime.md#execution-and-workspace-boundaries) for ownership and cleanup limits.
+
+Both GitHub workflows run the Linux PTY regressions before building:
+
+```sh
+python3 -m unittest discover -s tools/console -p 'test_*.py' -v
+```
+
+These exercise real TTY input, resize, nonzero exits, output draining, invalid controls, authentication and process-group cleanup. JVM tests cover the Android-side protocol, renderer replacement, bounded history and failed-save recovery. They do not establish Android PTY permissions, WebView keyboard/accessibility behaviour or background-process survival. Those require a physical device. No new tests have been executed for this feature yet.
+
+## Vendored terminal renderer
+
+Unmodified runtime distribution files, downloaded from the npm registry:
+
+| Package | Version | Tarball SHA-256 |
+| --- | --- | --- |
+| `@xterm/xterm` | 5.5.0 | `bd954fa721872170188cc5d7e83e88db3c83c9a18a4e8d24c2783d26491f59d2` |
+| `@xterm/addon-fit` | 0.10.0 | `917ac44972453d5eed52edc1e50260c76398ce48cf2290c2e60671102bba0b33` |
+
+Copy `package/lib/xterm.js`, `package/css/xterm.css`, and `package/lib/addon-fit.js` into the console assets. Original MIT license files are bundled in `app/src/main/assets/licenses/` and exposed by About. Source: [xterm.js 5.5.0](https://github.com/xtermjs/xterm.js/tree/5.5.0). Source maps are not required for runtime and are not bundled. No CDN or network access is used by the renderer.

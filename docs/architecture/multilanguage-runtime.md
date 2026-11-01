@@ -21,9 +21,10 @@ Implemented: shared C/C++/Python/Java execution, per-language LSP sessions, Pyth
 | `LanguageServers` / `Lsp` / `LspResponses` / `MainHandler` | Server sessions/transport, view-independent response decoding, revision guards and editor updates |
 | `DebugSession` / `DebugPanel` | GDB transport/MI state and Compose overlay presentation |
 | `LanguageToolInstaller` | Explicit setup confirmation, pending callbacks and post-install verification |
+| `RunConsole` / `console/runner.py` / `ConsoleTerminalView` | Authenticated PTY transport, owned process group, bounded output and offline terminal rendering |
 | `TermuxPrompts` | Shared Activity-owned install/initialization prompts, actions and saved state |
 
-Sora supplies rendering/input; inherited `codeeditor` utilities retain document, undo, lexer and completion behavior. No separate runtime module, embedded terminal, DI framework or plugin framework is required.
+Sora supplies rendering/input; inherited `codeeditor` utilities retain document, undo, lexer and completion behavior. The run console reuses bundled xterm.js in an isolated WebView with Material 3 controls. No separate runtime module, DI framework or plugin framework is required.
 
 ## Execution and workspace boundaries
 
@@ -36,6 +37,12 @@ C/C++ retains compilation, artifact staging and GDB. Python invokes the resolved
 Run configuration is private per project root or browser folder. Relative overrides resolve against that scope; explicitly relative project executables keep their project location when the runtime directory changes. Build/Compile retain their selected file and preparation directory. Python environment selection uses the displayed project/source scope and is shared by execution and pylsp.
 
 The Application-owned controller survives Activity recreation and distinguishes preparation, dispatch, completion, failure and unknown status. Probes have bounded waits; interactive programs may run indefinitely. Cancellation stops preparation, not a dispatched Termux process. After app process death, pending-status metadata reports uncertainty rather than replaying execution.
+
+**Run here** uses the same save/context/probe gates and command planner. Python is additionally required for the standard-library PTY runner; C/C++ and Java execution remain on their existing runtimes. The runner connects to a random loopback port with a per-run 256-bit token, then executes the planned argv in a dedicated controlling terminal/session. Bounded binary frames stream terminal bytes and carry input, resize, interrupt and force-stop commands. The bridge waits for the child's process group before processing controls; the group leader remains unreaped until cleanup to prevent PID reuse. A per-run temporary directory isolates native executables and is cleaned after the group stops. It never kills by executable name or runs a general command endpoint.
+
+One in-app run is supported at a time. Closing its screen retains the Application-owned connection; socket loss requests group cleanup. Explicitly detached process groups and Android killing the runner itself are outside that guarantee. Confirmed exit frames preserve the program's status; missing frames retain unknown status, including after app process death. No console session is automatically re-executed. Source saves and durable drafts are unchanged.
+
+The app retains at most 256 KiB of raw terminal history; the renderer keeps 2,000 scrollback rows. UI output is acknowledged in batches, without an unbounded JavaScript queue. Gaps reset the display and mark omitted history; replaying a truncated ANSI stream cannot reconstruct every full-screen application's prior state. The WebView serves an allowlist of APK assets from a synthetic HTTPS origin, blocks network/navigation and exposes only session input/resize/render acknowledgements. Program output is passed as bytes, never HTML or JavaScript source. Versions, licenses and checks are recorded in `tools/console/README.md`. The new console regressions have been authored but not executed in this checkout; the dated CI results below predate this feature.
 
 Workspace close completion waits for a resumed host and mutable FragmentManager state. Project-save failure keeps the project open; changed tab/session revisions cancel closing. Auto-save pauses throughout closing, and a later explicit save cancels the pending close. Rotation can retain a confirmed decision; process-death restoration recreates prompts without replaying an in-memory Discard approval.
 

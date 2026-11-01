@@ -230,4 +230,40 @@ class RunControllerTest {
         assertArrayEquals(args, sent.getStringArrayExtra("com.termux.RUN_COMMAND_ARGUMENTS"))
         assertFalse(sent.hasExtra("com.termux.RUN_COMMAND_PENDING_INTENT"))
     }
+
+    @Test fun aFailedSaveCannotStartAnInAppRunnerOrClearDurableRecovery() {
+        val run = request(RunCommands.Action.RUN).copy(inAppConsole = true)
+        controller.start(run)
+        saving.complete(false)
+        shadowOf(Looper.getMainLooper()).idle()
+        assertEquals(RunController.Stage.FAILED, controller.state.value.stage)
+        assertTrue(calls.isEmpty())
+        assertEquals(RunConsole.Phase.IDLE, controller.console.state.value.phase)
+        assertTrue(docs.isDirty(path))
+        docs.flush()
+        DocumentSessions(File(directory, "drafts"), { throw AssertionError(it) }, 500).use { restored ->
+            assertEquals("draft", restored.recoveryText(path))
+            assertTrue(restored.isDirty(path))
+        }
+    }
+
+    @Test fun anInAppRunUsesTheSameSaveGateAndCannotBeReplayedByANewController() {
+        controller.start(request(RunCommands.Action.RUN).copy(inAppConsole = true))
+        assertTrue(calls.isEmpty())
+        saved()
+        assertEquals(1, calls.size)
+        reply(0, result("/bin/clang\n/bin/python\n"))
+        assertEquals(2, calls.size)
+        assertTrue(calls[1].first.background)
+        assertEquals("/bin/python", calls[1].first.executable)
+        assertTrue(controller.console.state.value.active)
+        controller.start(request(RunCommands.Action.RUN))
+        assertEquals(2, calls.size)
+        val fresh = RunController(app, Supplier { docs }, Function { saving }, ToIntFunction { 1 }, Consumer {})
+        try {
+            assertEquals(RunController.Stage.UNKNOWN, fresh.state.value.stage)
+            assertEquals(RunConsole.Phase.IDLE, fresh.console.state.value.phase)
+            assertEquals(app.getString(R.string.console_connection_lost), fresh.state.value.detail)
+        } finally { fresh.shutdown() }
+    }
 }

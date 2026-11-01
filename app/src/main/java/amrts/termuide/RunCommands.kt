@@ -14,7 +14,8 @@ object RunCommands {
         val flags: String,
         val breakpoints: List<Int>,
         val configuration: RunConfiguration = RunConfiguration(),
-        val pythonEnvironment: String = ""
+        val pythonEnvironment: String = "",
+        val inAppConsole: Boolean = false
     )
     data class Plan(val executable: String, val arguments: List<String>, val directory: String, val background: Boolean = false)
 
@@ -27,6 +28,7 @@ object RunCommands {
             else request.directory
 
     @JvmStatic fun requiredTools(request: Request): List<String> = buildList {
+        require(!request.inAppConsole || request.action == Action.RUN) { "The in-app console is for Run" }
         require(request.pythonEnvironment.isEmpty() || (File(request.pythonEnvironment).isAbsolute && request.pythonEnvironment.none { it.isISOControl() })) { "Invalid Python environment" }
         if (request.project.rootPath == null) {
             require(request.path != null && Languages.canRun(request.type)) { "This source has no runtime integration" }
@@ -34,6 +36,7 @@ object RunCommands {
             add(requireNotNull(Languages.forType(request.type).runtime))
         }
         if (request.pythonEnvironment.isNotEmpty() && "python" !in this) add("python")
+        if (request.inAppConsole && "python" !in this) add("python")
         if (request.action == Action.DEBUG) {
             require(Languages.canDebug(request.type)) { "Debugging requires C/C++ source" }
             add("gdb")
@@ -60,7 +63,7 @@ object RunCommands {
         val extraArguments = if (arguments.isEmpty()) "" else " \"\${termuide_program_args[@]}\""
         val changeDirectory = if (usesRunConfiguration(request) && request.configuration.workingDirectory.isNotEmpty())
             "cd -- ${quote(workingDirectory(request))} && " else ""
-        val pause = "\ntermuide_status=\$?;read -n1 -rsp \$'\\nPress any key to exit...';exit \"\$termuide_status\""
+        val pause = if (request.inAppConsole) "" else "\ntermuide_status=\$?;read -n1 -rsp \$'\\nPress any key to exit...';exit \"\$termuide_status\""
         if (project.rootPath == null && Languages.forType(request.type).id in listOf("python", "java")) {
             val language = Languages.forType(request.type)
             val runtime = tools.getValue(language.runtime!!)
@@ -77,12 +80,15 @@ object RunCommands {
             Action.RUN, Action.DEBUG -> buildString {
                 if (project.rootPath == null) {
                     val compiler = tools.getValue(Languages.forType(request.type).compiler!!)
-                    append("x=\"\$TMPDIR/m\";${quote(compiler)} ${quote(file!!.absolutePath)} ${request.flags}")
+                    if (request.inAppConsole) append("x=\"\$TERMUIDE_RUN_DIR/program\";")
+                    else append("x=\"\$TMPDIR/m\";")
+                    append("${quote(compiler)} ${quote(file!!.absolutePath)} ${request.flags}")
                     if (!request.flags.contains("-g")) append(" -g")
                     append(" -o \"\$x\" && ")
                 } else {
                     append(environment(project, file))
-                    append("x=\"\$TMPDIR/termuide\";find \"\$o\" -maxdepth 1 -type f \\( -iname '*.so' -o ! -name '*.*' \\) -exec install -D -t \"\$x\" {} \\;;")
+                    append(if (request.inAppConsole) "x=\"\$TERMUIDE_RUN_DIR/artifacts\";" else "x=\"\$TMPDIR/termuide\";")
+                    append("find \"\$o\" -maxdepth 1 -type f \\( -iname '*.so' -o ! -name '*.*' \\) -exec install -D -t \"\$x\" {} \\;;")
                     append(if (project.runCmd == "\$x/\$e") "x=(\"\$x/\$e\") && " else "x=(${project.runCmd}) && ")
                     append("{ [ \"\${#x[@]}\" -gt 0 ] && [ -n \"\${x[0]}\" ] || { printf '%s\\n' 'Project run command is empty' >&2; false; }; } && ")
                     // Resolve explicit relative executables before switching to the runtime directory.
