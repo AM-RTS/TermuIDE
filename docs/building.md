@@ -31,6 +31,6 @@ For a repository adopting this workflow, configure **Settings → Secrets and va
 
 Use a persistent release key and keep a secure backup. Never commit the key or its passwords. The workflow refuses missing secrets and never publishes an unsigned APK. Publication uses `GITHUB_TOKEN` with `contents: write`; no personal access token is needed.
 
-CI adds `GITHUB_RUN_NUMBER` to the source version code and uses `0.2.4-ci.<run number>` as the version name. Keep version codes increasing for updates. The branch integration workflow retains debug/release APKs and Java tooling artifacts without publishing a release.
+CI adds `GITHUB_RUN_NUMBER` to the source version code and uses `0.2.4-ci.<run number>` as the version name. Keep version codes increasing for updates. The branch integration workflow retains debug/release APKs and Java tooling artifacts without publishing a release. It also compiles the device-test APK; device tests are not executed by that workflow.
 
 Host checks and signature verification do not establish phone behavior. Device checks are separate; use an isolated package/data set for destructive test fixtures.

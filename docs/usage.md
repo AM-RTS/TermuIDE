@@ -78,7 +78,7 @@ Run/Debug save the entry before dispatch; newer edits or a failed save abort pre
 
 Tap the top filename/path to switch or close open files. Dirty files offer Save/Discard/Cancel. The optional tab strip is available in settings. The bottom bar provides Diagnostics, Undo, Redo and Save; the diagnostics sheet opens on demand and lets you navigate to messages.
 
-Private drafts checkpoint at roughly 500 ms intervals while editing and flush when the app backgrounds. Restoring a draft does not itself trigger auto-save. Auto-save pauses for external source changes and pending close/reload prompts; failed saves keep dirty drafts. If a source could not be fully read, saving remains blocked until a successful reload.
+Private drafts checkpoint at roughly 500 ms intervals while editing and flush when the app backgrounds. Restoring a draft does not itself trigger auto-save. Auto-save pauses for external source changes and pending close/reload prompts; failed saves keep dirty drafts. If a source could not be fully read, saving remains blocked until a successful reload. Use the Reload action shown in the editor to retry; its confirmation warns that unsaved changes will be discarded.
 
 Source saves run in the background; edits made during saving remain dirty. Local publication uses synced staging and atomic replacement. Termux document providers must support rename; interrupted publication uses a backup/journal for restoration on the next open. A failed project save keeps its project and tabs open. Recovery cannot guarantee edits before a checkpoint or survive clearing app data/uninstallation; drafts are excluded from Android backup.
 
