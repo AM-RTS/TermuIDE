@@ -47,8 +47,18 @@ case "$server" in
       apt-get install --no-install-recommends --no-upgrade clang
     fi
     cd "$HOME"
-    "$python" -I -m pip install --disable-pip-version-check --upgrade --force-reinstall 'python-lsp-server==1.15.0'
-    "$python" -I -c 'import pylsp'
+    # Isolate pip and its build subprocesses from inherited settings and destinations.
+    for name in "${!PIP_@}"; do unset "$name"; done
+    PIP_CONFIG_FILE=/dev/null "$python" -I -m pip --isolated install --disable-pip-version-check --upgrade --force-reinstall 'python-lsp-server==1.15.0'
+    "$python" -I - <<'PY'
+from pathlib import Path
+import pylsp
+import sysconfig
+
+site = Path(sysconfig.get_path('purelib')).resolve()
+if site not in Path(pylsp.__file__).resolve().parents:
+    raise SystemExit('pylsp is outside the selected interpreter installation directory; setup was not verified.')
+PY
     ;;
   java)
     jdk="$PREFIX/lib/jvm/java-25-openjdk/bin/java"

@@ -723,6 +723,7 @@ private fun MainScreen(activity: MainActivity, editorHost: FrameLayout) {
                     onSave = { activity.savePythonEnvironment(scope, it) },
                     onRestart = { activity.restartLanguageServer(scope, it) }, onDismiss = { languageToolsScope = null },
                     onInstall = { activity.installLanguageTools(scope, it) }, setup = toolSetup,
+                    onStopWaiting = { Application.getInstance().toolInstaller.stopWaiting() },
                     initialError = loaded.exceptionOrNull()?.let { context.getString(R.string.run_config_invalid) })
             }
         }
@@ -852,7 +853,8 @@ internal fun RunConfigurationDialog(
 internal fun LanguageToolsDialog(
     scope: String, initialEnvironment: String, statuses: List<LanguageServers.Info>,
     onSave: (String) -> Boolean, onRestart: (String) -> Unit, onDismiss: () -> Unit, initialError: String? = null,
-    onInstall: (String) -> Unit = {}, setup: LanguageToolInstaller.Status = LanguageToolInstaller.Status()
+    onInstall: (String) -> Unit = {}, setup: LanguageToolInstaller.Status = LanguageToolInstaller.Status(),
+    onStopWaiting: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val haptics = LocalHapticFeedback.current
@@ -905,7 +907,8 @@ internal fun LanguageToolsDialog(
                     }
                     }
                 }
-                if ((setup.scope == scope || setup.busy) && setup.stage != LanguageToolInstaller.Stage.IDLE) {
+                if ((setup.scope == scope || setup.busy || setup.stage in listOf(LanguageToolInstaller.Stage.UNKNOWN, LanguageToolInstaller.Stage.CANCELLED))
+                    && setup.stage != LanguageToolInstaller.Stage.IDLE) {
                     val message = when (setup.stage) {
                         LanguageToolInstaller.Stage.INSTALLING -> context.getString(R.string.tools_setup_installing)
                         LanguageToolInstaller.Stage.CHECKING -> context.getString(R.string.tools_setup_checking)
@@ -914,6 +917,11 @@ internal fun LanguageToolsDialog(
                     Text(message, modifier = Modifier.testTag("tools-setup-status").semantics { liveRegion = LiveRegionMode.Polite },
                         color = if (setup.stage == LanguageToolInstaller.Stage.FAILED) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
                     if (setup.scope != scope) Text(setup.scope, style = MaterialTheme.typography.bodySmall)
+                    if (setup.busy || setup.stage == LanguageToolInstaller.Stage.UNKNOWN) {
+                        TextButton(onClick = onStopWaiting, modifier = Modifier.heightIn(min = 48.dp).testTag("tools-stop-waiting")) {
+                            Text(context.getString(R.string.tools_stop_waiting))
+                        }
+                    }
                 }
                 OutlinedTextField(value = environment, onValueChange = { environment = it }, singleLine = true,
                     label = { Text(context.getString(R.string.python_environment)) },

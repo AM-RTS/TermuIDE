@@ -369,23 +369,6 @@ class ComposeRegressionTest {
     }
 
     @Test
-    fun textSlicesConvertWithoutRecursionOrTrailingSentinel() {
-        val buffer = cn.rbc.codeeditor.util.TextBuffer()
-        buffer.setSpans(arrayListOf(cn.rbc.codeeditor.util.Pair(0, 0)))
-        assertEquals("", buffer.toString())
-        buffer.insert("hello".toCharArray(), 0, System.nanoTime(), false)
-        assertEquals("hello", buffer.toString())
-        assertEquals("ell", buffer.subSequence(1, 4).toString())
-        buffer.insert(" X ".toCharArray(), 2, System.nanoTime(), true)
-        assertEquals("he X llo", buffer.toString())
-        assertEquals("e X l", buffer.subSequence(1, 6).toString())
-        buffer.markUnsaved()
-        assertNotEquals(buffer.markedVersion, buffer.currentVersion)
-        buffer.markVersion()
-        assertEquals(buffer.markedVersion, buffer.currentVersion)
-    }
-
-    @Test
     fun launchRestoresMultipleDraftsWithoutCachedEditorDocuments() {
         val sessions = Application.getInstance().documents
         listOf("first.txt", "second.txt").forEach { name ->

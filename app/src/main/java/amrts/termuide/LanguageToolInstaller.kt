@@ -12,7 +12,7 @@ import kotlinx.coroutines.flow.asStateFlow
 
 /** Setup owns no editor/save state. Termux owns the visible package-manager process. */
 class LanguageToolInstaller(context: Context) {
-    enum class Stage { IDLE, INSTALLING, CHECKING, READY, FAILED, UNKNOWN }
+    enum class Stage { IDLE, INSTALLING, CHECKING, READY, FAILED, UNKNOWN, CANCELLED }
     data class Status(val stage: Stage = Stage.IDLE, val server: String = "", val scope: String = "", val detail: String? = null) {
         val busy: Boolean get() = stage == Stage.INSTALLING || stage == Stage.CHECKING
     }
@@ -23,6 +23,11 @@ class LanguageToolInstaller(context: Context) {
         Status(Stage.UNKNOWN, pending.getString("server", "").orEmpty(), pending.getString("scope", "").orEmpty(), app.getString(R.string.tools_setup_unknown)) else Status())
     val state: StateFlow<Status> = mutableState.asStateFlow()
     private var timeout: Runnable? = null
+
+    fun stopWaiting() {
+        if (!state.value.busy && state.value.stage != Stage.UNKNOWN) return
+        finish(Stage.CANCELLED, app.getString(R.string.tools_setup_stopped_waiting))
+    }
 
     fun start(context: Context, scope: String, server: String, environment: String) {
         check(!state.value.busy) { app.getString(R.string.tools_setup_busy) }

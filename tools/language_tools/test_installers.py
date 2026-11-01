@@ -6,9 +6,11 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tarfile
 import tempfile
 import unittest
+import zipfile
 from unittest.mock import patch
 
 ASSETS = Path(__file__).resolve().parents[2] / 'app/src/main/assets'
@@ -162,6 +164,64 @@ class SetupScriptTest(unittest.TestCase):
         result = self.run_setup('java')
         self.assertEqual(12, result.returncode)
         self.assertIn('restore --set java', self.log.read_text())
+
+    def test_python_setup_ignores_pip_destinations_and_installs_into_selected_environment(self):
+        self.fake('clang', 'exit 0\n')
+        environment = self.home / "real venv with ' quote"
+        subprocess.run([sys.executable, '-m', 'venv', str(environment)], check=True)
+        python = environment / 'bin/python'
+        real_python = environment / 'bin/python-real'
+        python.rename(real_python)
+        wheel = self.home / 'python_lsp_server-1.15.0-py3-none-any.whl'
+        info = 'python_lsp_server-1.15.0.dist-info/'
+        files = {'pylsp/__init__.py': '__version__ = "fixture"\n',
+                 info + 'METADATA': 'Metadata-Version: 2.1\nName: python-lsp-server\nVersion: 1.15.0\n',
+                 info + 'WHEEL': 'Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: py3-none-any\n'}
+        files[info + 'RECORD'] = ''.join(name + ',,\n' for name in [*files, info + 'RECORD'])
+        with zipfile.ZipFile(wheel, 'w') as bundle:
+            for name, contents in files.items(): bundle.writestr(name, contents)
+        # Use real pip with a local wheel, so this regression needs no network.
+        python.write_text(f'''#!{sys.executable}
+import os, subprocess, sys
+args = sys.argv[1:]
+if '-m' in args and args[args.index('-m') + 1] == 'pip':
+    assert not any(name in os.environ for name in ['PIP_TARGET', 'PIP_PREFIX', 'PIP_ROOT', 'PIP_USER'])
+    assert os.environ.get('PIP_CONFIG_FILE') == '/dev/null'
+    args = [{str(wheel)!r} if arg == 'python-lsp-server==1.15.0' else arg for arg in args]
+    args += ['--no-index', '--no-deps']
+raise SystemExit(subprocess.run([{str(real_python)!r}, *args], stdin=sys.stdin).returncode)
+''')
+        python.chmod(0o755)
+        outside = self.home / 'wrong-destination'
+        config = f'[global]\ntarget = {outside}\n'
+        (environment / 'pip.conf').write_text(config)
+        user_config = self.home / '.config/pip/pip.conf'
+        user_config.parent.mkdir(parents=True); user_config.write_text(config)
+        poison = self.home / 'custom-pip.conf'; poison.write_text(config)
+        with patch.dict(os.environ, {'PIP_TARGET': str(outside), 'PIP_PREFIX': str(outside),
+                                    'PIP_ROOT': str(outside), 'PIP_USER': '1', 'PIP_CONFIG_FILE': str(poison)}):
+            result = self.run_setup('pylsp', environment)
+        self.assertEqual(0, result.returncode, result.stderr)
+        location = subprocess.run([str(real_python), '-I', '-c', 'import pylsp; print(pylsp.__file__)'],
+                                  capture_output=True, text=True, check=True).stdout.strip()
+        self.assertTrue(Path(location).is_relative_to(environment))
+        self.assertFalse(outside.exists())
+
+    def test_python_origin_verification_rejects_an_existing_external_module(self):
+        self.fake('clang', 'exit 0\n')
+        environment = self.home / 'venv'; (environment / 'bin').mkdir(parents=True)
+        foreign = self.home / 'outside.py'; foreign.write_text('')
+        python = environment / 'bin/python'
+        python.write_text(f'''#!{sys.executable}
+import sys, types
+if sys.argv[1:] == ['-I', '-']:
+    sys.modules['pylsp'] = types.SimpleNamespace(__file__={str(foreign)!r})
+    exec(sys.stdin.read())
+''')
+        python.chmod(0o755)
+        result = self.run_setup('pylsp', environment)
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn('outside the selected interpreter', result.stderr)
 
 
 if __name__ == '__main__': unittest.main()

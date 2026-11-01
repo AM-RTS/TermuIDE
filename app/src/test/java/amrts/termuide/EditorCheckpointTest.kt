@@ -6,6 +6,21 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class EditorCheckpointTest {
+    @Test fun textSlicesConvertWithoutRecursionOrTrailingSentinel() {
+        val buffer = TextBuffer().apply { setSpans(arrayListOf(Pair(0, 0))) }
+        assertEquals("", buffer.toString())
+        buffer.insert("hello".toCharArray(), 0, 100, false)
+        assertEquals("hello", buffer.toString())
+        assertEquals("ell", buffer.subSequence(1, 4).toString())
+        buffer.insert(" X ".toCharArray(), 2, 200, true)
+        assertEquals("he X llo", buffer.toString())
+        assertEquals("e X l", buffer.subSequence(1, 6).toString())
+        buffer.markUnsaved()
+        assertNotEquals(buffer.markedVersion, buffer.currentVersion)
+        buffer.markVersion()
+        assertEquals(buffer.markedVersion, buffer.currentVersion)
+    }
+
     @Test fun savedUndoBranchCannotBeConfusedWithANewBranchAtTheSameDepth() {
         val buffer = TextBuffer().apply { setSpans(arrayListOf(Pair(0, 0))) }
         buffer.insert("a".toCharArray(), 0, 10, true)

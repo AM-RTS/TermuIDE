@@ -59,18 +59,40 @@ class DocumentSessionsTest {
         val text = AtomicReference("start")
         sessions(30).use { owner ->
             owner.open(path) { text.get() }
-            var checkpointDuringTyping = false
-            val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(350)
-            while (System.nanoTime() < deadline) {
-                text.set(text.get() + "x")
-                owner.changed(path)
-                // Windows can briefly deny a read while the writer atomically replaces this file.
-                if (DraftStore(directory).readAll { }.any { it.session.dirty }) {
-                    checkpointDuringTyping = true
+            owner.flush() // Finish clean metadata before the typing stream starts.
+            val stop = CountDownLatch(1)
+            val started = CountDownLatch(1)
+            val failure = AtomicReference<Throwable>()
+            val typing = Thread {
+                try {
+                    var edit = 0
+                    do {
+                        text.set("typing ${++edit}")
+                        owner.changed(path)
+                        if (edit == 2) started.countDown()
+                    } while (!stop.await(1, TimeUnit.MILLISECONDS))
+                } catch (error: Throwable) {
+                    failure.set(error)
                 }
-                Thread.sleep(5)
+            }.apply { isDaemon = true; start() }
+            try {
+                assertTrue("Typing stream did not start", started.await(5, TimeUnit.SECONDS))
+                val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+                var checkpoint: DraftStore.Record? = null
+                while (checkpoint == null && System.nanoTime() < deadline) {
+                    checkpoint = DraftStore(directory).readAll { }.singleOrNull { it.session.path == path && it.session.dirty }
+                    if (checkpoint == null) stop.await(10, TimeUnit.MILLISECONDS)
+                }
+                assertNotNull("Typing must not postpone recovery indefinitely", checkpoint)
+                assertTrue(checkpoint!!.text!!.startsWith("typing "))
+                assertTrue("Checkpoint must arrive before typing stops", typing.isAlive)
+                assertEquals("", File(path).readText())
+            } finally {
+                stop.countDown()
+                typing.join(5000)
+                assertFalse("Typing thread did not stop", typing.isAlive)
             }
-            assertTrue("Typing must not postpone recovery indefinitely", checkpointDuringTyping)
+            assertNull("Typing thread failed", failure.get())
         }
     }
 

@@ -48,6 +48,7 @@ class SourceWriterTest {
         var rejectPublish = false
         var rejectBackup = false
         var rejectDeleteBackup = false
+        var rejectRestore = false
         private fun physical(id: String) = File(storage, File(id).name)
         override fun onCreate() = true
         override fun queryRoots(projection: Array<out String>?) = MatrixCursor(projection ?: arrayOf("root_id"))
@@ -81,6 +82,7 @@ class SourceWriterTest {
         override fun renameDocument(documentId: String, displayName: String): String {
             if (rejectPublish && documentId.endsWith("-pending")) throw FileNotFoundException("Publish failed")
             if (rejectBackup && displayName.endsWith("-backup")) throw FileNotFoundException("Backup failed")
+            if (rejectRestore && documentId.endsWith("-backup")) throw FileNotFoundException("Restore failed")
             val result = File(File(documentId).parentFile, displayName).path
             if (!physical(documentId).renameTo(physical(result))) throw FileNotFoundException("Rename failed")
             return result
@@ -153,6 +155,71 @@ class SourceWriterTest {
         catch (_: java.io.IOException) { }
         assertEquals("original", original.readText())
         assertFalse(directory.listFiles()!!.any { it.name.endsWith("-backup") })
+    }
+
+    @Test fun failedBackupCleanupStillCompletesSaveAndPreservesRecoveryForNewEdits() {
+        val original = File(directory, path.name).apply { writeText("original") }
+        val drafts = File(directory, "drafts")
+        var text = "replacement 🧪"
+        DocumentSessions(drafts, { throw AssertionError(it) }, 60_000).use { sessions ->
+            sessions.open(path.path) { text }
+            sessions.changed(path.path)
+            app.saver.shutdown()
+            app.saver = DocumentSaver(sessions)
+            try {
+                provider.rejectDeleteBackup = true
+                val saving = app.saver.save(path.path, text, null) { }
+                drainSourceSaves()
+                assertTrue("Cleanup must not report a published save as failed", saving.join())
+                assertFalse(sessions.isDirty(path.path))
+                assertEquals(text, original.readText())
+                val journal = SourceWriter.Journal(path)
+                assertTrue(journal.record.isFile)
+                assertEquals("original", File(directory, journal.backup.name).readText())
+                FileHelper.openInputStream(path).bufferedReader().use { assertEquals(text, it.readText()) }
+
+                text = "newer unsaved text"
+                sessions.changed(path.path)
+                val blocked = app.saver.save(path.path, text, null) { }
+                drainSourceSaves()
+                assertTrue(blocked.isCompletedExceptionally)
+                assertEquals("replacement 🧪", original.readText())
+                sessions.flush()
+                DocumentSessions(drafts, { throw AssertionError(it) }, 60_000).use { restarted ->
+                    assertTrue(restarted.isDirty(path.path))
+                    assertEquals(text, restarted.recoveryText(path.path))
+                }
+
+                provider.rejectDeleteBackup = false
+                val retry = app.saver.save(path.path, text, null) { }
+                drainSourceSaves()
+                assertTrue(retry.join())
+                assertEquals(text, original.readText())
+                assertFalse(sessions.isDirty(path.path))
+                assertFalse(journal.record.exists())
+                assertFalse(File(directory, journal.backup.name).exists())
+                assertFalse(File(directory, journal.temporary.name).exists())
+            } finally { app.saver.shutdown() }
+        }
+    }
+
+    @Test fun failedRollbackRetainsTheOriginalUntilOpeningCanRestoreIt() {
+        File(directory, path.name).writeText("original")
+        provider.rejectPublish = true
+        provider.rejectRestore = true
+        try { SourceWriter.write(path, "replacement"); fail("Failed rollback was ignored") }
+        catch (_: java.io.IOException) { }
+        val journal = SourceWriter.Journal(path)
+        assertTrue(journal.record.isFile)
+        assertFalse(File(directory, path.name).exists())
+        assertEquals("original", File(directory, journal.backup.name).readText())
+        provider.rejectRestore = false
+        FileHelper.openInputStream(path).bufferedReader().use { assertEquals("original", it.readText()) }
+        provider.rejectPublish = false
+        SourceWriter.write(path, "retry")
+        assertEquals("retry", File(directory, path.name).readText())
+        assertEquals(listOf(path.name), directory.listFiles()!!.map { it.name })
+        assertFalse(journal.record.exists())
     }
 
     @Test fun providerWithoutRenameSupportCannotTruncateTheOriginal() {

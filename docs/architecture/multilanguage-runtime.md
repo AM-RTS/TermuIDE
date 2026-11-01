@@ -385,3 +385,27 @@ A branch CI artifact is not a public release asset: fresh Java-server installati
 
 
 Verification: [CI 41034109234](https://github.com/AM-RTS/TermuIDE/actions/runs/41034109234), implementation commit `37d868d`, passed all 268 app tests with zero failures/errors/skips, 12 installer-script checks, and four Java launcher checks. Both debug and minified signed release APKs built successfully, with APK v2/v3 signature verification passing. The test-report artifact confirms all five `LanguageToolInstallerTest` methods and the saved-confirmation/environment/busy Compose regression executed. The shared Termux launch helper now rejects an unresolved service immediately; setup also preserves Termux error messages returned without an exit code. Fresh matching-archive extraction, integrity failures, rejected archive entries, selected-environment behavior, old Java alternatives and restoring Java selection are checked in CI fixtures. The latest public prerelease still has no Java tools archive; a matching archive must be published before fresh Java downloads can succeed. This installer change has not been installed or exercised on the physical phone. No local Gradle/build/test or emulator check was run, and the branch remains unmerged.
+
+
+### Installer review follow-up - 2026-10-30
+
+Stop waiting abandons the app's pending installation/verification callback, removes its timeout, and unlocks the controls without claiming setup succeeded or killing Termux. Late results from the abandoned job are ignored. A cancelled-tracking status remains visible across scopes, while the existing Termux flock continues to prevent overlapping installers. This also lets a reconstructed UNKNOWN job be abandoned explicitly.
+
+Python setup clears inherited PIP_* settings, disables pip configuration files with PIP_CONFIG_FILE=/dev/null, and invokes pip's own isolated mode as well as Python's -I. This protects pip and build subprocesses from destination overrides. The post-install check requires pylsp's resolved module path to be inside that interpreter's purelib directory; an already importable external copy cannot claim a successful repair. Manual setup is still available for custom pip/index configuration. No document save/recovery ownership changes are involved.
+
+Regression cases were added for lost/late callbacks, verification timeout cancellation, the recovery button across scopes, real pip with a local wheel under poisoned destination/config settings, and rejection of an external module. Per the user's instruction, these new checks were not executed, no local Gradle/build/test or phone/emulator checks were run, and no CI run was triggered for this follow-up. The earlier green CI record above predates these fixes.
+
+
+### Test-quality follow-up - 2026-10-30
+
+The print-only GapIntSet demo was replaced with JUnit tests under the app's existing host-test task. All eight original shift examples now assert expected results, with additional membership/toggle/clear checks. Indexed reads are asserted before getData materializes the lazy gap. No editor-library dependency or additional test task is required.
+
+The pure TextBuffer slicing/checkpoint scenario moved from ComposeRegressionTest instrumentation into EditorCheckpointTest with every assertion retained and fixed edit timestamps. Device tests keep the Android-specific workflows. Continuous-typing recovery now uses a bounded background producer, a coordinated start/stop, and a five-second wait for an actual persisted dirty checkpoint while typing remains active; it no longer requires checkpoint completion inside a 350 ms observation window. It still exercises the real recovery scheduler and filesystem rather than claiming fully virtual-time determinism.
+
+Only test sources changed in this follow-up. The earlier uncommitted installer fixes remain separate and intact. Per the existing skip instruction, tests/builds/Gradle/device checks were not run and no CI run was triggered. Branch coverage and mutation strength remain unmeasured; these edits do not establish a numerical test-quality score.
+
+### Save-failure regression follow-up - 2026-11-01
+
+Provider backup-cleanup failure is now covered through DocumentSaver: publication still completes successfully and marks the saved revision clean; a subsequent blocked save preserves the published source and checkpoints newer unsaved edits for reconstruction. Once cleanup is available, retry publishes those edits and removes the staging files and journal. A second regression covers failed publication plus failed rollback: the original remains in the journaled backup and can be restored on the next open before retrying the save.
+
+The adjacent failure paths were reviewed against the existing tests: interrupted local saves, rejected provider backup/publish, project-save failure, worker rejection, newer revisions during save, checkpoint write/snapshot failure and corrupt draft isolation already have behavioral assertions. No production save/recovery change was needed in this pass. Local Gradle, builds, tests, and device/emulator checks remain skipped; branch CI will validate this follow-up together with the previously unexecuted installer and test-quality changes before merge.

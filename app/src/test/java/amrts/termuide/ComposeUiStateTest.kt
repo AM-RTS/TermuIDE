@@ -262,7 +262,9 @@ class ComposeUiStateTest {
             MaterialTheme { LanguageToolsDialog("/project", "", listOf(
                 LanguageServers.Info(LanguageServers.Server.PYTHON, LanguageServers.State.MISSING, null, false),
                 LanguageServers.Info(LanguageServers.Server.JAVA, LanguageServers.State.MISSING, null, false)),
-                onSave = { true }, onRestart = {}, onDismiss = {}, onInstall = { installed = it }, setup = setup.value) }
+                onSave = { true }, onRestart = {}, onDismiss = {}, onInstall = { installed = it }, setup = setup.value,
+                onStopWaiting = { setup.value = setup.value.copy(stage = LanguageToolInstaller.Stage.CANCELLED,
+                    detail = app.getString(R.string.tools_setup_stopped_waiting)) }) }
         }
         compose.onNodeWithTag("tools-install-java").performScrollTo().performClick()
         assertNull(installed)
@@ -275,6 +277,10 @@ class ComposeUiStateTest {
         compose.runOnIdle { setup.value = LanguageToolInstaller.Status(LanguageToolInstaller.Stage.INSTALLING, "java", "/another-project") }
         compose.onNodeWithTag("tools-install-java").performScrollTo().assertIsNotEnabled()
         compose.onNodeWithTag("tools-setup-status").performScrollTo().assertTextEquals(app.getString(R.string.tools_setup_installing))
+        compose.onNodeWithTag("tools-stop-waiting").performScrollTo().performClick()
+        compose.onNodeWithTag("tools-install-java").performScrollTo().assertIsEnabled()
+        compose.onNodeWithTag("tools-setup-status").performScrollTo().assertTextEquals(app.getString(R.string.tools_setup_stopped_waiting))
+        compose.onNodeWithTag("tools-stop-waiting").assertDoesNotExist()
     }
 
     @Test fun languageToolsPreservesDraftsAndDisablesRestartUntilEnvironmentIsSaved() {

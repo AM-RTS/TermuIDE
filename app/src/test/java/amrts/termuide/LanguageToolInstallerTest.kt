@@ -97,4 +97,31 @@ class LanguageToolInstallerTest {
         installer.start(app, "/project", "java", "")
         assertEquals(LanguageToolInstaller.Stage.INSTALLING, installer.state.value.stage)
     }
+
+    @Test fun lostInstallCallbackCanBeAbandonedWithoutAcceptingALateSuccess() {
+        val before = app.documents.state.value
+        installer.start(app, "/project", "java", "")
+        val abandoned = token()
+        shadowOf(app).nextStartedService
+        installer.stopWaiting()
+        assertEquals(LanguageToolInstaller.Stage.CANCELLED, installer.state.value.stage)
+        assertFalse(installer.state.value.busy)
+        assertFalse(prefs.contains("token"))
+        installer.receive(abandoned, result())
+        assertEquals(LanguageToolInstaller.Stage.CANCELLED, installer.state.value.stage)
+        assertNull(shadowOf(app).nextStartedService)
+        assertEquals(before, app.documents.state.value)
+        installer.start(app, "/project", "java", "")
+        assertNotEquals(abandoned, token())
+        assertEquals(LanguageToolInstaller.Stage.INSTALLING, installer.state.value.stage)
+    }
+
+    @Test fun stoppingVerificationCancelsItsTimeoutAndClearsRestoredPendingState() {
+        installer.start(app, "/project", "clangd", "")
+        installer.receive(token(), result())
+        installer.stopWaiting()
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(RunController.PROBE_TIMEOUT + 1))
+        assertEquals(LanguageToolInstaller.Stage.CANCELLED, installer.state.value.stage)
+        assertEquals(LanguageToolInstaller.Stage.IDLE, LanguageToolInstaller(app).state.value.stage)
+    }
 }
