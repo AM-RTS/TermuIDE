@@ -53,6 +53,9 @@ internal fun RunConsoleScreen(console: RunConsole) {
         Scaffold(Modifier.fillMaxSize().imePadding(), contentWindowInsets = WindowInsets.safeDrawing,
             topBar = {
                 TopAppBar(title = { Text(context.getString(R.string.run_console)) }, actions = {
+                    TextButton(onClick = { console.resetTextSize() }) {
+                        Text(context.getString(R.string.console_reset_text_size))
+                    }
                     IconButton(onClick = { console.hide() }) {
                         Icon(Icons.Filled.Close, context.getString(R.string.console_hide))
                     }

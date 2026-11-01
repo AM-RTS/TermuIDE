@@ -26,7 +26,37 @@
     check(replies.join('') === '\x1b[0n', 'A detached retained renderer still processes terminal queries');
     document.getElementById('terminal').appendChild(terminal.element);
     check(!terminal.options.disableStdin, 'Live output does not leave keyboard input disabled');
+    await write('\r\n' + Array.from({ length: 60 }, (_, i) => 'row' + i).join('\r\n'));
+    terminal.scrollToLine(10);
+    terminal.select(0, 10, 4);
+    const selected = terminal.getSelection();
+    const previousCols = terminal.cols;
+    replies.length = 0;
+    consoleTerminal.setFontSize(20);
+    check(terminal.options.fontSize === 20 && terminal.cols < previousCols && sizes.at(-1).cols === terminal.cols,
+      'Text sizing refits the terminal and reports new PTY dimensions');
+    check(terminal.getSelection() === selected && selected.length > 0,
+      'Resizing keeps the existing selection of unwrapped text');
+    check(terminal.buffer.active.viewportY < terminal.buffer.active.baseY && replies.length === 0,
+      'Resizing retains scrollback position without injecting input');
+    terminal.scrollToBottom();
+    terminal.scrollLines(-3);
+    check(terminal.buffer.active.viewportY === terminal.buffer.active.baseY - 3,
+      'Scrollback still works after text resizing');
+    terminal.paste('after resize');
+    check(replies.join('') === 'after resize' && !terminal.options.disableStdin,
+      'Input remains enabled after text resizing');
+    consoleTerminal.setFontSize(100);
+    check(terminal.options.fontSize === 32, 'Oversized text is bounded');
+    consoleTerminal.setFontSize(1);
+    check(terminal.options.fontSize === 8, 'Undersized text is bounded');
+    consoleTerminal.setFontSize(NaN);
+    check(terminal.options.fontSize === 8, 'Invalid text sizes are ignored');
+    consoleTerminal.setFontSize(14);
+    check(terminal.options.fontSize === 14 && terminal.cols === previousCols, 'Reset refits the original text size');
     consoleTerminal.enable(false);
+    consoleTerminal.setFontSize(20);
+    check(terminal.options.disableStdin, 'Text sizing cannot enable input after completion');
     await write('finished output', true);
     check(terminal.options.disableStdin, 'Restoring output cannot reenable input after program completion');
     check(!failed, 'The bundled renderer completes without a script failure');

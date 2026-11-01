@@ -4,10 +4,11 @@
 <style>#terminal { width: 640px; height: 320px; }</style>
 <script>
 const replies = [];
+const sizes = [];
 const pending = new Map();
 let failed = false;
 window.ConsoleBridge = {
-  ready() {}, resize() {}, failed() { failed = true; }, input(data) { replies.push(data); },
+  ready() {}, resize(cols, rows) { sizes.push({ cols, rows }); }, failed() { failed = true; }, input(data) { replies.push(data); },
   rendered(sequence) { pending.get(sequence)?.(); pending.delete(sequence); }
 };
 </script>

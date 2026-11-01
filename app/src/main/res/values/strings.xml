@@ -4,6 +4,7 @@
     <string name="run_console">Run console</string>
     <string name="console_hide">Hide console; keep program running</string>
     <string name="console_input">Program terminal input and output</string>
+    <string name="console_reset_text_size">Reset text size</string>
     <string name="console_connecting">Connecting to Termux…</string>
     <string name="console_running">Running · Termux backend</string>
     <string name="console_stopping">Stopping program…</string>

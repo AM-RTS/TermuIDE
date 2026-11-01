@@ -32,7 +32,11 @@ window.consoleTerminal = {
       }).observe(document.getElementById('terminal'));
     }
     terminal.options.theme = { background: options.background, foreground: options.foreground, cursor: options.cursor };
-    terminal.options.fontSize = options.fontSize;
+    this.setFontSize(options.fontSize);
+  },
+  setFontSize(size) {
+    if (!terminal || !Number.isFinite(size)) return;
+    terminal.options.fontSize = Math.max(8, Math.min(32, Math.round(size)));
     fit.fit();
   },
   write(encoded, sequence, reset, historical = false) {

@@ -6,6 +6,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.preference.PreferenceManager
 import android.widget.FrameLayout
 import java.io.DataInputStream
 import java.io.DataOutputStream
@@ -55,6 +56,20 @@ class RunConsole(private val context: Context) {
     private var rows = 24
     private var renderer: ConsoleTerminalView? = null
     private var rendererCreated = false
+    private val preferences = PreferenceManager.getDefaultSharedPreferences(context)
+    internal val textSize: Int
+        get() = ((preferences.all["console_text_size"] as? Int) ?: Application.textsize).coerceIn(8, 32)
+
+    internal fun setTextSize(size: Int) {
+        val bounded = size.coerceIn(8, 32)
+        if (bounded == textSize) return
+        preferences.edit().putInt("console_text_size", bounded).apply()
+        renderer?.setTextSize(bounded)
+    }
+    internal fun resetTextSize() {
+        preferences.edit().remove("console_text_size").apply()
+        renderer?.setTextSize(textSize)
+    }
 
     fun show() { mutableState.value = mutableState.value.copy(visible = true) }
     fun hide() {

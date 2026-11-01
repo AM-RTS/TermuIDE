@@ -3,6 +3,9 @@ package amrts.termuide
 import android.os.Looper
 import android.app.Activity
 import android.content.MutableContextWrapper
+import android.os.SystemClock
+import android.view.InputDevice
+import android.view.MotionEvent
 import android.widget.FrameLayout
 import java.io.DataInputStream
 import java.io.DataOutputStream
@@ -246,6 +249,86 @@ class RunConsoleTest {
         exit(37)
         assertEquals("last output", console.output.after(0)!!.bytes.toString(Charsets.UTF_8))
         assertEquals(37, console.state.value.exitCode)
+    }
+
+    @Test fun consoleTextSizeSurvivesNewControllersAndResetUsesEditorDefault() {
+        val original = Application.textsize
+        val replacement = RunConsole(Application.getInstance())
+        try {
+            Application.textsize = 14
+            console.resetTextSize()
+            console.setTextSize(22)
+            assertEquals(22, replacement.textSize)
+            Application.textsize = 16
+            assertEquals(22, console.textSize)
+            console.setTextSize(100)
+            assertEquals(32, replacement.textSize)
+            console.setTextSize(1)
+            assertEquals(8, replacement.textSize)
+            replacement.resetTextSize()
+            assertEquals(16, console.textSize)
+        } finally {
+            console.resetTextSize()
+            Application.textsize = original
+            replacement.shutdown()
+        }
+    }
+
+    @Test fun onlyTwoFingerGesturesResizeTextAndCancellationEndsTheGesture() {
+        val activity = Robolectric.buildActivity(Activity::class.java).setup()
+        val original = Application.textsize
+        try {
+            Application.textsize = 14
+            console.resetTextSize()
+            val host = FrameLayout(activity.get())
+            console.attachRenderer(host) { fail("Renderer failed") }
+            val terminal = host.getChildAt(0) as ConsoleTerminalView
+            val start = SystemClock.uptimeMillis()
+            var elapsed = 0L
+            fun touch(action: Int, vararg positions: Float) {
+                elapsed += 32
+                val properties = Array(positions.size) { index -> MotionEvent.PointerProperties().apply {
+                    id = index; toolType = MotionEvent.TOOL_TYPE_FINGER
+                } }
+                val coordinates = Array(positions.size) { index -> MotionEvent.PointerCoords().apply {
+                    x = positions[index]; y = 200f; pressure = 1f; size = 1f
+                } }
+                MotionEvent.obtain(start, start + elapsed, action, positions.size, properties, coordinates,
+                    0, 0, 1f, 1f, 0, 0, InputDevice.SOURCE_TOUCHSCREEN, 0).also {
+                    terminal.onTouchEvent(it)
+                    it.recycle()
+                }
+            }
+            touch(MotionEvent.ACTION_DOWN, 100f)
+            touch(MotionEvent.ACTION_MOVE, 300f)
+            touch(MotionEvent.ACTION_UP, 300f)
+            assertEquals(14, console.textSize)
+            touch(MotionEvent.ACTION_DOWN, 100f)
+            touch(MotionEvent.ACTION_POINTER_DOWN or (1 shl MotionEvent.ACTION_POINTER_INDEX_SHIFT), 100f, 300f)
+            touch(MotionEvent.ACTION_MOVE, 100f, 500f)
+            touch(MotionEvent.ACTION_MOVE, 100f, 700f)
+            assertTrue("Pinch out must enlarge text", console.textSize > 14)
+            val enlarged = console.textSize
+            touch(MotionEvent.ACTION_POINTER_UP or (1 shl MotionEvent.ACTION_POINTER_INDEX_SHIFT), 100f, 700f)
+            touch(MotionEvent.ACTION_MOVE, 250f)
+            touch(MotionEvent.ACTION_UP, 250f)
+            assertEquals(enlarged, console.textSize)
+            touch(MotionEvent.ACTION_DOWN, 100f)
+            touch(MotionEvent.ACTION_POINTER_DOWN or (1 shl MotionEvent.ACTION_POINTER_INDEX_SHIFT), 100f, 700f)
+            touch(MotionEvent.ACTION_MOVE, 100f, 500f)
+            touch(MotionEvent.ACTION_MOVE, 100f, 300f)
+            touch(MotionEvent.ACTION_CANCEL, 100f, 300f)
+            assertTrue("Pinch in must shrink text", console.textSize < enlarged)
+            val reduced = console.textSize
+            touch(MotionEvent.ACTION_DOWN, 100f)
+            touch(MotionEvent.ACTION_MOVE, 400f)
+            touch(MotionEvent.ACTION_UP, 400f)
+            assertEquals(reduced, console.textSize)
+        } finally {
+            console.resetTextSize()
+            Application.textsize = original
+            activity.pause().stop().destroy()
+        }
     }
 
     @Test fun rendererSurvivesHostReplacementAndItsBridgeRunsWhileDetached() {

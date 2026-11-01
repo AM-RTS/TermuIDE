@@ -2,6 +2,8 @@
 
 `app/src/main/assets/console/runner.py` runs under Termux Python using only its standard library. The Android controller owns the authenticated socket; xterm.js renders bytes offline inside a Material 3 screen. See [runtime architecture](../../docs/architecture/multilanguage-runtime.md#execution-and-workspace-boundaries) for ownership and cleanup limits.
 
+Pinch with two fingers to resize console text (8–32 px). The console remembers its own size; **Reset text size** restores the current editor text-size setting. Single-finger input, scrolling and selection use the existing WebView handling. Resizing refits rows/columns and notifies the PTY, so full-screen programs may redraw.
+
 Both GitHub workflows run the Linux PTY regressions before building:
 
 ```sh

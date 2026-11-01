@@ -5,6 +5,8 @@ import android.content.MutableContextWrapper
 import android.os.Handler
 import android.os.Looper
 import android.util.Base64
+import android.view.MotionEvent
+import android.view.ScaleGestureDetector
 import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
@@ -15,6 +17,7 @@ import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import java.io.ByteArrayInputStream
 import org.json.JSONObject
+import kotlin.math.roundToInt
 
 /** Offline terminal renderer. Only the bundled page can access the active session's input bridge. */
 @SuppressLint("SetJavaScriptEnabled", "ViewConstructor")
@@ -29,6 +32,41 @@ internal class ConsoleTerminalView(private val wrappedContext: MutableContextWra
     private val listener: () -> Unit = { pump() }
     private var errorListener: (() -> Unit)? = null
     private val main = Handler(Looper.getMainLooper())
+    private var pinching = false
+    private var scaledTextSize = console.textSize.toFloat()
+    private val scaleDetector = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+        override fun onScaleBegin(detector: ScaleGestureDetector): Boolean {
+            scaledTextSize = console.textSize.toFloat()
+            return true
+        }
+        override fun onScale(detector: ScaleGestureDetector): Boolean {
+            val factor = detector.scaleFactor
+            if (factor.isFinite() && factor > 0) {
+                scaledTextSize = (scaledTextSize * factor).coerceIn(8f, 32f)
+                console.setTextSize(scaledTextSize.roundToInt())
+            }
+            return true
+        }
+    }).apply { isQuickScaleEnabled = false; isStylusScaleEnabled = false }
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) pinching = false
+        if (!pinching && event.pointerCount > 1) {
+            pinching = true
+            // Cancel WebView's pending scroll/long press before taking ownership of this gesture.
+            MotionEvent.obtain(event).also { cancel ->
+                cancel.action = MotionEvent.ACTION_CANCEL
+                super.onTouchEvent(cancel)
+                cancel.recycle()
+            }
+        }
+        scaleDetector.onTouchEvent(event)
+        if (pinching) {
+            if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) pinching = false
+            return true
+        }
+        return super.onTouchEvent(event)
+    }
 
     fun attach(host: FrameLayout, onError: () -> Unit) {
         (parent as? android.view.ViewGroup)?.removeView(this)
@@ -88,11 +126,15 @@ internal class ConsoleTerminalView(private val wrappedContext: MutableContextWra
         setBackgroundColor(background)
         fun css(color: Int) = String.format(java.util.Locale.ROOT, "#%06x", color and 0xffffff)
         options = JSONObject().put("background", css(background)).put("foreground", css(foreground))
-            .put("cursor", css(cursor)).put("fontSize", Application.textsize.coerceIn(8, 32))
+            .put("cursor", css(cursor)).put("fontSize", console.textSize)
             .put("language", java.util.Locale.getDefault().toLanguageTag())
             .put("label", context.getString(R.string.console_input))
             .put("omitted", context.getString(R.string.console_output_omitted))
         if (ready) configurePage()
+    }
+    fun setTextSize(size: Int) {
+        options.put("fontSize", size)
+        if (ready && valid()) evaluateJavascript("consoleTerminal.setFontSize($size)", null)
     }
     private fun valid() = !released && console.state.value.id == id
     private fun configurePage() {
