@@ -47,11 +47,12 @@ class RunController @JvmOverloads constructor(
     }
     private val app = context.applicationContext
     private val history = app.getSharedPreferences("runtime_status", Context.MODE_PRIVATE)
+    private val restoredPending = history.getString("pending", null)
     private val main = Handler(Looper.getMainLooper())
     private val worker = Executors.newSingleThreadExecutor { task -> Thread(task, "Runtime preparation").apply { isDaemon = true } }
-    private val mutableState = MutableStateFlow(if (history.contains("pending"))
+    private val mutableState = MutableStateFlow(if (restoredPending != null)
         Status(Stage.UNKNOWN, detail = app.getString(if (history.getBoolean("pending_console", false))
-            R.string.console_connection_lost else R.string.runtime_result_unknown)) else Status())
+            R.string.console_previous_run_unknown else R.string.runtime_result_unknown)) else Status())
     val state: StateFlow<Status> = mutableState.asStateFlow()
     val console = RunConsole(app)
     private val toolCache = mutableMapOf<String, String>()
@@ -219,7 +220,13 @@ class RunController @JvmOverloads constructor(
     }
 
     fun dismissStatus() {
-        if (state.value.preparing) cancelPreparation() else mutableState.value = Status()
+        if (state.value.preparing) cancelPreparation() else {
+            val pending = current?.id ?: restoredPending
+            if (state.value.stage == Stage.UNKNOWN && !console.state.value.active &&
+                pending != null && history.getString("pending", null) == pending)
+                history.edit().remove("pending").remove("pending_console").apply()
+            mutableState.value = Status()
+        }
     }
 
     private fun status(job: Job, stage: Stage) {

@@ -31,6 +31,7 @@
     <string name="console_connect_timeout">The console did not connect. Check Termux access and that Python is installed, or use Run in Termux.</string>
     <string name="console_setup">Run here also needs Termux Python: pkg install python. Run in Termux remains available.</string>
     <string name="console_connection_lost">Console connection ended without a confirmed exit status. The runner requests process cleanup; completion is unconfirmed.</string>
+    <string name="console_previous_run_unknown">Previous console run has no confirmed exit status.</string>
     <string name="console_input_limit">Console input is busy or exceeds 16 KiB. Send a smaller amount and try again.</string>
     <string name="console_input_failed">Input could not be sent. Output is still being monitored; retry input or use Force stop.</string>
     <string name="console_stop_unconfirmed">The console channel was closed to request cleanup. Process termination could not be confirmed.</string>

@@ -205,10 +205,42 @@ class RunControllerTest {
 
     @Test fun aNewControllerCannotAssumeAnEarlierExternalProgramStopped() {
         start(); saved(); reply(0, result())
+        controller.dismissStatus()
+        assertEquals(RunController.Stage.IDLE, controller.state.value.stage)
         val fresh = RunController(app, Supplier { docs }, Function { saving }, ToIntFunction { 1 }, Consumer {})
         try {
             assertEquals(RunController.Stage.UNKNOWN, fresh.state.value.stage)
             assertFalse(fresh.state.value.preparing)
+        } finally { fresh.shutdown() }
+    }
+
+    @Test fun dismissingARestoredConsoleWarningPersistsWithoutChangingDrafts() {
+        val history = app.getSharedPreferences("runtime_status", 0)
+        history.edit().putString("pending", "previous-run").putBoolean("pending_console", true).commit()
+        val fresh = RunController(app, Supplier { docs }, Function { saving }, ToIntFunction { 1 }, Consumer {})
+        try {
+            assertEquals(RunController.Stage.UNKNOWN, fresh.state.value.stage)
+            assertEquals(app.getString(R.string.console_previous_run_unknown), fresh.state.value.detail)
+            fresh.dismissStatus()
+            assertEquals(RunController.Stage.IDLE, fresh.state.value.stage)
+            val reopened = RunController(app, Supplier { docs }, Function { saving }, ToIntFunction { 1 }, Consumer {})
+            try { assertEquals(RunController.Stage.IDLE, reopened.state.value.stage) }
+            finally { reopened.shutdown() }
+            assertFalse(history.contains("pending_console"))
+            docs.flush()
+            assertTrue(docs.isDirty(path))
+            assertEquals("draft", docs.recoveryText(path))
+        } finally { fresh.shutdown() }
+    }
+
+    @Test fun dismissingAnOlderWarningCannotForgetANewerPendingRun() {
+        val history = app.getSharedPreferences("runtime_status", 0)
+        history.edit().putString("pending", "previous-run").putBoolean("pending_console", true).commit()
+        val fresh = RunController(app, Supplier { docs }, Function { saving }, ToIntFunction { 1 }, Consumer {})
+        try {
+            history.edit().putString("pending", "newer-run").commit()
+            fresh.dismissStatus()
+            assertEquals("newer-run", history.getString("pending", null))
         } finally { fresh.shutdown() }
     }
 
@@ -259,11 +291,13 @@ class RunControllerTest {
         assertTrue(controller.console.state.value.active)
         controller.start(request(RunCommands.Action.RUN))
         assertEquals(2, calls.size)
+        controller.dismissStatus()
+        assertTrue(controller.console.state.value.active)
         val fresh = RunController(app, Supplier { docs }, Function { saving }, ToIntFunction { 1 }, Consumer {})
         try {
             assertEquals(RunController.Stage.UNKNOWN, fresh.state.value.stage)
             assertEquals(RunConsole.Phase.IDLE, fresh.console.state.value.phase)
-            assertEquals(app.getString(R.string.console_connection_lost), fresh.state.value.detail)
+            assertEquals(app.getString(R.string.console_previous_run_unknown), fresh.state.value.detail)
         } finally { fresh.shutdown() }
     }
 }
