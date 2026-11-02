@@ -131,7 +131,7 @@ object RunCommands {
         val python = server == "pylsp"
         val tool = if (python) "python" else if (server == "java") "termuide-java-lsp" else "clangd"
         val checks = if (python) mapOf("python" to (PYTHON_CHECK +
-            "\"\$resolved\" -E -S -c ${quote(PYTHON_TOOL_SETUP + "import pylsp")} >/dev/null 2>&1 || { printf '%s\\n' 'Install python-lsp-server in the selected Python environment.' >&2; exit 127; }; "))
+            "lsp_error=\$(\"\$resolved\" -E -S -c ${quote(PYTHON_TOOL_SETUP + "import importlib;importlib.import_module('pylsp.__main__')")} 2>&1 >/dev/null) || { printf 'Python language server could not load:\\n%s\\n' \"\${lsp_error: -400}\" >&2; exit 127; }; "))
             else if (server == "java") mapOf(tool to "\"\$resolved\" --check >/dev/null || exit 127;") else emptyMap()
         val pinned = if (python && environment.isNotEmpty()) mapOf("python" to environment + "/bin/python") else emptyMap()
         return probeTools(root, "", listOf(tool), emptyMap(), checks, pinned, if (python) environment else "")

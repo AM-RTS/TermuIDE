@@ -425,7 +425,8 @@ class ScriptRuntimeTest {
         assertEquals(create.stderr, 0, create.exit)
         val missing = execute(RunCommands.languageServerProbe("pylsp", directory.path, empty.path), environment = poisoned)
         assertEquals(127, missing.exit)
-        assertTrue(missing.stderr.contains("Install python-lsp-server"))
+        assertTrue(missing.stderr.contains("Python language server could not load"))
+        assertTrue(missing.stderr.contains("pylsp"))
         assertFalse(marker.exists())
     }
 
@@ -451,6 +452,11 @@ class ScriptRuntimeTest {
         val launched = execute(toolCommand(listOf(probe.stdout.trim()) + RunCommands.pythonLanguageServerArguments()), environment = environment)
         assertEquals(launched.stderr, 0, launched.exit)
         assertEquals("user-site server\n", launched.stdout)
+        installed.resolve("__main__.py").writeText("raise RuntimeError('broken pylsp entrypoint')\n")
+        val broken = execute(RunCommands.languageServerProbe("pylsp", directory.path, ""), environment = environment)
+        assertEquals(127, broken.exit)
+        assertTrue(broken.stderr.contains("RuntimeError: broken pylsp entrypoint"))
+        assertTrue(broken.stdout.isEmpty())
     }
 
 }

@@ -311,6 +311,58 @@ class LanguageServersTest {
         } finally { Application.completion = "n" }
     }
 
+    @Test fun serverProcessDiagnosticsSurviveSocketFailureAndOldLaunchCallbacksAreIgnored() {
+        val app = Application.getInstance()
+        val oldHandler = app.hand
+        app.hand = MainHandler(null)
+        val calls = mutableListOf<android.content.Intent>()
+        val context = object : android.content.ContextWrapper(app) {
+            override fun startForegroundService(service: android.content.Intent): android.content.ComponentName {
+                calls.add(service)
+                return android.content.ComponentName("com.termux", "com.termux.app.RunCommandService")
+            }
+        }
+        fun token(intent: android.content.Intent): String {
+            val callback = intent.getParcelableExtra<android.app.PendingIntent>("com.termux.RUN_COMMAND_PENDING_INTENT")!!
+            return org.robolectric.Shadows.shadowOf(callback).savedIntent.data!!.lastPathSegment!!
+        }
+        Application.completion = "s"
+        val file = File("/process-error-workspace/main.py")
+        try {
+            while (org.robolectric.Shadows.shadowOf(app).nextStartedService != null) { }
+            servers.ensure(context, file, EditFragment.TYPE_PYTHON)
+            servers.receive(token(calls.last()), android.os.Bundle().apply {
+                putInt("err", -1); putInt("exitCode", 0); putString("stdout", "/bin/python\n")
+            })
+            val launch = org.robolectric.Shadows.shadowOf(app).nextStartedService!!
+            val launchToken = token(launch)
+            val lsp = servers.find(file)!!
+            val stale = lsp.incoming("{}")
+            val failure = android.os.Bundle().apply {
+                putInt("err", -1); putInt("exitCode", 1)
+                putString("stderr", "traceback\n".repeat(400) + "ModuleNotFoundError: broken_dependency")
+            }
+            servers.receive(launchToken, failure)
+            assertTrue(lsp.hasFailed())
+            assertFalse(stale.isCurrent)
+            assertEquals(LanguageServers.State.FAILED, lsp.state())
+            assertTrue(lsp.detail().endsWith("ModuleNotFoundError: broken_dependency"))
+            assertTrue(lsp.detail().length < 2100)
+            val diagnostic = lsp.detail()
+            lsp.connectionFailed()
+            assertEquals(diagnostic, lsp.detail())
+            servers.restart(context, lsp.root, "pylsp")
+            val replacement = servers.find(file)!!
+            servers.receive(launchToken, failure)
+            assertEquals(LanguageServers.State.CHECKING, replacement.state())
+            assertNull(replacement.detail())
+        } finally {
+            servers.end()
+            app.hand = oldHandler
+            Application.completion = "n"
+        }
+    }
+
     @Test fun environmentSelectionRebindsOnlyPythonAndConfiguresJediWithTheSameInterpreter() {
         val app = Application.getInstance()
         val scope = "/environment-workspace"

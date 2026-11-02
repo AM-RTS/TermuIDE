@@ -46,7 +46,11 @@ final class LanguageServers {
         final Lsp session;
         final PendingIntent callback;
         final Runnable timeout;
-        Probe(Lsp session, PendingIntent callback, Runnable timeout) { this.session = session; this.callback = callback; this.timeout = timeout; }
+        final boolean launch;
+        Probe(Lsp session, PendingIntent callback, Runnable timeout) { this(session, callback, timeout, false); }
+        Probe(Lsp session, PendingIntent callback, Runnable timeout, boolean launch) {
+            this.session = session; this.callback = callback; this.timeout = timeout; this.launch = launch;
+        }
     }
     private final Handler main = new Handler(Looper.getMainLooper());
     private final Map<String, Probe> pending = new HashMap<>();
@@ -145,10 +149,11 @@ final class LanguageServers {
     void receive(String token, Bundle result) {
         Probe probe = pending.remove(token);
         if (probe == null) return;
-        main.removeCallbacks(probe.timeout);
+        if (probe.timeout != null) main.removeCallbacks(probe.timeout);
         probe.callback.cancel();
         Lsp session = probe.session;
         if (!sessions.containsValue(session) || !documents.containsValue(session)) return;
+        if (probe.launch) { session.processFinished(result); return; }
         String tool = session.server.command[0];
         RunController.ProbeResult outcome = RunController.readProbeResult(Application.getInstance(), result, Collections.singletonList(tool));
         if (outcome.getTools() == null) {
@@ -157,9 +162,13 @@ final class LanguageServers {
         }
         try {
             session.configureRuntime(outcome.getTools().get(tool));
-            session.start(Application.getInstance(), Application.getInstance().hand);
+            String launchToken = UUID.randomUUID().toString();
+            PendingIntent callback = RunController.resultCallback(Application.getInstance(), RESULT_SCHEME, launchToken);
+            pending.put(launchToken, new Probe(session, callback, null, true));
+            session.start(Application.getInstance(), Application.getInstance().hand, callback);
             session.initialize(session.root);
         } catch (RuntimeException error) {
+            cancel(session);
             session.end();
             session.setState(State.FAILED, error.getMessage());
         }
@@ -170,7 +179,7 @@ final class LanguageServers {
         while (iterator.hasNext()) {
             Probe probe = iterator.next();
             if (probe.session != session) continue;
-            iterator.remove(); main.removeCallbacks(probe.timeout); probe.callback.cancel();
+            iterator.remove(); if (probe.timeout != null) main.removeCallbacks(probe.timeout); probe.callback.cancel();
         }
     }
 

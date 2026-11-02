@@ -35,6 +35,7 @@ public final class Lsp implements Runnable {
     private String executable;
     private LanguageServers.State state = LanguageServers.State.STOPPED;
     private String detail;
+    private String processError;
     String configurationError;
     private volatile int generation;
     private boolean started;
@@ -63,8 +64,29 @@ public final class Lsp implements Runnable {
         end(); failed = true; setState(LanguageServers.State.FAILED, message);
     }
     void connectionFailed() {
+        if (processError != null) { setState(LanguageServers.State.FAILED, processError); return; }
         setState(state == LanguageServers.State.READY ? LanguageServers.State.DISCONNECTED : LanguageServers.State.FAILED,
             Application.getInstance().getString(R.string.lsp_connection_ended));
+    }
+    void processFinished(Bundle result) {
+        if (!started) return;
+        try {
+            if (result != null && result.get("err") instanceof Integer && result.getInt("err") == -1 &&
+                result.get("exitCode") instanceof Integer && result.getInt("exitCode") != 0) {
+                String stderr = result.getString("stderr", "").trim();
+                processError = Application.getInstance().getString(R.string.lsp_process_exit, result.getInt("exitCode")) +
+                    (stderr.isEmpty() ? "" : "\n" + stderr.substring(Math.max(0, stderr.length() - 2000)));
+            } else if (result != null && result.get("err") instanceof Integer && result.getInt("err") != -1) {
+                String message = result.getString("errmsg", "").trim();
+                processError = message.isEmpty() ? Application.getInstance().getString(R.string.runtime_setup_required)
+                    : message.substring(Math.max(0, message.length() - 2000));
+            }
+        } catch (RuntimeException invalidResult) { /* Keep the transport failure when Termux returns no usable diagnostic. */ }
+        String error = processError;
+        end();
+        processError = error;
+        failed = true;
+        connectionFailed();
     }
     static final class Incoming {
         final Lsp source;
@@ -129,7 +151,7 @@ public final class Lsp implements Runnable {
 
     boolean isStarted() { return started; }
     boolean hasFailed() { return failed; }
-    public void start(Context context, Handler read) {
+    public void start(Context context, Handler read, android.app.PendingIntent result) {
         end();
         started = true;
         setState(LanguageServers.State.STARTING, null);
@@ -140,12 +162,13 @@ public final class Lsp implements Runnable {
         mRead = read;
         Sender sender = new Sender();
         mSndr = sender;
-        Utils.run(context, "/system/bin/toybox", launchArguments(), root == null ? Utils.ROOT.getAbsolutePath() : root, true);
+        Utils.run(context, "/system/bin/toybox", launchArguments(), root == null ? Utils.ROOT.getAbsolutePath() : root, true, result);
         int epoch = generation;
         new Thread(() -> run(sender, read, epoch), "LSP-" + server.id).start();
     }
 
     public void end() {
+        processError = null;
         ++generation;
         ready = false;
         opened.clear();
