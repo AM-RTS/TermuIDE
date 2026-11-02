@@ -379,7 +379,8 @@ class LanguageServersTest {
             assertSame(c, servers.find(native))
             assertEquals("$scope/.venv", replacement.environment)
             replacement.configureRuntime("$scope/.venv/bin/python")
-            assertEquals(listOf("$scope/.venv/bin/python") + RunCommands.pythonLanguageServerArguments(), replacement.launchArguments().takeLast(5))
+            assertEquals(listOf("$scope/.venv/bin/python") + RunCommands.pythonLanguageServerArguments(),
+                replacement.launchArguments().takeLast(1 + RunCommands.pythonLanguageServerArguments().size))
             val sender = replacement.connectedSender()
             replacement.initialize(scope)
             val options = JSONObject(String(sender.single(), Charsets.UTF_8)).getJSONObject("params").getJSONObject("initializationOptions")

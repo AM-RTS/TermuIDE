@@ -74,13 +74,15 @@ public final class Lsp implements Runnable {
         try {
             if (result != null && result.get("err") instanceof Integer && result.getInt("err") == -1 &&
                 result.get("exitCode") instanceof Integer && result.getInt("exitCode") != 0) {
-                String stderr = result.getString("stderr", "").trim();
-                processError = Application.getInstance().getString(R.string.lsp_process_exit, result.getInt("exitCode")) +
-                    (stderr.isEmpty() ? "" : "\n" + stderr.substring(Math.max(0, stderr.length() - 2000)));
+                int exit = result.getInt("exitCode");
+                processError = exit == 139 ? Application.getInstance().getString(R.string.lsp_process_segv)
+                    : Application.getInstance().getString(R.string.lsp_process_exit, exit);
+                String stderr = diagnostic(result.getString("stderr", ""));
+                if (!stderr.isEmpty()) processError += "\n" + stderr;
             } else if (result != null && result.get("err") instanceof Integer && result.getInt("err") != -1) {
-                String message = result.getString("errmsg", "").trim();
+                String message = diagnostic(result.getString("errmsg", ""));
                 processError = message.isEmpty() ? Application.getInstance().getString(R.string.runtime_setup_required)
-                    : message.substring(Math.max(0, message.length() - 2000));
+                    : message;
             }
         } catch (RuntimeException invalidResult) { /* Keep the transport failure when Termux returns no usable diagnostic. */ }
         String error = processError;
@@ -88,6 +90,16 @@ public final class Lsp implements Runnable {
         processError = error;
         failed = true;
         connectionFailed(null);
+        // end() invalidates the socket's queued messages; send current-generation editor cleanup.
+        if (mRead != null) {
+            Message message = Message.obtain();
+            message.what = ERROR; message.obj = incoming(null);
+            mRead.sendMessage(message);
+        }
+    }
+    private static String diagnostic(String value) {
+        value = value.trim();
+        return value.length() <= 2000 ? value : value.substring(0, 900) + "\n[...]\n" + value.substring(value.length() - 1000);
     }
     static final class Incoming {
         final Lsp source;

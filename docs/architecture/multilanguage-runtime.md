@@ -36,7 +36,7 @@ C/C++ retains compilation, artifact staging and GDB. Python invokes the resolved
 
 Run configuration is private per project root or browser folder. Relative overrides resolve against that scope; explicitly relative project executables keep their project location when the runtime directory changes. Build/Compile retain their selected file and preparation directory. Python environment selection uses the displayed project/source scope and is shared by execution and pylsp.
 
-Visible Run in Termux and installer sessions execute explicit, non-interactive Bash commands. They do not load zsh/Oh My Zsh startup files; shell-dependent styling can differ from a manually opened login session. The in-app console uses the app theme independently.
+Visible Run in Termux and installer sessions execute explicit, non-interactive Bash commands. They do not load zsh/Oh My Zsh startup files. Termux owns terminal palettes and active-session selection; TermuIDE does not choose a terminal background. The in-app console uses the app theme independently.
 
 The Application-owned controller survives Activity recreation and distinguishes preparation, dispatch, completion, failure and unknown status. Probes have bounded waits; interactive programs may run indefinitely. Cancellation stops preparation, not a dispatched Termux process. After app process death, pending-status metadata reports uncertainty rather than replaying execution.
 
@@ -73,6 +73,8 @@ Recovery does not guarantee edits before their checkpoint, device power-loss dur
 `LanguageServers` lazily owns sessions keyed by server and normalized project/folder root. C/C++ share clangd; Python uses pylsp; Java uses the optional `termuide-java-lsp`. Each session has its own port, capabilities, request IDs and open-document set. Allocation avoids immediately reusing a shutting-down bridge. All reuse the Termux netcat stdio bridge; closing the last tab stops its session.
 
 Python preflight loads the pylsp entry point using the launcher's isolated interpreter setup, so a package with broken startup dependencies does not pass merely because `import pylsp` succeeds. Server-exit callbacks retain the stderr tail for Language tools; socket/framing exceptions appear when no process diagnostic is available. Socket-EOF notifications cannot overwrite a process diagnostic, and closing/replacing a session cancels its callback.
+
+Python startup enables `faulthandler` for native-crash diagnostics. Long process errors preserve both the beginning and end, so fatal-error headings are retained alongside the final exception. A process failure invalidates old protocol replies and posts current-generation editor cleanup, clearing stale diagnostics/completion data without changing document revisions or drafts.
 
 Messages carry their source LSP/generation. Shutdown invalidates queued events and completions; requests and results use document versions/revisions. Reconnect/restart reopens actual live buffers, including recovered unsaved text, without force-saving them. Unsupported capabilities are suppressed; only clangd receives fallback compiler flags. Framing bounds headers/body allocation and validates UTF-8 lengths; initialization has a deadline.
 

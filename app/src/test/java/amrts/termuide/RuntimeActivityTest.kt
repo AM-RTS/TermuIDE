@@ -99,6 +99,38 @@ class RuntimeActivityTest {
         assertEquals(RunController.Stage.DISPATCHED, app.runs.state.value.stage)
     }
 
+    @Test fun aServerProcessCrashClearsItsEditorDataWithoutLosingCrashDetailsOrDrafts() {
+        val lsp = app.languageServers.session(source, EditFragment.TYPE_C)!!
+        lsp.connectedSender()
+        Lsp::class.java.getDeclaredField("mRead").apply { isAccessible = true }.set(lsp, app.hand)
+        val editor = host.get().editor
+        editor.paste("/* unsaved */ ")
+        val diagnostic = Diagnostic().apply { msg = "stale warning"; stl = 0; enl = 0; enc = 1 }
+        editor.text.setDiag(listOf(diagnostic))
+        app.hand.cacheData[source.path] = setOf("staleType")
+        assertNotNull(editor.text.diag)
+        assertTrue(app.hand.cacheData.containsKey(source.path))
+        val revision = app.documents.state.value.single { it.path == source.path }.revision
+        val stale = lsp.incoming("{}")
+        try {
+            lsp.processFinished(Bundle().apply {
+                putInt("err", -1); putInt("exitCode", 139)
+                putString("stderr", "Fatal Python error: Segmentation fault\n" + "frame\n".repeat(800) + "last frame")
+            })
+            shadowOf(Looper.getMainLooper()).idle()
+            assertFalse(stale.isCurrent)
+            assertNull(editor.text.diag)
+            assertFalse(app.hand.cacheData.containsKey(source.path))
+            assertEquals(LanguageServers.State.FAILED, lsp.state())
+            assertTrue(lsp.detail().contains("SIGSEGV"))
+            assertTrue(lsp.detail().contains("Fatal Python error"))
+            assertTrue(lsp.detail().endsWith("last frame"))
+            assertTrue(lsp.detail().length < 2200)
+            assertTrue(app.documents.isDirty(source.path))
+            assertEquals(revision, app.documents.state.value.single { it.path == source.path }.revision)
+        } finally { app.languageServers.close(source) }
+    }
+
     @Test fun configuredEntryUsesItsRecoveredDraftAndLeavesOtherDirtyTabsIntact() {
         val original = source
         val activity = host.get()

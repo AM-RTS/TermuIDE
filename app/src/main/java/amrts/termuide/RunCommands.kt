@@ -122,7 +122,7 @@ object RunCommands {
     // Remove workspace imports before site hooks run; retain installed venv and user-site packages.
     private const val PYTHON_TOOL_SETUP = "import sys;sys.path.pop(0);import os;os.environ.pop('PYTHONPATH',None);os.environ.pop('PYTHONHOME',None);import site;site.main();"
 
-    @JvmStatic fun pythonLanguageServerArguments(): List<String> = listOf("-E", "-S", "-c",
+    @JvmStatic fun pythonLanguageServerArguments(): List<String> = listOf("-E", "-S", "-X", "faulthandler", "-c",
         PYTHON_TOOL_SETUP + "import runpy;runpy.run_module('pylsp',run_name='__main__',alter_sys=True)")
 
     @JvmStatic fun languageServerProbe(server: String, root: String, environment: String): Plan {
@@ -131,7 +131,7 @@ object RunCommands {
         val python = server == "pylsp"
         val tool = if (python) "python" else if (server == "java") "termuide-java-lsp" else "clangd"
         val checks = if (python) mapOf("python" to (PYTHON_CHECK +
-            "lsp_error=\$(\"\$resolved\" -E -S -c ${quote(PYTHON_TOOL_SETUP + "import importlib;importlib.import_module('pylsp.__main__')")} 2>&1 >/dev/null) || { printf 'Python language server could not load:\\n%s\\n' \"\${lsp_error: -400}\" >&2; exit 127; }; "))
+            "lsp_error=\$(\"\$resolved\" -E -S -X faulthandler -c ${quote(PYTHON_TOOL_SETUP + "import importlib;importlib.import_module('pylsp.__main__')")} 2>&1 >/dev/null) || { printf 'Python language server could not load:\\n%s\\n' \"\${lsp_error: -400}\" >&2; exit 127; }; "))
             else if (server == "java") mapOf(tool to "\"\$resolved\" --check >/dev/null || exit 127;") else emptyMap()
         val pinned = if (python && environment.isNotEmpty()) mapOf("python" to environment + "/bin/python") else emptyMap()
         return probeTools(root, "", listOf(tool), emptyMap(), checks, pinned, if (python) environment else "")

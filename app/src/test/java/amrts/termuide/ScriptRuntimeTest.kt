@@ -440,7 +440,7 @@ class ScriptRuntimeTest {
         assertEquals(userSite.stderr, 0, userSite.exit)
         val installed = File(userSite.stdout.trim(), "pylsp").apply { mkdirs() }
         installed.resolve("__init__.py").writeText("")
-        installed.resolve("__main__.py").writeText("print('user-site server')\n")
+        installed.resolve("__main__.py").writeText("import faulthandler\nassert faulthandler.is_enabled()\nprint('user-site server')\n")
         val python = File(directory, "bin/python").apply {
             parentFile.mkdirs()
             writeText("#!/bin/bash\nexec '${base.stdout.trim().replace("'", "'\\''")}' \"\$@\"\n")
