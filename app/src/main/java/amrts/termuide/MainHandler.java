@@ -54,7 +54,7 @@ public class MainHandler extends Handler {
         if (!incoming.isCurrent()) return;
         Lsp lsp = incoming.source;
         if (message.what == Lsp.ERROR) {
-            lsp.connectionFailed();
+            lsp.connectionFailed(incoming.json);
             if (ma != null) for (String path : ma.getOpenFilePaths()) {
                 EditFragment fragment = fragment(path);
                 if (fragment == null || fragment.getView() == null || !Application.getInstance().languageServers.owns(lsp, fragment.getFile())) continue;

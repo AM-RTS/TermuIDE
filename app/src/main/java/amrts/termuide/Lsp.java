@@ -63,10 +63,11 @@ public final class Lsp implements Runnable {
     void initializationFailed(String message) {
         end(); failed = true; setState(LanguageServers.State.FAILED, message);
     }
-    void connectionFailed() {
+    void connectionFailed(String reason) {
         if (processError != null) { setState(LanguageServers.State.FAILED, processError); return; }
         setState(state == LanguageServers.State.READY ? LanguageServers.State.DISCONNECTED : LanguageServers.State.FAILED,
-            Application.getInstance().getString(R.string.lsp_connection_ended));
+            Application.getInstance().getString(R.string.lsp_connection_ended) +
+                (reason == null || reason.trim().isEmpty() ? "" : "\n" + reason.substring(0, Math.min(500, reason.length()))));
     }
     void processFinished(Bundle result) {
         if (!started) return;
@@ -86,7 +87,7 @@ public final class Lsp implements Runnable {
         end();
         processError = error;
         failed = true;
-        connectionFailed();
+        connectionFailed(null);
     }
     static final class Incoming {
         final Lsp source;
@@ -200,6 +201,7 @@ public final class Lsp implements Runnable {
 		int i = 0;
 		Socket connection = null;
         Runnable initializationDeadline = null;
+        String connectionError = null;
 		try{
 			do {
                 if (sender.stopped || sender != mSndr) return;
@@ -232,6 +234,7 @@ public final class Lsp implements Runnable {
                 if (sender == mSndr && !sender.stopped) reader.sendMessage(msg);
             }
 		} catch (Exception ioe) {
+            connectionError = ioe.getMessage();
 			Log.e(TAG, "Language-server connection ended", ioe);
 		} finally {
             if (initializationDeadline != null) reader.removeCallbacks(initializationDeadline);
@@ -242,7 +245,7 @@ public final class Lsp implements Runnable {
                 ready = false;
                 requests.clear();
                 Message message = Message.obtain();
-                message.what = ERROR; message.obj = new Incoming(this, epoch, null);
+                message.what = ERROR; message.obj = new Incoming(this, epoch, connectionError);
                 reader.sendMessage(message);
             }
         }

@@ -72,7 +72,7 @@ Recovery does not guarantee edits before their checkpoint, device power-loss dur
 
 `LanguageServers` lazily owns sessions keyed by server and normalized project/folder root. C/C++ share clangd; Python uses pylsp; Java uses the optional `termuide-java-lsp`. Each session has its own port, capabilities, request IDs and open-document set. Allocation avoids immediately reusing a shutting-down bridge. All reuse the Termux netcat stdio bridge; closing the last tab stops its session.
 
-Python preflight loads the pylsp entry point using the launcher's isolated interpreter setup, so a package with broken startup dependencies does not pass merely because `import pylsp` succeeds. Server-exit callbacks retain the stderr tail for Language tools; socket-EOF notifications cannot overwrite that diagnostic, and closing/replacing a session cancels its callback.
+Python preflight loads the pylsp entry point using the launcher's isolated interpreter setup, so a package with broken startup dependencies does not pass merely because `import pylsp` succeeds. Server-exit callbacks retain the stderr tail for Language tools; socket/framing exceptions appear when no process diagnostic is available. Socket-EOF notifications cannot overwrite a process diagnostic, and closing/replacing a session cancels its callback.
 
 Messages carry their source LSP/generation. Shutdown invalidates queued events and completions; requests and results use document versions/revisions. Reconnect/restart reopens actual live buffers, including recovered unsaved text, without force-saving them. Unsupported capabilities are suppressed; only clangd receives fallback compiler flags. Framing bounds headers/body allocation and validates UTF-8 lengths; initialization has a deadline.
 

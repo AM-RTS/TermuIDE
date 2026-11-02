@@ -349,7 +349,7 @@ class LanguageServersTest {
             assertTrue(lsp.detail().endsWith("ModuleNotFoundError: broken_dependency"))
             assertTrue(lsp.detail().length < 2100)
             val diagnostic = lsp.detail()
-            lsp.connectionFailed()
+            lsp.connectionFailed("Connection reset")
             assertEquals(diagnostic, lsp.detail())
             servers.restart(context, lsp.root, "pylsp")
             val replacement = servers.find(file)!!
@@ -386,8 +386,9 @@ class LanguageServersTest {
             assertEquals("$scope/.venv/bin/python", options.getJSONObject("pylsp").getJSONObject("plugins").getJSONObject("jedi").getString("environment"))
             replacement.initialized()
             assertEquals(LanguageServers.State.READY, replacement.state())
-            replacement.connectionFailed()
+            replacement.connectionFailed("Invalid Content-Length header")
             assertEquals(LanguageServers.State.DISCONNECTED, replacement.state())
+            assertTrue(replacement.detail().contains("Invalid Content-Length header"))
         } finally { app.getSharedPreferences("run_configurations", 0).edit().remove(scope).commit() }
     }
 
