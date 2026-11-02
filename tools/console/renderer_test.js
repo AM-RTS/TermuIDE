@@ -54,6 +54,12 @@
     check(terminal.options.fontSize === 8, 'Invalid text sizes are ignored');
     consoleTerminal.setFontSize(14);
     check(terminal.options.fontSize === 14 && terminal.cols === previousCols, 'Reset refits the original text size');
+    await write('\x1bc' + Array.from({ length: 60 }, (_, i) => 'long row ' + i + ': ' + 'abcdef'.repeat(40)).join('\r\n') + '\r\n');
+    terminal.scrollToLine(10);
+    terminal.select(3, 10, 120);
+    const wrappedSelection = terminal.getSelection();
+    consoleTerminal.setFontSize(20);
+    check(terminal.getSelection() === wrappedSelection, 'Resizing preserves selected text across wrapped lines');
     consoleTerminal.enable(false);
     consoleTerminal.setFontSize(20);
     check(terminal.options.disableStdin, 'Text sizing cannot enable input after completion');
