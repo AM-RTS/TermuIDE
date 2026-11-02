@@ -326,9 +326,13 @@ public final class Lsp implements Runnable {
 		}
 		if (server == LanguageServers.Server.CLANGD)
             sb.append(",\"initializationOptions\":{\"fallbackFlags\":[\"-Wall\"]}");
-        if (server == LanguageServers.Server.PYTHON && executable != null)
-            sb.append(",\"initializationOptions\":{\"pylsp\":{\"plugins\":{\"jedi\":{\"environment\":")
-                .append(JSONObject.quote(executable)).append("}}}}");
+        if (server == LanguageServers.Server.PYTHON) {
+            // Eager scientific-package imports can crash native extensions before any file opens.
+            sb.append(",\"initializationOptions\":{\"pylsp\":{\"plugins\":{\"preload\":{\"enabled\":false}");
+            if (executable != null)
+                sb.append(",\"jedi\":{\"environment\":").append(JSONObject.quote(executable)).append('}');
+            sb.append("}}}");
+        }
         sb.append('}');
 		mSndr.send("initialize", sb.toString(), 0);
 	}

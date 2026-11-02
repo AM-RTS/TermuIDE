@@ -397,6 +397,43 @@ class ScriptRuntimeTest {
     private fun toolCommand(arguments: List<String>) = RunCommands.Plan("unused-by-host-fixture",
         listOf("-c", "\"\$@\"", "termuide-tool") + arguments, directory.path, true)
 
+    @Test fun pythonInitializationSkipsCrashingPreloadsAndStillCompletes() {
+        val env = System.getenv("TERMUIDE_TEST_PYTHON_ENV")
+        org.junit.Assume.assumeNotNull(env)
+        File(directory, "termuide_crashing_native_dependency.py").writeText("import os\nos._exit(139)\n")
+        for (selection in listOf("", env!!)) {
+            val lsp = Lsp(LanguageServers.Server.PYTHON, directory.path, "127.0.0.1", 48455, selection)
+            lsp.configureRuntime("$env/bin/python")
+            val sender = lsp.connectedSender()
+            lsp.initialize(directory.path)
+            val params = org.json.JSONObject(String(sender.single(), Charsets.UTF_8)).getJSONObject("params").toString()
+            val script = """
+                import json, sys
+                from io import BytesIO
+                from pathlib import Path
+                from pylsp.python_lsp import PythonLSPServer
+                from pylsp.plugins import preload_imports
+                sys.path.insert(0, ${org.json.JSONObject.quote(directory.path)})
+                preload_imports.MODULES = ['termuide_crashing_native_dependency']
+                server = PythonLSPServer(BytesIO(), BytesIO())
+                try:
+                    server.m_initialize(**json.loads(${org.json.JSONObject.quote(params)}))
+                    assert 'termuide_crashing_native_dependency' not in sys.modules
+                    uri = (Path(${org.json.JSONObject.quote(directory.path)}) / 'completion.py').as_uri()
+                    server.workspace.put_document(uri, 'termuide_marker = 42\ntermuide_')
+                    result = server.m_text_document__completion(textDocument={'uri': uri}, position={'line': 1, 'character': 9})
+                    items = result['items'] if isinstance(result, dict) else result
+                    assert any(item['label'].startswith('termuide_marker') for item in items), items
+                    print('completion ready')
+                finally:
+                    server.m_shutdown()
+            """.trimIndent()
+            val result = execute(toolCommand(listOf("$env/bin/python", "-E", "-c", script)))
+            assertEquals(result.stderr, 0, result.exit)
+            assertEquals("completion ready\n", result.stdout)
+        }
+    }
+
     @Test fun pythonToolingIgnoresWorkspaceAndPythonPathBeforeStartupHooksRun() {
         val env = System.getenv("TERMUIDE_TEST_PYTHON_ENV")
         org.junit.Assume.assumeNotNull(env)
