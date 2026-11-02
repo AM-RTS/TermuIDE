@@ -156,7 +156,7 @@ internal fun ConsoleOutputSelection(snapshot: RunConsole.OutputSelection) {
     val context = LocalContext.current
     var copied by remember(snapshot) { mutableStateOf(false) }
     Surface(Modifier.fillMaxSize()) {
-        Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(context.getString(R.string.console_selection_hint), style = MaterialTheme.typography.bodySmall)
             val text = snapshot.text
             when {
@@ -168,15 +168,15 @@ internal fun ConsoleOutputSelection(snapshot: RunConsole.OutputSelection) {
                 text.isEmpty() -> Text(context.getString(R.string.console_selection_empty))
                 else -> {
                     if (snapshot.truncated) Text(context.getString(R.string.console_selection_truncated), style = MaterialTheme.typography.bodySmall)
-                    SelectionContainer(Modifier.weight(1f).fillMaxWidth()) {
-                        Text(text, Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
-                            style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace))
-                    }
                     TextButton(onClick = {
                         context.getSystemService(ClipboardManager::class.java).setPrimaryClip(
                             ClipData.newPlainText(context.getString(R.string.run_console), text))
                         copied = true
                     }) { Text(context.getString(if (copied) R.string.console_selection_copied else R.string.console_copy_all)) }
+                    SelectionContainer {
+                        Text(text, Modifier.fillMaxWidth(),
+                            style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace))
+                    }
                 }
             }
         }

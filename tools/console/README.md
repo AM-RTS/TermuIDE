@@ -6,6 +6,8 @@ Pinch with two fingers to resize console text (8–32 px). The console remembers
 
 **Select/Copy** opens a frozen, selectable plain-text snapshot of the active terminal buffer, including retained scrollback. Long-press to select part of it, or use **Copy all**. **Live terminal** (or Back) returns to the interactive display; the program keeps running and Ctrl+C/Force stop remain available. Snapshots retain at most 65,536 UTF-16 units, with an omission notice when capped, and stay in memory across Activity recreation. They are discarded when closed, hidden or replaced by a new run. Phone selection handles and keyboard behaviour still require device verification.
 
+Capture waits for the renderer to acknowledge output already received by the app. The covered terminal cannot regain keyboard focus in copy mode, while its program-response bridge stays active. Copy controls and text share one scroll area for short windows and large fonts.
+
 Both GitHub workflows run the Linux PTY regressions before building:
 
 ```sh

@@ -30,6 +30,9 @@ internal class ConsoleTerminalView(private val wrappedContext: MutableContextWra
     private var released = false
     private var acknowledged = 0L
     private var pending: Long? = null
+    private var snapshotRequest = 0L
+    private var snapshotThrough = 0L
+    private var captureSnapshot: (() -> Unit)? = null
     private var options = JSONObject()
     private val listener: () -> Unit = { pump() }
     private var errorListener: (() -> Unit)? = null
@@ -77,6 +80,7 @@ internal class ConsoleTerminalView(private val wrappedContext: MutableContextWra
         wrappedContext.baseContext = host.context
         errorListener = onError
         host.addView(this, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+        updateInput()
     }
     fun detach(host: FrameLayout) {
         if (parent !== host) return
@@ -142,25 +146,31 @@ internal class ConsoleTerminalView(private val wrappedContext: MutableContextWra
     }
     fun snapshotText(callback: (RunConsole.OutputSelection?) -> Unit) {
         if (!ready || !valid()) { callback(null); return }
-        clearFocus()
+        updateInput()
         context.getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(windowToken, 0)
+        val request = ++snapshotRequest
         var completed = false
         fun complete(value: RunConsole.OutputSelection?) {
             if (completed) return
             completed = true
+            if (request == snapshotRequest) captureSnapshot = null
             callback(if (valid()) value else null)
         }
         val timeout = Runnable { complete(null) }
         main.postDelayed(timeout, 5000)
-        evaluateJavascript("consoleTerminal.snapshotText()") { result ->
-            main.removeCallbacks(timeout)
-            val snapshot = try {
-                val json = JSONObject(result ?: "null")
-                val text = json.get("text") as? String
-                if (text != null && text.length <= 65536) RunConsole.OutputSelection(text, json.getBoolean("truncated")) else null
-            } catch (_: org.json.JSONException) { null }
-            complete(snapshot)
+        snapshotThrough = console.output.latestSequence
+        captureSnapshot = {
+            evaluateJavascript("consoleTerminal.snapshotText()") { result ->
+                main.removeCallbacks(timeout)
+                val snapshot = try {
+                    val json = JSONObject(result ?: "null")
+                    val text = json.get("text") as? String
+                    if (text != null && text.length <= 65536) RunConsole.OutputSelection(text, json.getBoolean("truncated")) else null
+                } catch (_: org.json.JSONException) { null }
+                complete(snapshot)
+            }
         }
+        pump()
     }
     private fun valid() = !released && console.state.value.id == id
     private fun configurePage() {
@@ -169,10 +179,21 @@ internal class ConsoleTerminalView(private val wrappedContext: MutableContextWra
         }
     }
     fun updateInput() {
+        val selecting = console.state.value.selection != null
+        (parent as? FrameLayout)?.descendantFocusability = if (selecting) FOCUS_BLOCK_DESCENDANTS else FOCUS_AFTER_DESCENDANTS
+        isFocusableInTouchMode = !selecting
+        isFocusable = !selecting
+        if (selecting) clearFocus()
         if (ready && valid()) evaluateJavascript("consoleTerminal.enable(${console.state.value.phase == RunConsole.Phase.RUNNING})", null)
     }
     private fun pump() {
         if (!ready || !valid() || pending != null) return
+        // Capture only after xterm has acknowledged all output present when Select/Copy was requested.
+        if (acknowledged >= snapshotThrough) {
+            val capture = captureSnapshot
+            captureSnapshot = null
+            capture?.invoke()
+        }
         val historical = acknowledged < replayThrough
         val batch = console.output.after(acknowledged, if (historical) replayThrough else Long.MAX_VALUE)
         if (batch == null) {

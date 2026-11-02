@@ -88,7 +88,10 @@ class RunConsole(private val context: Context) {
         }
         renderer?.snapshotText(::complete) ?: complete(null)
     }
-    internal fun closeSelection() { mutableState.value = state.value.copy(selection = null) }
+    internal fun closeSelection() {
+        mutableState.value = state.value.copy(selection = null)
+        renderer?.updateInput()
+    }
 
     fun show() { mutableState.value = mutableState.value.copy(visible = true) }
     fun hide() {

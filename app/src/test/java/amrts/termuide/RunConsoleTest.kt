@@ -449,6 +449,9 @@ class RunConsoleTest {
             val terminal = readyRenderer(host)
             console.selectOutput()
             assertNull(console.state.value.selection!!.text)
+            assertFalse(terminal.isFocusable)
+            assertFalse(terminal.requestFocus())
+            assertEquals(FrameLayout.FOCUS_BLOCK_DESCENDANTS, host.descendantFocusability)
             val text = "first\n界🙂 \"quoted\" \\path"
             shadowOf(terminal).lastEvaluatedJavascriptCallback.onReceiveValue(
                 org.json.JSONObject().put("text", text).put("truncated", false).toString())
@@ -459,11 +462,15 @@ class RunConsoleTest {
             val replacement = FrameLayout(second.get())
             console.attachRenderer(replacement) { fail("Renderer failed") }
             assertSame(terminal, replacement.getChildAt(0))
+            assertFalse(terminal.isFocusable)
+            assertEquals(FrameLayout.FOCUS_BLOCK_DESCENDANTS, replacement.descendantFocusability)
             assertSame(snapshot, console.state.value.selection)
             send('O', "new output".toByteArray())
             await { console.output.after(0) != null }
             assertEquals(text, console.state.value.selection!!.text)
-            console.input("still live")
+            val bridge = shadowOf(terminal).getJavascriptInterface("ConsoleBridge")
+            bridge.javaClass.getDeclaredMethod("input", String::class.java).apply { isAccessible = true }.invoke(bridge, "still live")
+            shadowOf(Looper.getMainLooper()).idle()
             val wire = DataInputStream(peer!!.getInputStream())
             assertEquals(11, wire.readInt()); assertEquals('I'.code, wire.readUnsignedByte())
             assertEquals("still live", ByteArray(10).also(wire::readFully).toString(Charsets.UTF_8))
@@ -473,6 +480,8 @@ class RunConsoleTest {
             assertSame(snapshot, console.state.value.selection)
             console.closeSelection()
             assertNull(console.state.value.selection)
+            assertTrue(terminal.isFocusableInTouchMode)
+            assertEquals(FrameLayout.FOCUS_AFTER_DESCENDANTS, replacement.descendantFocusability)
         } finally { second.pause().stop().destroy() }
     }
 
@@ -518,6 +527,36 @@ class RunConsoleTest {
             late.onReceiveValue(org.json.JSONObject().put("text", "late").put("truncated", false).toString())
             assertTrue(console.state.value.selection!!.failed)
             assertEquals(RunConsole.Phase.CONNECTING, console.state.value.phase)
+        } finally { activity.pause().stop().destroy() }
+    }
+
+    @Test fun copyWaitsForAllQueuedOutputToBeRenderedBeforeTakingItsSnapshot() {
+        val activity = Robolectric.buildActivity(Activity::class.java).setup()
+        try {
+            val terminal = readyRenderer(FrameLayout(activity.get()))
+            repeat(5) { console.output.append("queued $it\n".toByteArray()) }
+            console.selectOutput()
+            assertTrue(shadowOf(terminal).lastEvaluatedJavascript.startsWith("consoleTerminal.write("))
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(4))
+            console.closeSelection()
+            console.selectOutput()
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(2))
+            assertFalse("The old request's timeout must not cancel its replacement", console.state.value.selection!!.failed)
+            val bridge = shadowOf(terminal).getJavascriptInterface("ConsoleBridge")
+            val rendered = bridge.javaClass.getDeclaredMethod("rendered", String::class.java).apply { isAccessible = true }
+            for (sequence in listOf("2", "4")) {
+                rendered.invoke(bridge, sequence)
+                shadowOf(Looper.getMainLooper()).idle()
+                assertNull(console.state.value.selection!!.text)
+                assertTrue(shadowOf(terminal).lastEvaluatedJavascript.startsWith("consoleTerminal.write("))
+            }
+            rendered.invoke(bridge, "5")
+            shadowOf(Looper.getMainLooper()).idle()
+            assertEquals("consoleTerminal.snapshotText()", shadowOf(terminal).lastEvaluatedJavascript)
+            val text = (0..4).joinToString("") { "queued $it\n" }
+            shadowOf(terminal).lastEvaluatedJavascriptCallback.onReceiveValue(
+                org.json.JSONObject().put("text", text).put("truncated", false).toString())
+            assertEquals(text, console.state.value.selection!!.text)
         } finally { activity.pause().stop().destroy() }
     }
 }
