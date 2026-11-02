@@ -26,6 +26,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
@@ -42,8 +43,12 @@ class RunConsole(private val context: Context) {
         @Volatile var socket: Socket? = null
         @Volatile var finished = false
         @Volatile var authenticated = false
+        val pendingResize = AtomicReference<ByteArray?>()
         val writes = ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS, ArrayBlockingQueue<Runnable>(16),
             { task -> Thread(task, "Console input").apply { isDaemon = true } })
+    }
+    private class Write(val kind: Char, val action: () -> Unit) : Runnable {
+        override fun run() = action()
     }
     private val main = Handler(Looper.getMainLooper())
     private val reader = Executors.newSingleThreadExecutor { task -> Thread(task, "Console output").apply { isDaemon = true } }
@@ -237,13 +242,25 @@ class RunConsole(private val context: Context) {
     private fun send(kind: Char, data: ByteArray = byteArrayOf()) {
         val run = session ?: return
         if (state.value.phase != Phase.RUNNING || run.finished) return
+        if (kind == 'R') {
+            run.pendingResize.set(data)
+            run.writes.queue.removeIf { it is Write && it.kind == 'R' }
+        }
         try {
-            run.writes.execute {
+            run.writes.execute(Write(kind) {
                 try {
-                    val out = DataOutputStream(run.socket?.getOutputStream() ?: return@execute)
-                    out.writeInt(data.size + 1)
-                    out.writeByte(kind.code)
-                    out.write(data)
+                    val out = DataOutputStream(run.socket?.getOutputStream() ?: return@Write)
+                    // Queued input also flushes the latest resize if the bounded queue could not accept it.
+                    run.pendingResize.getAndSet(null)?.let { size ->
+                        out.writeInt(size.size + 1)
+                        out.writeByte('R'.code)
+                        out.write(size)
+                    }
+                    if (kind != 'R') {
+                        out.writeInt(data.size + 1)
+                        out.writeByte(kind.code)
+                        out.write(data)
+                    }
                     out.flush()
                 } catch (_: IOException) {
                     // The reader owns completion; a failed write must not discard buffered output/exit frames.
@@ -253,10 +270,10 @@ class RunConsole(private val context: Context) {
                         }
                     }
                 }
-            }
+            })
             if (kind != 'R' && state.value.detail != null) mutableState.value = state.value.copy(detail = null)
         } catch (_: java.util.concurrent.RejectedExecutionException) {
-            mutableState.value = state.value.copy(detail = context.getString(R.string.console_input_limit))
+            if (kind != 'R') mutableState.value = state.value.copy(detail = context.getString(R.string.console_input_limit))
         }
     }
 

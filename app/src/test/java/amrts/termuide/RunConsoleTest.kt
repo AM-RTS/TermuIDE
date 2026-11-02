@@ -3,9 +3,11 @@ package amrts.termuide
 import android.os.Looper
 import android.app.Activity
 import android.content.MutableContextWrapper
+import android.preference.PreferenceManager
 import android.os.SystemClock
 import android.view.InputDevice
 import android.view.MotionEvent
+import android.view.accessibility.AccessibilityManager
 import android.widget.FrameLayout
 import java.io.DataInputStream
 import java.io.DataOutputStream
@@ -187,6 +189,54 @@ class RunConsoleTest {
         exit(137)
     }
 
+    @Test fun pinchResizesCoalesceWithoutCrowdingOutInputAndKeepTheLatestDimensions() {
+        authenticate()
+        val run = session()
+        val writes = run.javaClass.getDeclaredField("writes").apply { isAccessible = true }.get(run) as ThreadPoolExecutor
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        writes.execute { entered.countDown(); release.await() }
+        assertTrue(entered.await(2, TimeUnit.SECONDS))
+        try {
+            repeat(100) { console.resize(40 + it, 20 + it) }
+            assertEquals(1, writes.queue.size)
+            console.input("typed during pinch")
+            assertEquals(2, writes.queue.size)
+            assertNull(console.state.value.detail)
+        } finally { release.countDown() }
+        val input = DataInputStream(peer!!.getInputStream())
+        assertEquals(9, input.readInt()); assertEquals('R'.code, input.readUnsignedByte())
+        assertEquals(119, input.readInt()); assertEquals(139, input.readInt())
+        assertEquals(19, input.readInt()); assertEquals('I'.code, input.readUnsignedByte())
+        assertEquals("typed during pinch", ByteArray(18).also(input::readFully).toString(Charsets.UTF_8))
+        exit(0)
+    }
+
+    @Test fun aFullInputQueueStillPublishesTheLastResizeWithoutRejectingTypedInput() {
+        authenticate()
+        val run = session()
+        val writes = run.javaClass.getDeclaredField("writes").apply { isAccessible = true }.get(run) as ThreadPoolExecutor
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        writes.execute { entered.countDown(); release.await() }
+        assertTrue(entered.await(2, TimeUnit.SECONDS))
+        try {
+            repeat(16) { console.input("x") }
+            console.resize(71, 23)
+            console.resize(63, 21)
+            assertEquals(16, writes.queue.size)
+            assertNull(console.state.value.detail)
+        } finally { release.countDown() }
+        val input = DataInputStream(peer!!.getInputStream())
+        assertEquals(9, input.readInt()); assertEquals('R'.code, input.readUnsignedByte())
+        assertEquals(21, input.readInt()); assertEquals(63, input.readInt())
+        repeat(16) {
+            assertEquals(2, input.readInt()); assertEquals('I'.code, input.readUnsignedByte())
+            assertEquals('x'.code, input.readUnsignedByte())
+        }
+        exit(0)
+    }
+
     @Test fun stoppingDuringAuthenticationClosesThatPeerAndDoesNotBlockTheNextRun() {
         val old = Socket("127.0.0.1", plan.arguments[5].toInt()).apply { soTimeout = 2000 }
         old.use {
@@ -257,6 +307,9 @@ class RunConsoleTest {
         try {
             Application.textsize = 14
             console.resetTextSize()
+            PreferenceManager.getDefaultSharedPreferences(Application.getInstance()).edit()
+                .putString("console_text_size", "invalid restored preference").apply()
+            assertEquals(14, console.textSize)
             console.setTextSize(22)
             assertEquals(22, replacement.textSize)
             Application.textsize = 16
@@ -277,6 +330,7 @@ class RunConsoleTest {
     @Test fun onlyTwoFingerGesturesResizeTextAndCancellationEndsTheGesture() {
         val activity = Robolectric.buildActivity(Activity::class.java).setup()
         val original = Application.textsize
+        val accessibility = shadowOf(Application.getInstance().getSystemService(AccessibilityManager::class.java))
         try {
             Application.textsize = 14
             console.resetTextSize()
@@ -324,7 +378,15 @@ class RunConsoleTest {
             touch(MotionEvent.ACTION_MOVE, 400f)
             touch(MotionEvent.ACTION_UP, 400f)
             assertEquals(reduced, console.textSize)
+            accessibility.setTouchExplorationEnabled(true)
+            touch(MotionEvent.ACTION_DOWN, 100f)
+            touch(MotionEvent.ACTION_POINTER_DOWN or (1 shl MotionEvent.ACTION_POINTER_INDEX_SHIFT), 100f, 300f)
+            touch(MotionEvent.ACTION_MOVE, 100f, 500f)
+            touch(MotionEvent.ACTION_MOVE, 100f, 700f)
+            touch(MotionEvent.ACTION_UP, 100f)
+            assertEquals("Touch exploration keeps its two-finger gestures", reduced, console.textSize)
         } finally {
+            accessibility.setTouchExplorationEnabled(false)
             console.resetTextSize()
             Application.textsize = original
             activity.pause().stop().destroy()

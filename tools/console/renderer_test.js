@@ -7,7 +7,7 @@
     const id = String(++sequence);
     return new Promise(resolve => {
       pending.set(id, resolve);
-      consoleTerminal.write(btoa(data), id, false, historical);
+      consoleTerminal.write(btoa(String.fromCharCode(...new TextEncoder().encode(data))), id, false, historical);
     });
   }
   try {
@@ -58,8 +58,27 @@
     terminal.scrollToLine(10);
     terminal.select(3, 10, 120);
     const wrappedSelection = terminal.getSelection();
+    function viewportParagraph() {
+      const buffer = terminal.buffer.active;
+      let row = buffer.viewportY;
+      while (row > 0 && buffer.getLine(row).isWrapped) row--;
+      let text = buffer.getLine(row).translateToString(true);
+      while (buffer.getLine(row + 1)?.isWrapped) text += buffer.getLine(++row).translateToString(true);
+      return text;
+    }
+    const scrolledParagraph = viewportParagraph();
     consoleTerminal.setFontSize(20);
     check(terminal.getSelection() === wrappedSelection, 'Resizing preserves selected text across wrapped lines');
+    check(viewportParagraph() === scrolledParagraph, 'Resizing keeps the same wrapped paragraph in view');
+    consoleTerminal.setFontSize(14);
+    check(terminal.getSelection() === wrappedSelection, 'Reset preserves a wrapped selection');
+    await write('\x1bc' + Array.from({ length: 45 }, (_, i) => 'unicode row ' + i + ': ' + '界a🙂b'.repeat(40)).join('\r\n') + '\r\n');
+    terminal.select(3, 10, 120);
+    const unicodeSelection = terminal.getSelection();
+    consoleTerminal.setFontSize(21);
+    check(terminal.getSelection() === unicodeSelection, 'Wide Unicode selections survive wrapping changes');
+    consoleTerminal.setFontSize(14);
+    check(terminal.getSelection() === unicodeSelection, 'Reset preserves wide Unicode selections');
     consoleTerminal.enable(false);
     consoleTerminal.setFontSize(20);
     check(terminal.options.disableStdin, 'Text sizing cannot enable input after completion');

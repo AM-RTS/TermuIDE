@@ -7,6 +7,7 @@ import android.os.Looper
 import android.util.Base64
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
+import android.view.accessibility.AccessibilityManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
@@ -32,6 +33,7 @@ internal class ConsoleTerminalView(private val wrappedContext: MutableContextWra
     private val listener: () -> Unit = { pump() }
     private var errorListener: (() -> Unit)? = null
     private val main = Handler(Looper.getMainLooper())
+    private val accessibility = context.getSystemService(AccessibilityManager::class.java)
     private var pinching = false
     private var scaledTextSize = console.textSize.toFloat()
     private val scaleDetector = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
@@ -50,6 +52,7 @@ internal class ConsoleTerminalView(private val wrappedContext: MutableContextWra
     }).apply { isQuickScaleEnabled = false; isStylusScaleEnabled = false }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (accessibility.isTouchExplorationEnabled) return super.onTouchEvent(event)
         if (event.actionMasked == MotionEvent.ACTION_DOWN) pinching = false
         if (!pinching && event.pointerCount > 1) {
             pinching = true
