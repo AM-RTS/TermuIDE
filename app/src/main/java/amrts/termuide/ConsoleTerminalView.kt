@@ -8,6 +8,7 @@ import android.util.Base64
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.accessibility.AccessibilityManager
+import android.view.inputmethod.InputMethodManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
@@ -138,6 +139,28 @@ internal class ConsoleTerminalView(private val wrappedContext: MutableContextWra
     fun setTextSize(size: Int) {
         options.put("fontSize", size)
         if (ready && valid()) evaluateJavascript("consoleTerminal.setFontSize($size)", null)
+    }
+    fun snapshotText(callback: (RunConsole.OutputSelection?) -> Unit) {
+        if (!ready || !valid()) { callback(null); return }
+        clearFocus()
+        context.getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(windowToken, 0)
+        var completed = false
+        fun complete(value: RunConsole.OutputSelection?) {
+            if (completed) return
+            completed = true
+            callback(if (valid()) value else null)
+        }
+        val timeout = Runnable { complete(null) }
+        main.postDelayed(timeout, 5000)
+        evaluateJavascript("consoleTerminal.snapshotText()") { result ->
+            main.removeCallbacks(timeout)
+            val snapshot = try {
+                val json = JSONObject(result ?: "null")
+                val text = json.get("text") as? String
+                if (text != null && text.length <= 65536) RunConsole.OutputSelection(text, json.getBoolean("truncated")) else null
+            } catch (_: org.json.JSONException) { null }
+            complete(snapshot)
+        }
     }
     private fun valid() = !released && console.state.value.id == id
     private fun configurePage() {

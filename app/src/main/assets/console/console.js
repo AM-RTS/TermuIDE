@@ -88,6 +88,25 @@ window.consoleTerminal = {
     terminal.options.fontSize = Math.max(8, Math.min(32, Math.round(size)));
     fitTerminal();
   },
+  snapshotText() {
+    const buffer = terminal.buffer.active;
+    let end = buffer.length - 1;
+    while (end > buffer.baseY + buffer.cursorY && !buffer.getLine(end).translateToString(true)) end--;
+    let text = '';
+    let truncated = false;
+    for (let row = end; row >= 0; row--) {
+      const wrapped = row < end && buffer.getLine(row + 1).isWrapped;
+      const line = buffer.getLine(row).translateToString(!wrapped, 0, wrapped ? wrappedWidth(buffer, row) : terminal.cols);
+      text = line + (row < end && !wrapped ? '\n' : '') + text;
+      if (text.length > 65536) {
+        text = text.slice(-65536);
+        if (text.charCodeAt(0) >= 0xdc00 && text.charCodeAt(0) <= 0xdfff) text = text.slice(1);
+        truncated = true;
+        break;
+      }
+    }
+    return { text, truncated };
+  },
   write(encoded, sequence, reset, historical = false) {
     restoring = historical;
     terminal.options.disableStdin = historical || !inputEnabled;

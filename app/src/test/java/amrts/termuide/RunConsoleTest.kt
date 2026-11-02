@@ -429,6 +429,97 @@ class RunConsoleTest {
             assertEquals(0, oldErrors + newErrors)
         } finally { second.pause().stop().destroy() }
     }
+
+    private fun readyRenderer(host: FrameLayout): ConsoleTerminalView {
+        console.attachRenderer(host) { fail("Renderer failed") }
+        return (host.getChildAt(0) as ConsoleTerminalView).also { terminal ->
+            terminal.configure(0xff000000.toInt(), 0xffffffff.toInt(), 0xffffffff.toInt())
+            val bridge = shadowOf(terminal).getJavascriptInterface("ConsoleBridge")
+            bridge.javaClass.getDeclaredMethod("ready").apply { isAccessible = true }.invoke(bridge)
+            shadowOf(Looper.getMainLooper()).idle()
+        }
+    }
+
+    @Test fun copySnapshotSurvivesHostReplacementWhileOutputInputAndStopKeepWorking() {
+        authenticate()
+        val first = Robolectric.buildActivity(Activity::class.java).setup()
+        val second = Robolectric.buildActivity(Activity::class.java).setup()
+        try {
+            val host = FrameLayout(first.get())
+            val terminal = readyRenderer(host)
+            console.selectOutput()
+            assertNull(console.state.value.selection!!.text)
+            val text = "first\n界🙂 \"quoted\" \\path"
+            shadowOf(terminal).lastEvaluatedJavascriptCallback.onReceiveValue(
+                org.json.JSONObject().put("text", text).put("truncated", false).toString())
+            val snapshot = console.state.value.selection
+            assertEquals(text, snapshot!!.text)
+            console.detachRenderer(host)
+            first.pause().stop().destroy()
+            val replacement = FrameLayout(second.get())
+            console.attachRenderer(replacement) { fail("Renderer failed") }
+            assertSame(terminal, replacement.getChildAt(0))
+            assertSame(snapshot, console.state.value.selection)
+            send('O', "new output".toByteArray())
+            await { console.output.after(0) != null }
+            assertEquals(text, console.state.value.selection!!.text)
+            console.input("still live")
+            val wire = DataInputStream(peer!!.getInputStream())
+            assertEquals(11, wire.readInt()); assertEquals('I'.code, wire.readUnsignedByte())
+            assertEquals("still live", ByteArray(10).also(wire::readFully).toString(Charsets.UTF_8))
+            console.forceStop()
+            assertEquals(1, wire.readInt()); assertEquals('K'.code, wire.readUnsignedByte())
+            exit(137)
+            assertSame(snapshot, console.state.value.selection)
+            console.closeSelection()
+            assertNull(console.state.value.selection)
+        } finally { second.pause().stop().destroy() }
+    }
+
+    @Test fun dismissedAndHiddenCopyRequestsCannotReopenOrOverwriteANewerSnapshot() {
+        val activity = Robolectric.buildActivity(Activity::class.java).setup()
+        try {
+            val terminal = readyRenderer(FrameLayout(activity.get()))
+            val payload = org.json.JSONObject().put("text", "old").put("truncated", false).toString()
+            console.selectOutput()
+            val oldCallback = shadowOf(terminal).lastEvaluatedJavascriptCallback
+            console.closeSelection()
+            console.selectOutput()
+            val newCallback = shadowOf(terminal).lastEvaluatedJavascriptCallback
+            oldCallback.onReceiveValue(payload)
+            assertNull(console.state.value.selection!!.text)
+            newCallback.onReceiveValue(payload.replace("old", "new"))
+            assertEquals("new", console.state.value.selection!!.text)
+            console.closeSelection()
+            console.selectOutput()
+            val hiddenCallback = shadowOf(terminal).lastEvaluatedJavascriptCallback
+            console.hide()
+            hiddenCallback.onReceiveValue(payload)
+            assertNull(console.state.value.selection)
+            assertFalse(console.state.value.visible)
+        } finally { activity.pause().stop().destroy() }
+    }
+
+    @Test fun copyFailuresAreBoundedAndCannotChangeRunStatus() {
+        val activity = Robolectric.buildActivity(Activity::class.java).setup()
+        try {
+            val terminal = readyRenderer(FrameLayout(activity.get()))
+            for (payload in listOf("null", "{}", org.json.JSONObject().put("text", "x".repeat(65537)).put("truncated", true).toString())) {
+                console.selectOutput()
+                shadowOf(terminal).lastEvaluatedJavascriptCallback.onReceiveValue(payload)
+                assertTrue(console.state.value.selection!!.failed)
+                assertEquals(RunConsole.Phase.CONNECTING, console.state.value.phase)
+                console.closeSelection()
+            }
+            console.selectOutput()
+            val late = shadowOf(terminal).lastEvaluatedJavascriptCallback
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(6))
+            assertTrue(console.state.value.selection!!.failed)
+            late.onReceiveValue(org.json.JSONObject().put("text", "late").put("truncated", false).toString())
+            assertTrue(console.state.value.selection!!.failed)
+            assertEquals(RunConsole.Phase.CONNECTING, console.state.value.phase)
+        } finally { activity.pause().stop().destroy() }
+    }
 }
 
 class ConsoleOutputTest {

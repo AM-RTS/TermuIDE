@@ -28,7 +28,7 @@ class ConsoleRendererTest(unittest.TestCase):
         self.assertNotEqual('RUNNING', content, 'Renderer failed to acknowledge output: ' + process.stderr[-1000:])
         report = json.loads(content)
         self.assertTrue(report['ok'], report)
-        self.assertEqual(22, len(report['checks']), report)
+        self.assertEqual(29, len(report['checks']), report)
 
 
 if __name__ == '__main__':

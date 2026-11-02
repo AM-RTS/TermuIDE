@@ -5,6 +5,15 @@
     <string name="console_hide">Hide console; keep program running</string>
     <string name="console_input">Program terminal input and output</string>
     <string name="console_reset_text_size">Reset text size</string>
+    <string name="console_select_output">Select/Copy</string>
+    <string name="console_live_terminal">Live terminal</string>
+    <string name="console_selection_hint">Snapshot of retained output. New output appears in the live terminal. Long-press text to select and copy.</string>
+    <string name="console_selection_loading">Reading terminal output…</string>
+    <string name="console_selection_failed">Could not read terminal output. Return to the live terminal and try again.</string>
+    <string name="console_selection_empty">No output to copy yet.</string>
+    <string name="console_selection_truncated">Earlier text omitted. Showing the most recent output.</string>
+    <string name="console_copy_all">Copy all</string>
+    <string name="console_selection_copied">Copied</string>
     <string name="console_connecting">Connecting to Termux…</string>
     <string name="console_running">Running · Termux backend</string>
     <string name="console_stopping">Stopping program…</string>

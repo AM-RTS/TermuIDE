@@ -33,8 +33,9 @@ import kotlinx.coroutines.flow.asStateFlow
 /** One authenticated PTY run, retained across Activity recreation but never replayed after process death. */
 class RunConsole(private val context: Context) {
     enum class Phase { IDLE, CONNECTING, RUNNING, STOPPING, FINISHED, UNKNOWN }
+    data class OutputSelection(val text: String? = null, val truncated: Boolean = false, val failed: Boolean = false)
     data class State(val id: String = "", val phase: Phase = Phase.IDLE, val visible: Boolean = false,
-                     val exitCode: Int? = null, val detail: String? = null) {
+                     val exitCode: Int? = null, val detail: String? = null, val selection: OutputSelection? = null) {
         val active: Boolean get() = phase == Phase.CONNECTING || phase == Phase.RUNNING || phase == Phase.STOPPING
     }
     private class Session(val server: ServerSocket, val complete: (Int?, String?) -> Unit) {
@@ -75,10 +76,23 @@ class RunConsole(private val context: Context) {
         preferences.edit().remove("console_text_size").apply()
         renderer?.setTextSize(textSize)
     }
+    internal fun selectOutput() {
+        if (!state.value.visible || state.value.selection != null) return
+        val request = OutputSelection()
+        val id = state.value.id
+        mutableState.value = state.value.copy(selection = request)
+        fun complete(snapshot: OutputSelection?) {
+            if (state.value.id == id && state.value.selection === request) {
+                mutableState.value = state.value.copy(selection = snapshot ?: OutputSelection(failed = true))
+            }
+        }
+        renderer?.snapshotText(::complete) ?: complete(null)
+    }
+    internal fun closeSelection() { mutableState.value = state.value.copy(selection = null) }
 
     fun show() { mutableState.value = mutableState.value.copy(visible = true) }
     fun hide() {
-        mutableState.value = mutableState.value.copy(visible = false)
+        mutableState.value = mutableState.value.copy(visible = false, selection = null)
         if (!state.value.active) releaseRenderer()
     }
     internal fun attachRenderer(host: FrameLayout, onError: () -> Unit) {
@@ -308,6 +322,7 @@ class RunConsole(private val context: Context) {
         run.writes.shutdownNow()
     }
     fun shutdown() {
+        closeSelection()
         session?.let { it.finished = true; close(it) }
         session = null
         releaseRenderer()

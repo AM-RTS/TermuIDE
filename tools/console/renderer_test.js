@@ -84,6 +84,35 @@
     check(terminal.options.disableStdin, 'Text sizing cannot enable input after completion');
     await write('finished output', true);
     check(terminal.options.disableStdin, 'Restoring output cannot reenable input after program completion');
+    await write('\x1bc\x1b[31mred\x1b[0m\r\n界🙂 "quoted" \\path\r\n');
+    let snapshot = consoleTerminal.snapshotText();
+    check(snapshot.text === 'red\n界🙂 "quoted" \\path\n' && !snapshot.truncated,
+      'Copy snapshots contain rendered Unicode and actual newlines without ANSI codes');
+    const frozen = snapshot.text;
+    await write('new output');
+    check(snapshot.text === frozen && consoleTerminal.snapshotText().text.endsWith('new output'),
+      'Snapshots stay frozen while the live terminal keeps rendering');
+    const wrappedText = 'a paragraph with spaces '.repeat(20);
+    await write('\x1bc' + wrappedText + '\r\nnext');
+    snapshot = consoleTerminal.snapshotText();
+    check(snapshot.text === wrappedText + '\nnext', 'Soft wrapping introduces no extra line breaks or lost spaces');
+    consoleTerminal.enable(true);
+    replies.length = 0;
+    terminal.select(0, 0, 4);
+    const copySelection = terminal.getSelection();
+    consoleTerminal.snapshotText();
+    terminal.paste('after snapshot');
+    check(replies.join('') === 'after snapshot' && copySelection.length > 0 && !terminal.options.disableStdin,
+      'Taking a snapshot does not disable terminal input or inject replies');
+    await write('\x1b[?1049h\x1b[Halt screen');
+    check(consoleTerminal.snapshotText().text === 'alt screen', 'Copy uses the active alternate screen without mixing old output');
+    await write('\x1b[?1049l\x1bc');
+    for (let i = 0; i < 20; i++) await write('🙂'.repeat(2000));
+    snapshot = consoleTerminal.snapshotText();
+    check(snapshot.truncated && snapshot.text.length <= 65536 && snapshot.text.replaceAll('🙂', '') === '',
+      'Large copy snapshots are bounded and never split Unicode surrogate pairs');
+    await write('\x1bc');
+    check(consoleTerminal.snapshotText().text === '', 'An empty terminal produces an empty snapshot');
     check(!failed, 'The bundled renderer completes without a script failure');
     document.getElementById('result').textContent = JSON.stringify({ ok: true, checks });
   } catch (error) {

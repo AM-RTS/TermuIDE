@@ -2,7 +2,9 @@
 
 `app/src/main/assets/console/runner.py` runs under Termux Python using only its standard library. The Android controller owns the authenticated socket; xterm.js renders bytes offline inside a Material 3 screen. See [runtime architecture](../../docs/architecture/multilanguage-runtime.md#execution-and-workspace-boundaries) for ownership and cleanup limits.
 
-Pinch with two fingers to resize console text (8–32 px). The console remembers its own size; **Reset text size** restores the current editor text-size setting. Single-finger input, scrolling and selection use the existing WebView handling; touch exploration retains its two-finger gestures. Resizing tracks selection and scroll position through normal-buffer reflow and sends the latest rows/columns without filling the input queue. Full-screen programs may redraw; output they replace or history trimmed from the buffer cannot retain its selection.
+Pinch with two fingers to resize console text (8–32 px). The console remembers its own size; **Reset text size** restores the current editor text-size setting. Single-finger input and scrolling use the existing WebView handling; touch exploration retains its two-finger gestures. Touch selection uses **Select/Copy** below. Resizing tracks xterm selections and scroll position through normal-buffer reflow and sends the latest rows/columns without filling the input queue. Full-screen programs may redraw; output they replace or history trimmed from the buffer cannot retain its selection.
+
+**Select/Copy** opens a frozen, selectable plain-text snapshot of the active terminal buffer, including retained scrollback. Long-press to select part of it, or use **Copy all**. **Live terminal** (or Back) returns to the interactive display; the program keeps running and Ctrl+C/Force stop remain available. Snapshots retain at most 65,536 UTF-16 units, with an omission notice when capped, and stay in memory across Activity recreation. They are discarded when closed, hidden or replaced by a new run. Phone selection handles and keyboard behaviour still require device verification.
 
 Both GitHub workflows run the Linux PTY regressions before building:
 
