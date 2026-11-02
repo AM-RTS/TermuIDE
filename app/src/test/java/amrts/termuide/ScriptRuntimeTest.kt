@@ -413,13 +413,14 @@ class ScriptRuntimeTest {
                 from pathlib import Path
                 from pylsp.python_lsp import PythonLSPServer
                 from pylsp.plugins import preload_imports
-                sys.path.insert(0, ${org.json.JSONObject.quote(directory.path)})
+                root = Path(sys.argv[1])
+                sys.path.insert(0, str(root))
                 preload_imports.MODULES = ['termuide_crashing_native_dependency']
                 server = PythonLSPServer(BytesIO(), BytesIO())
                 try:
-                    server.m_initialize(**json.loads(${org.json.JSONObject.quote(params)}))
+                    server.m_initialize(**json.loads(sys.argv[2]))
                     assert 'termuide_crashing_native_dependency' not in sys.modules
-                    uri = (Path(${org.json.JSONObject.quote(directory.path)}) / 'completion.py').as_uri()
+                    uri = (root / 'completion.py').as_uri()
                     server.workspace.put_document(uri, 'termuide_marker = 42\ntermuide_')
                     result = server.m_text_document__completion(textDocument={'uri': uri}, position={'line': 1, 'character': 9})
                     items = result['items'] if isinstance(result, dict) else result
@@ -428,7 +429,7 @@ class ScriptRuntimeTest {
                 finally:
                     server.m_shutdown()
             """.trimIndent()
-            val result = execute(toolCommand(listOf("$env/bin/python", "-E", "-c", script)))
+            val result = execute(toolCommand(listOf("$env/bin/python", "-E", "-c", script, directory.path, params)))
             assertEquals(result.stderr, 0, result.exit)
             assertEquals("completion ready\n", result.stdout)
         }
