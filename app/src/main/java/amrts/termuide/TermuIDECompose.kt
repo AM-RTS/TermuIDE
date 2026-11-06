@@ -511,7 +511,7 @@ private fun MainScreen(activity: MainActivity, editorHost: FrameLayout) {
                     },
                     actions = {
                         IconButton(
-                            enabled = consoleState.active || (runVisible && !execution.preparing),
+                            enabled = if (consoleState.active) consoleState.id.isNotEmpty() else runVisible && !execution.preparing,
                             onClick = { if (consoleState.active) console.show() else activity.performAction(R.id.run_here) }
                         ) {
                             Icon(painterResource(R.drawable.ic_play_24), context.getString(if (consoleState.active) R.string.run_console else R.string.run_here))

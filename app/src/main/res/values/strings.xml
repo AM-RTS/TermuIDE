@@ -2,7 +2,7 @@
     <string name="run_here">Run here</string>
     <string name="run_in_termux">Run in Termux</string>
     <string name="run_console">Run console</string>
-    <string name="console_minimize">Minimize console</string>
+    <string name="console_close">Close console and stop program</string>
     <string name="console_short_connecting">Connecting…</string>
     <string name="console_short_running">Running</string>
     <string name="console_short_stopping">Stopping…</string>
@@ -32,7 +32,7 @@
     <string name="console_down">Down</string>
     <string name="console_left">Left</string>
     <string name="console_right">Right</string>
-    <string name="console_stop_confirm">Terminate this run and its process group? Closing the console alone keeps the program running.</string>
+    <string name="console_stop_confirm">Terminate this run and its process group?</string>
     <string name="console_connect_timeout">The console did not connect. Check Termux access and that Python is installed, or use Run in Termux.</string>
     <string name="console_setup">Run here also needs Termux Python: pkg install python. Run in Termux remains available.</string>
     <string name="console_connection_lost">Console connection ended without a confirmed exit status. The runner requests process cleanup; completion is unconfirmed.</string>

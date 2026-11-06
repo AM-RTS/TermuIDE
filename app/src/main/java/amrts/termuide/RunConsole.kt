@@ -35,10 +35,11 @@ class RunConsole(private val context: Context) {
     enum class Phase { IDLE, CONNECTING, RUNNING, STOPPING, FINISHED, UNKNOWN }
     data class OutputSelection(val text: String? = null, val truncated: Boolean = false, val failed: Boolean = false)
     data class State(val id: String = "", val phase: Phase = Phase.IDLE, val visible: Boolean = false,
-                     val exitCode: Int? = null, val detail: String? = null, val selection: OutputSelection? = null) {
+                     val exitCode: Int? = null, val detail: String? = null, val selection: OutputSelection? = null,
+                     val minimized: Boolean = false) {
         val active: Boolean get() = phase == Phase.CONNECTING || phase == Phase.RUNNING || phase == Phase.STOPPING
     }
-    private class Session(val server: ServerSocket, val complete: (Int?, String?) -> Unit) {
+    private class Session(val server: ServerSocket, val sourcePath: String?, val complete: (Int?, String?) -> Unit) {
         val id = UUID.randomUUID().toString()
         val token = ByteArray(32).also { SecureRandom().nextBytes(it) }.joinToString("") { "%02x".format(it.toInt() and 255) }
         @Volatile var socket: Socket? = null
@@ -93,9 +94,21 @@ class RunConsole(private val context: Context) {
         renderer?.updateInput()
     }
 
-    fun show() { mutableState.value = mutableState.value.copy(visible = true) }
+    fun show() {
+        if (state.value.id.isNotEmpty()) mutableState.value = state.value.copy(visible = true, minimized = false)
+    }
     fun hide() {
-        mutableState.value = mutableState.value.copy(visible = false, selection = null)
+        mutableState.value = mutableState.value.copy(visible = false, selection = null, minimized = true)
+    }
+    fun closeConsole() {
+        if (state.value.id.isEmpty()) return
+        mutableState.value = state.value.copy(id = "", visible = false, selection = null, minimized = false)
+        releaseRenderer()
+        output.clear()
+        forceStop()
+    }
+    fun closeForSource(path: String) {
+        if (path == session?.sourcePath) closeConsole()
     }
     internal fun attachRenderer(host: FrameLayout, onError: () -> Unit) {
         val terminal = renderer ?: ConsoleTerminalView(MutableContextWrapper(context.applicationContext), this,
@@ -120,13 +133,14 @@ class RunConsole(private val context: Context) {
     internal fun observeOutput(listener: (() -> Unit)?) { outputChanged = listener }
     internal fun removeOutputObserver(listener: () -> Unit) { if (outputChanged === listener) outputChanged = null }
 
-    internal fun prepare(plan: RunCommands.Plan, python: String, complete: (Int?, String?) -> Unit): RunCommands.Plan {
+    internal fun prepare(plan: RunCommands.Plan, python: String, sourcePath: String? = null,
+                         complete: (Int?, String?) -> Unit): RunCommands.Plan {
         check(!state.value.active) { "A console program is already running" }
         releaseRenderer()
         rendererCreated = false
         val script = context.assets.open("console/runner.py").bufferedReader().use { it.readText() }
         val server = ServerSocket(0, 4, InetAddress.getByName("127.0.0.1")).apply { soTimeout = 500 }
-        val run = Session(server, complete)
+        val run = Session(server, sourcePath, complete)
         session = run
         output.clear()
         mutableState.value = State(run.id, Phase.CONNECTING, true)
@@ -189,7 +203,7 @@ class RunConsole(private val context: Context) {
                         val delivered = CountDownLatch(1)
                         main.post {
                             try {
-                                if (session === run && !run.finished) {
+                                if (session === run && !run.finished && state.value.id == run.id) {
                                     output.append(data)
                                     outputChanged?.invoke()
                                 }

@@ -7,7 +7,7 @@
 
 [Download](https://github.com/AM-RTS/TermuIDE/releases) · [User guide](docs/usage.md) · [Build instructions](docs/building.md) · [中文](README_zh.md)
 
-TermuIDE is an Android IDE for C/C++, with basic Python and Java console support. It combines a Material 3 interface, the Sora editor, language-server completion, and recovery of unsaved work. Compilers and language tools run in Termux and are installed separately.
+A Termux-powered Android IDE for C/C++, with basic Python and Java support. It combines a Material 3 interface, the Sora editor, language-server completion, and recovery of unsaved work. Compilers and language tools run in Termux and are installed separately.
 
 An independent fork of [TermuC](https://github.com/RainbowC0/TermuC), maintained by AM-RTS and contributors. It is not an official TermuC or Termux release.
 

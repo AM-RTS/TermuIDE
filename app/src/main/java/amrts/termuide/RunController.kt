@@ -148,7 +148,7 @@ class RunController @JvmOverloads constructor(
         }
         try {
             val outgoing = if (!probe && job.request.inAppConsole) {
-                console.prepare(plan, toolCache.getValue("python")) { exit, error ->
+                console.prepare(plan, toolCache.getValue("python"), job.request.path) { exit, error ->
                     if (current === job && !job.cancelled) {
                         clearCallback(job)
                         if (exit != null && history.getString("pending", null) == job.id) history.edit().remove("pending").apply()

@@ -640,7 +640,9 @@ public class MainActivity extends androidx.activity.ComponentActivity implements
     public List<String> getPendingClosePaths() { return workspace.pendingClosePaths(); }
 
     private void closeDocumentSession(String path) {
-        workspace.closeDocument(path, Application.getInstance().getDocuments());
+        Application app = Application.getInstance();
+        workspace.closeDocument(path, app.getDocuments());
+        app.getRuns().getConsole().closeForSource(path);
     }
 
     public void cancelCloseDocuments() {

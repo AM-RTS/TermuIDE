@@ -27,11 +27,11 @@ import org.robolectric.annotation.Config
 class RunConsoleDrawerUiTest {
     @get:Rule val compose = createComposeRule()
 
-    @Test fun swipeAndButtonToggleTheSameConsoleRun() {
+    @Test fun swipesKeepTheRunAndCloseButtonDiscardsIt() {
         val app = Application.getInstance()
         val console = RunConsole(app)
         val title = app.getString(R.string.run_console)
-        val minimize = app.getString(R.string.console_minimize)
+        val close = app.getString(R.string.console_close)
         try {
             console.prepare(RunCommands.Plan("/bin/true", emptyList(), "/tmp"), "/bin/python") { _, _ -> }
             val runId = console.state.value.id
@@ -48,16 +48,20 @@ class RunConsoleDrawerUiTest {
 
             compose.onNodeWithText(app.getString(R.string.console_short_connecting)).assertIsDisplayed()
             compose.onNodeWithText(title).performTouchInput { swipeUp(startY = centerY, endY = centerY - 120f) }
-            compose.onNodeWithContentDescription(minimize).assertIsDisplayed()
+            compose.onNodeWithContentDescription(close).assertIsDisplayed()
             compose.onNodeWithText(title).performTouchInput { swipeDown(startY = centerY, endY = centerY + 120f) }
-            compose.onNodeWithContentDescription(minimize).assertDoesNotExist()
+            compose.onNodeWithContentDescription(close).assertDoesNotExist()
 
             compose.onNodeWithText(title).performClick()
-            compose.onNodeWithContentDescription(minimize).performClick()
-            compose.onNodeWithText(app.getString(R.string.console_short_connecting)).assertIsDisplayed()
             compose.runOnIdle {
                 assertEquals(runId, console.state.value.id)
                 assertEquals(RunConsole.Phase.CONNECTING, console.state.value.phase)
+            }
+            compose.onNodeWithContentDescription(close).performClick()
+            compose.onNodeWithText(title).assertDoesNotExist()
+            compose.runOnIdle {
+                assertEquals("", console.state.value.id)
+                assertEquals(false, console.state.value.active)
             }
         } finally {
             compose.runOnIdle { console.shutdown() }

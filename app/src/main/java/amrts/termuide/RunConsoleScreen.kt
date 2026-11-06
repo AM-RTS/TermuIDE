@@ -24,7 +24,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -69,7 +69,7 @@ import androidx.compose.ui.window.DialogProperties
 
 @Composable
 internal fun CollapsedRunConsole(state: RunConsole.State, onExpand: () -> Unit) {
-    if (state.id.isEmpty() || state.visible) return
+    if (!state.minimized) return
     Surface(
         onClick = onExpand,
         modifier = Modifier.fillMaxWidth().consoleSwipe(up = true, onSwipe = onExpand)
@@ -117,9 +117,9 @@ private fun Modifier.consoleSwipe(up: Boolean, onSwipe: () -> Unit): Modifier {
 @Composable
 internal fun RunConsoleScreen(console: RunConsole) {
     val state by console.state.collectAsState()
-    val visibility = remember { MutableTransitionState(false) }
+    val visibility = remember(state.id) { MutableTransitionState(false) }
     visibility.targetState = state.visible
-    if (!state.visible && visibility.isIdle) return
+    if (state.id.isEmpty() || (!state.visible && visibility.isIdle)) return
     val context = LocalContext.current
     var confirmStop by rememberSaveable(state.id) { mutableStateOf(false) }
     var rendererFailed by rememberSaveable(state.id) { mutableStateOf(false) }
@@ -144,8 +144,8 @@ internal fun RunConsoleScreen(console: RunConsole) {
                             } else TextButton(onClick = { console.resetTextSize() }) {
                                 Text(context.getString(R.string.console_reset_text_size))
                             }
-                            IconButton(onClick = { console.hide() }) {
-                                Icon(Icons.Filled.KeyboardArrowDown, context.getString(R.string.console_minimize))
+                            IconButton(onClick = console::closeConsole) {
+                                Icon(Icons.Filled.Close, context.getString(R.string.console_close))
                             }
                         })
                     }, bottomBar = {

@@ -41,7 +41,7 @@ class RunConsoleTest {
 
     @Before fun prepare() {
         console = RunConsole(Application.getInstance())
-        plan = console.prepare(RunCommands.Plan("/bin/bash", listOf("-c", "exit 37"), "/tmp"), "/bin/python") { code, error ->
+        plan = console.prepare(RunCommands.Plan("/bin/bash", listOf("-c", "exit 37"), "/tmp"), "/bin/python", "/tmp/source.c") { code, error ->
             completions += code to error
         }
     }
@@ -148,6 +148,24 @@ class RunConsoleTest {
         assertEquals(1, input.readInt())
         assertEquals('K'.code, input.readUnsignedByte())
         exit(137)
+    }
+
+    @Test fun closingOnlyTheLaunchingTabDiscardsTheDrawerAndStopsTheRun() {
+        authenticate()
+        console.hide()
+        console.closeForSource("/tmp/other.c")
+        assertTrue(console.state.value.minimized)
+        assertEquals(RunConsole.Phase.RUNNING, console.state.value.phase)
+
+        console.closeForSource("/tmp/source.c")
+        assertFalse(console.state.value.minimized)
+        assertEquals(RunConsole.Phase.STOPPING, console.state.value.phase)
+        val input = DataInputStream(peer!!.getInputStream())
+        assertEquals(1, input.readInt())
+        assertEquals('K'.code, input.readUnsignedByte())
+        exit(137)
+        console.show()
+        assertFalse(console.state.value.visible)
     }
 
     @Test fun oversizedUnicodeInputIsRejectedAtomicallyAndResizeCannotHideTheError() {
@@ -429,8 +447,10 @@ class RunConsoleTest {
             console.show()
             console.attachRenderer(newHost) { newErrors++ }
             assertSame(terminal, newHost.getChildAt(0))
-            console.prepare(RunCommands.Plan("/bin/true", emptyList(), "/tmp"), "/bin/python") { _, _ -> }
+            console.closeConsole()
             assertTrue(shadowOf(terminal).wasDestroyCalled())
+            assertFalse(console.state.value.active)
+            assertEquals("", console.state.value.id)
             assertEquals(0, oldErrors + newErrors)
         } finally { second.pause().stop().destroy() }
     }
