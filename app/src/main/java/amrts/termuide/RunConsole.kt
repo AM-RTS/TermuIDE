@@ -96,7 +96,6 @@ class RunConsole(private val context: Context) {
     fun show() { mutableState.value = mutableState.value.copy(visible = true) }
     fun hide() {
         mutableState.value = mutableState.value.copy(visible = false, selection = null)
-        if (!state.value.active) releaseRenderer()
     }
     internal fun attachRenderer(host: FrameLayout, onError: () -> Unit) {
         val terminal = renderer ?: ConsoleTerminalView(MutableContextWrapper(context.applicationContext), this,
@@ -316,7 +315,6 @@ class RunConsole(private val context: Context) {
         mutableState.value = state.value.copy(phase = if (exit != null) Phase.FINISHED else Phase.UNKNOWN,
             exitCode = exit, detail = detail)
         renderer?.updateInput()
-        if (!state.value.visible) releaseRenderer()
         run.complete(exit, detail)
     }
     private fun close(run: Session) {

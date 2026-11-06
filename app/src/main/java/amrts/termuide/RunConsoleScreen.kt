@@ -3,6 +3,11 @@ package amrts.termuide
 import android.widget.FrameLayout
 import android.content.ClipData
 import android.content.ClipboardManager
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -13,12 +18,14 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -31,18 +38,27 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -50,100 +66,154 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 
+@Composable
+internal fun CollapsedRunConsole(state: RunConsole.State, onExpand: () -> Unit) {
+    if (state.id.isEmpty() || state.visible) return
+    Surface(
+        onClick = onExpand,
+        modifier = Modifier.fillMaxWidth().consoleSwipe(up = true, onSwipe = onExpand)
+            .semantics { role = Role.Button },
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+    ) {
+        Row(Modifier.heightIn(min = 48.dp).padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Filled.KeyboardArrowUp, contentDescription = null)
+            Column(Modifier.weight(1f).padding(vertical = 4.dp)) {
+                Text(stringResource(R.string.run_console), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.titleSmall)
+                Text(consoleStatus(state, compact = true), Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                    maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
+            }
+        }
+    }
+}
+
+@Composable
+private fun consoleStatus(state: RunConsole.State, compact: Boolean = false): String = when (state.phase) {
+    RunConsole.Phase.CONNECTING -> stringResource(if (compact) R.string.console_short_connecting else R.string.console_connecting)
+    RunConsole.Phase.RUNNING -> stringResource(if (compact) R.string.console_short_running else R.string.console_running)
+    RunConsole.Phase.STOPPING -> stringResource(if (compact) R.string.console_short_stopping else R.string.console_stopping)
+    RunConsole.Phase.FINISHED -> stringResource(if (compact) R.string.console_short_finished else R.string.console_finished, state.exitCode ?: -1)
+    else -> stringResource(if (compact) R.string.console_short_unknown else R.string.console_connection_lost)
+}
+
+@Composable
+private fun Modifier.consoleSwipe(up: Boolean, onSwipe: () -> Unit): Modifier {
+    val currentAction by rememberUpdatedState(onSwipe)
+    return pointerInput(up) {
+        var distance = 0f
+        detectVerticalDragGestures(
+            onDragStart = { distance = 0f },
+            onDragEnd = { if ((if (up) -distance else distance) >= 24.dp.toPx()) currentAction() },
+        ) { change, delta ->
+            change.consume()
+            distance += delta
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun RunConsoleScreen(console: RunConsole) {
     val state by console.state.collectAsState()
-    if (!state.visible) return
+    val visibility = remember { MutableTransitionState(false) }
+    visibility.targetState = state.visible
+    if (!state.visible && visibility.isIdle) return
     val context = LocalContext.current
     var confirmStop by rememberSaveable(state.id) { mutableStateOf(false) }
     var rendererFailed by rememberSaveable(state.id) { mutableStateOf(false) }
-    Dialog(onDismissRequest = { if (state.selection != null) console.closeSelection() else console.hide() },
+    Dialog(onDismissRequest = {
+        if (state.visible) {
+            if (state.selection != null) console.closeSelection() else console.hide()
+        }
+    },
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
-        Scaffold(Modifier.fillMaxSize().imePadding(), contentWindowInsets = WindowInsets.safeDrawing,
-            topBar = {
-                TopAppBar(title = { Text(context.getString(if (state.selection == null) R.string.run_console else R.string.console_select_output)) }, actions = {
-                    if (state.selection != null) TextButton(onClick = { console.closeSelection() }) {
-                        Text(context.getString(R.string.console_live_terminal))
-                    } else TextButton(onClick = { console.resetTextSize() }) {
-                        Text(context.getString(R.string.console_reset_text_size))
+        val keyboard = LocalSoftwareKeyboardController.current
+        LaunchedEffect(state.visible) {
+            if (!state.visible) keyboard?.hide()
+        }
+        Box(Modifier.fillMaxSize().clipToBounds()) {
+            AnimatedVisibility(visibility, enter = slideInVertically { it }, exit = slideOutVertically { it }) {
+                Scaffold(Modifier.fillMaxSize().imePadding(), contentWindowInsets = WindowInsets.safeDrawing,
+                    topBar = {
+                        TopAppBar(modifier = Modifier.consoleSwipe(up = false, onSwipe = console::hide),
+                            title = { Text(context.getString(if (state.selection == null) R.string.run_console else R.string.console_select_output)) }, actions = {
+                            if (state.selection != null) TextButton(onClick = { console.closeSelection() }) {
+                                Text(context.getString(R.string.console_live_terminal))
+                            } else TextButton(onClick = { console.resetTextSize() }) {
+                                Text(context.getString(R.string.console_reset_text_size))
+                            }
+                            IconButton(onClick = { console.hide() }) {
+                                Icon(Icons.Filled.KeyboardArrowDown, context.getString(R.string.console_minimize))
+                            }
+                        })
+                    }, bottomBar = {
+                        Column {
+                            Text(consoleStatus(state), Modifier.padding(horizontal = 16.dp, vertical = 4.dp).semantics { liveRegion = LiveRegionMode.Polite },
+                                style = MaterialTheme.typography.bodySmall)
+                            state.detail?.let { Text(it, Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodySmall) }
+                            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp),
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                TextButton(onClick = { console.selectOutput() }, enabled = state.selection == null && !rendererFailed) {
+                                    Text(context.getString(R.string.console_select_output))
+                                }
+                                TextButton(onClick = { console.interrupt() }, enabled = state.phase == RunConsole.Phase.RUNNING) {
+                                    Text(context.getString(R.string.console_interrupt))
+                                }
+                                TextButton(onClick = { confirmStop = true }, enabled = state.active && state.phase != RunConsole.Phase.STOPPING) {
+                                    Text(context.getString(R.string.console_force_stop))
+                                }
+                                TextButton(onClick = { console.input("\u0004") }, enabled = state.phase == RunConsole.Phase.RUNNING) {
+                                    Text(context.getString(R.string.console_eof))
+                                }
+                                TextButton(onClick = { console.input("\t") }, enabled = state.phase == RunConsole.Phase.RUNNING) { Text("Tab") }
+                                TextButton(onClick = { console.input("\u001b") }, enabled = state.phase == RunConsole.Phase.RUNNING) { Text("Esc") }
+                                TextButton(onClick = { console.input("\u001b[A") }, enabled = state.phase == RunConsole.Phase.RUNNING) {
+                                    Text(context.getString(R.string.console_up))
+                                }
+                                TextButton(onClick = { console.input("\u001b[B") }, enabled = state.phase == RunConsole.Phase.RUNNING) {
+                                    Text(context.getString(R.string.console_down))
+                                }
+                                TextButton(onClick = { console.input("\u001b[D") }, enabled = state.phase == RunConsole.Phase.RUNNING) {
+                                    Text(context.getString(R.string.console_left))
+                                }
+                                TextButton(onClick = { console.input("\u001b[C") }, enabled = state.phase == RunConsole.Phase.RUNNING) {
+                                    Text(context.getString(R.string.console_right))
+                                }
+                            }
+                        }
+                    }) { padding ->
+                    val colors = MaterialTheme.colorScheme
+                    key(state.id) {
+                        Box(Modifier.fillMaxSize().padding(padding)) {
+                        if (rendererFailed) Column(Modifier.fillMaxSize().padding(16.dp)) {
+                            Text(context.getString(R.string.console_renderer_failed), style = MaterialTheme.typography.bodyMedium)
+                            TextButton(onClick = { rendererFailed = false }) { Text(context.getString(R.string.console_retry_renderer)) }
+                        } else AndroidView(factory = { context ->
+                            FrameLayout(context).apply {
+                                try {
+                                    console.attachRenderer(this) { rendererFailed = true }
+                                } catch (_: RuntimeException) { post { rendererFailed = true } }
+                            }
+                        }, modifier = Modifier.fillMaxSize(),
+                            onReset = null, onRelease = { host ->
+                                console.detachRenderer(host)
+                            }, update = { host ->
+                                host.importantForAccessibility = if (state.selection == null) android.view.View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
+                                    else android.view.View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+                                (host.getChildAt(0) as? ConsoleTerminalView)?.let {
+                                    it.configure(colors.surface.toArgb(), colors.onSurface.toArgb(), colors.primary.toArgb())
+                                    it.updateInput()
+                                }
+                            })
+                        state.selection?.let { ConsoleOutputSelection(it) }
+                        }
                     }
-                    IconButton(onClick = { console.hide() }) {
-                        Icon(Icons.Filled.Close, context.getString(R.string.console_hide))
-                    }
-                })
-            }, bottomBar = {
-                Column {
-                    val status = when (state.phase) {
-                        RunConsole.Phase.CONNECTING -> context.getString(R.string.console_connecting)
-                        RunConsole.Phase.RUNNING -> context.getString(R.string.console_running)
-                        RunConsole.Phase.STOPPING -> context.getString(R.string.console_stopping)
-                        RunConsole.Phase.FINISHED -> context.getString(R.string.console_finished, state.exitCode ?: -1)
-                        else -> context.getString(R.string.console_connection_lost)
-                    }
-                    Text(status, Modifier.padding(horizontal = 16.dp, vertical = 4.dp).semantics { liveRegion = LiveRegionMode.Polite },
-                        style = MaterialTheme.typography.bodySmall)
-                    state.detail?.let { Text(it, Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodySmall) }
-                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        TextButton(onClick = { console.selectOutput() }, enabled = state.selection == null && !rendererFailed) {
-                            Text(context.getString(R.string.console_select_output))
-                        }
-                        TextButton(onClick = { console.interrupt() }, enabled = state.phase == RunConsole.Phase.RUNNING) {
-                            Text(context.getString(R.string.console_interrupt))
-                        }
-                        TextButton(onClick = { confirmStop = true }, enabled = state.active && state.phase != RunConsole.Phase.STOPPING) {
-                            Text(context.getString(R.string.console_force_stop))
-                        }
-                        TextButton(onClick = { console.input("\u0004") }, enabled = state.phase == RunConsole.Phase.RUNNING) {
-                            Text(context.getString(R.string.console_eof))
-                        }
-                        TextButton(onClick = { console.input("\t") }, enabled = state.phase == RunConsole.Phase.RUNNING) { Text("Tab") }
-                        TextButton(onClick = { console.input("\u001b") }, enabled = state.phase == RunConsole.Phase.RUNNING) { Text("Esc") }
-                        TextButton(onClick = { console.input("\u001b[A") }, enabled = state.phase == RunConsole.Phase.RUNNING) {
-                            Text(context.getString(R.string.console_up))
-                        }
-                        TextButton(onClick = { console.input("\u001b[B") }, enabled = state.phase == RunConsole.Phase.RUNNING) {
-                            Text(context.getString(R.string.console_down))
-                        }
-                        TextButton(onClick = { console.input("\u001b[D") }, enabled = state.phase == RunConsole.Phase.RUNNING) {
-                            Text(context.getString(R.string.console_left))
-                        }
-                        TextButton(onClick = { console.input("\u001b[C") }, enabled = state.phase == RunConsole.Phase.RUNNING) {
-                            Text(context.getString(R.string.console_right))
-                        }
-                    }
-                }
-            }) { padding ->
-            val colors = MaterialTheme.colorScheme
-            key(state.id) {
-                Box(Modifier.fillMaxSize().padding(padding)) {
-                if (rendererFailed) Column(Modifier.fillMaxSize().padding(16.dp)) {
-                    Text(context.getString(R.string.console_renderer_failed), style = MaterialTheme.typography.bodyMedium)
-                    TextButton(onClick = { rendererFailed = false }) { Text(context.getString(R.string.console_retry_renderer)) }
-                } else AndroidView(factory = { context ->
-                    FrameLayout(context).apply {
-                        try {
-                            console.attachRenderer(this) { rendererFailed = true }
-                        } catch (_: RuntimeException) { post { rendererFailed = true } }
-                    }
-                }, modifier = Modifier.fillMaxSize(),
-                    onReset = null, onRelease = { host ->
-                        console.detachRenderer(host)
-                    }, update = { host ->
-                        host.importantForAccessibility = if (state.selection == null) android.view.View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
-                            else android.view.View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
-                        (host.getChildAt(0) as? ConsoleTerminalView)?.let {
-                            it.configure(colors.surface.toArgb(), colors.onSurface.toArgb(), colors.primary.toArgb())
-                            it.updateInput()
-                        }
-                    })
-                state.selection?.let { ConsoleOutputSelection(it) }
                 }
             }
         }
-        if (confirmStop && state.active) AlertDialog(onDismissRequest = { confirmStop = false },
+        if (state.visible && confirmStop && state.active) AlertDialog(onDismissRequest = { confirmStop = false },
             title = { Text(context.getString(R.string.console_force_stop)) },
             text = { Text(context.getString(R.string.console_stop_confirm)) },
             confirmButton = { TextButton(onClick = { confirmStop = false; console.forceStop() }) { Text(context.getString(R.string.console_force_stop)) } },

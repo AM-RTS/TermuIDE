@@ -2,7 +2,12 @@
     <string name="run_here">Run here</string>
     <string name="run_in_termux">Run in Termux</string>
     <string name="run_console">Run console</string>
-    <string name="console_hide">Hide console; keep program running</string>
+    <string name="console_minimize">Minimize console</string>
+    <string name="console_short_connecting">Connecting…</string>
+    <string name="console_short_running">Running</string>
+    <string name="console_short_stopping">Stopping…</string>
+    <string name="console_short_finished">Exit %1$d</string>
+    <string name="console_short_unknown">Exit unconfirmed</string>
     <string name="console_input">Program terminal input and output</string>
     <string name="console_reset_text_size">Reset text size</string>
     <string name="console_select_output">Select/Copy</string>

@@ -589,6 +589,7 @@ private fun MainScreen(activity: MainActivity, editorHost: FrameLayout) {
             },
             bottomBar = {
                 Column {
+                    CollapsedRunConsole(consoleState, onExpand = console::show)
                     if (execution.stage != RunController.Stage.IDLE) {
                         val message = executionMessage(context, execution)
                         Surface(tonalElevation = 2.dp) {

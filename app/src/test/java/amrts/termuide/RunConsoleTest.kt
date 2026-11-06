@@ -425,6 +425,11 @@ class RunConsoleTest {
             console.detachRenderer(newHost)
             console.hide()
             exit(0)
+            assertFalse(shadowOf(terminal).wasDestroyCalled())
+            console.show()
+            console.attachRenderer(newHost) { newErrors++ }
+            assertSame(terminal, newHost.getChildAt(0))
+            console.prepare(RunCommands.Plan("/bin/true", emptyList(), "/tmp"), "/bin/python") { _, _ -> }
             assertTrue(shadowOf(terminal).wasDestroyCalled())
             assertEquals(0, oldErrors + newErrors)
         } finally { second.pause().stop().destroy() }
