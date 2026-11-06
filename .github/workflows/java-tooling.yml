@@ -1,7 +1,7 @@
 name: Java tooling integration
 on:
   push:
-    branches: [codex/java-lsp-integration, codex/in-app-console]
+    branches: [codex/java-lsp-integration]
     paths:
       - app/**
       - codeeditor/**
