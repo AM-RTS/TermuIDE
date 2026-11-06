@@ -1059,7 +1059,7 @@ private fun DiagnosticsSheet(
             if (diagnostics.isEmpty()) item {
                 Text(context.getString(R.string.no_diagnostics), Modifier.padding(16.dp), style = MaterialTheme.typography.bodyMedium)
             }
-            items(diagnostics) { (path, diagnostic) ->
+            items(diagnostics.sortedBy { it.second.severity }) { (path, diagnostic) ->
                 val severity = context.getString(when (diagnostic.severity) {
                     0 -> R.string.diagnostic_error
                     1 -> R.string.diagnostic_warning
