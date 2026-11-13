@@ -809,6 +809,7 @@ public class MainActivity extends androidx.activity.ComponentActivity implements
 
     public void renameFile(String from, String to) {
         if (!FileHelper.validFileName(to)) { toast(getString(R.string.rename_failed)); return; }
+        if (new File(from).getName().equals(to)) return;
         changeBrowserEntry(from, to);
     }
 
@@ -834,18 +835,18 @@ public class MainActivity extends androidx.activity.ComponentActivity implements
         getFragmentManager().executePendingTransactions();
         workspace.pendingFileName = null;
         workspace.startFileOperation(() -> {
-            boolean removed;
+            boolean succeeded;
             File destination = destinationName == null ? null : new File(target.getParentFile(), destinationName);
-            try { removed = destination == null ? FileHelper.removeFiles(target) : FileHelper.rename(target, destinationName); }
-            catch (RuntimeException error) { Log.e("Files", "File operation failed", error); removed = false; }
+            try { succeeded = destination == null ? FileHelper.removeFiles(target) : FileHelper.rename(target, destinationName); }
+            catch (RuntimeException error) { Log.e("Files", "File operation failed", error); succeeded = false; }
             WorkspaceSession.FileResult result = new WorkspaceSession.FileResult(
-                destination == null ? (removed ? R.string.deleted : R.string.open_failed) : (removed ? 0 : R.string.rename_failed),
-                null, null, removed && destination != null ? new File[]{target, destination} : new File[]{target});
+                destination == null ? (succeeded ? R.string.deleted : R.string.open_failed) : (succeeded ? 0 : R.string.rename_failed),
+                null, null, succeeded && destination != null ? new File[]{target, destination} : new File[]{target});
             result.reopenPaths = new ArrayList<>();
             for (String path : affected) {
-                String reopening = removed && destination != null
+                String reopening = succeeded && destination != null
                     ? destination.toPath().resolve(targetPath.relativize(new File(path).toPath().normalize())).toString() : path;
-                if ((destination != null || !removed) && FileHelper.isFile(new File(reopening))) {
+                if ((destination != null || !succeeded) && FileHelper.isFile(new File(reopening))) {
                     result.reopenPaths.add(reopening);
                     if (path.equals(selected)) result.reopenSelected = reopening;
                 }
