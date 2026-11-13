@@ -205,11 +205,11 @@ final class LanguageServers {
         restartMatching(context, value -> value.server == Server.PYTHON && (project || scope.equals(value.root)));
     }
 
-    void javaWorkspaceChanged(Context context, File... changedFiles) {
-        // Reuse restart/reopen to rebuild Java's disk index without touching document recovery.
+    void workspaceChanged(Context context, File... changedFiles) {
+        // Rebuild Java's index or reload a changed Python environment without touching drafts.
         restartMatching(context, session -> {
-            if (session.server != Server.JAVA) return false;
-            java.nio.file.Path root = new File(session.root).toPath();
+            if (session.server != Server.JAVA && (session.server != Server.PYTHON || session.environment.isEmpty())) return false;
+            java.nio.file.Path root = new File(session.server == Server.PYTHON ? session.environment : session.root).toPath();
             for (File file : changedFiles) {
                 java.nio.file.Path changed = file.getAbsoluteFile().toPath().normalize();
                 if (changed.startsWith(root) || root.startsWith(changed)) return true;

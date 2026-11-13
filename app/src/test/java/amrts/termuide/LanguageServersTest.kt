@@ -262,16 +262,45 @@ class LanguageServersTest {
         }
         Application.completion = "s"
         try {
-            servers.javaWorkspaceChanged(unavailable, File("/workspace"))
+            servers.workspaceChanged(unavailable, File("/workspace"))
             val replacement = servers.find(file)!!
             assertNotSame(old, replacement)
             assertSame(neighbour, servers.find(neighbourFile))
             assertSame(native, servers.find(nativeFile))
-            servers.javaWorkspaceChanged(unavailable, File("/work"))
+            servers.workspaceChanged(unavailable, File("/work"))
             assertSame(replacement, servers.find(file))
             assertSame(neighbour, servers.find(neighbourFile))
         } finally { Application.completion = "n" }
     }
+    @Test fun renamedEnvironmentRebindsExistingPythonTabsWithoutRestartingNativeServers() {
+        val app = Application.getInstance()
+        val scope = "/renamed-python-env"
+        val file = File(scope, "main.py")
+        val nativeFile = File(scope, "main.c")
+        val context = object : android.content.ContextWrapper(app) {
+            override fun startForegroundService(service: android.content.Intent): android.content.ComponentName {
+                throw SecurityException("No Termux service in this host fixture")
+            }
+        }
+        Application.completion = "s"
+        try {
+            RunConfiguration.save(app, scope, RunConfiguration(pythonEnvironment = ".venv"))
+            val old = servers.session(file, EditFragment.TYPE_PYTHON)!!
+            val native = servers.session(nativeFile, EditFragment.TYPE_C)!!
+            servers.workspaceChanged(context, File(scope, "unrelated.txt"))
+            assertSame(old, servers.find(file))
+            assertTrue(RunConfiguration.relocate(app, File(scope, ".venv"), File(scope, "env")))
+            servers.workspaceChanged(context, File(scope, ".venv"), File(scope, "env"))
+            val replacement = servers.find(file)!!
+            assertNotSame(old, replacement)
+            assertEquals("$scope/env", replacement.environment)
+            assertSame(native, servers.find(nativeFile))
+        } finally {
+            app.getSharedPreferences("run_configurations", 0).edit().remove(scope).commit()
+            Application.completion = "n"
+        }
+    }
+
     @Test fun preflightStatusRejectsMalformedResultsAndClosedSessionCallbacks() {
         Application.completion = "s"
         val calls = mutableListOf<android.content.Intent>()

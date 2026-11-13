@@ -806,8 +806,8 @@ public class MainActivity extends androidx.activity.ComponentActivity implements
                 getFragmentManager().executePendingTransactions();
                 if (result.reopenSelected != null) selectItem(workspace.indexOf(result.reopenSelected));
             }
-            // Partial deletion can still change Java's index.
-            if (result.changed.length > 0) Application.getInstance().languageServers.javaWorkspaceChanged(this, result.changed);
+            // Partial deletion can still change Java's index or a Python environment.
+            if (result.changed.length > 0) Application.getInstance().languageServers.workspaceChanged(this, result.changed);
             if (result.created != null) {
                 boolean current = result.isCurrent(workspace, Application.getInstance().getDocuments(), pwd);
                 if (!current) { toast(getString(R.string.save_newer_changes)); refresh(); return; }
