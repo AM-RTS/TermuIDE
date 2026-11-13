@@ -131,6 +131,41 @@ class WorkspaceFilesTest {
         assertEquals("destination", destination.readText())
     }
 
+    @Test fun failedSaveBeforeRenameKeepsTheTabAndDurableDraftAtItsOriginalPath() {
+        val source = directory.resolve("unsaved.c").apply { writeText("original") }
+        val fragment = open(source)
+        fragment.view!!.paste("// keep draft\n")
+        val draft = fragment.view!!.text.toString()
+        val originalSaver = app.saver
+        app.saver = DocumentSaver(app.documents) { _, _ -> throw java.io.IOException("simulated failure") }
+        try {
+            controller.get().renameFile(source.path, "new.c")
+            controller.get().resolveCloseDocuments(true)
+            drainSourceSaves()
+            assertTrue(source.exists())
+            assertFalse(directory.resolve("new.c").exists())
+            assertEquals(listOf(source.path), controller.get().openFilePaths)
+            app.documents.flush()
+            assertEquals(draft, app.documents.recoveryText(source.path))
+            assertEquals("original", source.readText())
+        } finally {
+            app.saver.shutdown()
+            app.saver = originalSaver
+        }
+    }
+
+    @Test fun activeProjectFolderCannotBeRenamedOrDeletedUnderItsConfiguration() {
+        val root = directory.resolve("project").apply { mkdir() }
+        Project.publish(Project.Config(root.path, "build", "", "", "", 0, emptyList()))
+        controller.get().renameFile(root.path, "moved")
+        controller.get().deleteBrowserEntry(root.path)
+        drainFileTasks()
+        assertTrue(root.exists())
+        assertFalse(directory.resolve("moved").exists())
+        assertEquals(root.path, Project.snapshot().rootPath)
+        assertFalse(controller.get().isDeleting)
+    }
+
     @Test fun deletionFinishesOnTheReplacementHostAndKeepsDirtyRecovery() {
         val source = directory.resolve("draft.txt").apply { writeText("original") }
         val deleting = directory.resolve("remove.txt").apply { writeText("remove") }
