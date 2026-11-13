@@ -16,6 +16,23 @@ final class WorkspaceSession extends ArrayList<String> {
     boolean savingClose;
     CompletableFuture<Void> sourceClose;
     ProjectClose projectClose;
+    DebugPanel debugger;
+    private String restoredProjectPath;
+    CompletableFuture<Project.Config> projectRestore;
+
+    CompletableFuture<Project.Config> restoreProject() {
+        if (projectRestore != null) return projectRestore;
+        String root = restoredProjectPath != null ? restoredProjectPath
+            : Application.getInstance().getSharedPreferences("workspace", 0).getString("project", null);
+        projectRestore = Project.snapshot().rootPath != null || root == null ? CompletableFuture.completedFuture(null)
+            : Application.getInstance().fileTask(() -> Project.read(new File(root, Project.PROJ)));
+        return projectRestore;
+    }
+
+    void activateProject(Project.Config config) {
+        Project.publish(config);
+        Application.getInstance().getSharedPreferences("workspace", 0).edit().putString("project", config.rootPath).apply();
+    }
 
     final WorkspacePresentation presentation = new WorkspacePresentation();
     CompletableFuture<FileResult> fileOperation;
@@ -24,7 +41,8 @@ final class WorkspaceSession extends ArrayList<String> {
     static final class FileResult {
         final File[] changed;
         final Project.Config previous, created;
-        final int message;
+        int message;
+        boolean configurationChanged;
         List<String> openingTabs;
         List<DocumentSession> openingRevisions;
         Set<String> openingDiscards;
@@ -32,6 +50,12 @@ final class WorkspaceSession extends ArrayList<String> {
         File originDirectory;
         List<String> reopenPaths;
         String reopenSelected;
+        boolean isCurrent(WorkspaceSession workspace, DocumentSessions documents, File directory) {
+            return Project.snapshot() == previous && (originDirectory == null || originDirectory.equals(directory))
+                && (openingTabs == null || (openingTabs.equals(workspace)
+                    && Objects.equals(retainedPath, workspace.getSelectedPath())
+                    && openingRevisions.equals(documents.getState().getValue())));
+        }
         FileResult(int message, Project.Config previous, Project.Config created, File... changed) {
             this.message = message; this.previous = previous; this.created = created; this.changed = changed;
         }
@@ -43,6 +67,59 @@ final class WorkspaceSession extends ArrayList<String> {
         fileOperation = pending;
         pending.whenComplete((result, error) -> { if (fileListener != null) fileListener.run(); });
         return pending;
+    }
+
+    void beginProjectOpen(File configuration, DocumentSessions documents, String selected) {
+        Project.Config previous = Project.snapshot();
+        List<String> tabs = new ArrayList<>(this);
+        List<DocumentSession> revisions = new ArrayList<>(documents.getState().getValue());
+        Set<String> discards = new HashSet<>(approvedDiscards);
+        startFileOperation(() -> {
+            FileResult result = new FileResult(0, previous, Project.read(configuration));
+            result.openingTabs = tabs; result.openingRevisions = revisions;
+            result.openingDiscards = discards; result.retainedPath = selected;
+            return result;
+        });
+    }
+
+    List<String> pathsUnder(File target) {
+        java.nio.file.Path root = target.toPath().normalize();
+        List<String> paths = new ArrayList<>();
+        for (String path : this) if (new File(path).toPath().normalize().startsWith(root)) paths.add(path);
+        return paths;
+    }
+
+    void beginFileChange(File target, String destinationName, List<String> affected, String selected) {
+        java.nio.file.Path targetPath = target.toPath().normalize();
+        startFileOperation(() -> {
+            boolean succeeded;
+            File destination = destinationName == null ? null : new File(target.getParentFile(), destinationName);
+            try { succeeded = destination == null ? FileHelper.removeFiles(target) : FileHelper.rename(target, destinationName); }
+            catch (RuntimeException error) { android.util.Log.e("Files", "File operation failed", error); succeeded = false; }
+            WorkspaceSession.FileResult result = new WorkspaceSession.FileResult(
+                destination == null ? (succeeded ? R.string.deleted : R.string.open_failed) : (succeeded ? 0 : R.string.rename_failed),
+                null, null, succeeded && destination != null ? new File[]{target, destination} : new File[]{target});
+            result.reopenPaths = new ArrayList<>();
+            for (String path : affected) {
+                String reopening = succeeded && destination != null
+                    ? destination.toPath().resolve(targetPath.relativize(new File(path).toPath().normalize())).toString() : path;
+                if ((destination != null || !succeeded) && FileHelper.isFile(new File(reopening))) {
+                    result.reopenPaths.add(reopening);
+                    if (path.equals(selected)) result.reopenSelected = reopening;
+                }
+            }
+            if (succeeded && destination != null) {
+                result.configurationChanged = true;
+                try {
+                    if (!RunConfiguration.relocate(Application.getInstance(), target, destination))
+                        result.message = R.string.run_config_relocate_failed;
+                } catch (RuntimeException error) {
+                    android.util.Log.e("Files", "Unable to relocate run settings", error);
+                    result.message = R.string.run_config_relocate_failed;
+                }
+            }
+            return result;
+        });
     }
 
     static final class CloseRequest {
@@ -141,8 +218,23 @@ final class WorkspaceSession extends ArrayList<String> {
         return sourceClose != null ? sourceClose : projectClose == null ? null : projectClose.result;
     }
 
+    ProjectClose completeCloseSave(DocumentSessions documents, DocumentSaver saver) {
+        CompletableFuture<?> pending = pendingResult();
+        ProjectClose close = projectClose;
+        sourceClose = null; projectClose = null; savingClose = false;
+        Object saved = pending.join();
+        if (close != null && !Boolean.TRUE.equals(saved))
+            throw new java.util.concurrent.CompletionException(new java.io.IOException("Project save failed"));
+        if (close != null ? !close.isCurrent(this, documents, saver)
+                : pendingClosePaths().stream().anyMatch(documents::isDirty))
+            throw new IllegalStateException("Documents changed while saving");
+        return close;
+    }
+
     void clearProject() {
         Project.close();
+        restoredProjectPath = null; projectRestore = null;
+        Application.getInstance().getSharedPreferences("workspace", 0).edit().remove("project").apply();
         clear();
     }
 
@@ -160,6 +252,7 @@ final class WorkspaceSession extends ArrayList<String> {
         if (selected != null && contains(selected)) selectedPath = selected;
         else if (!select(state.getInt("selected", 0))) select(0);
         pendingProjectPath = state.getString("pendingProject");
+        restoredProjectPath = state.getString("activeProject");
         pendingFileName = state.getString("pendingFileName");
         List<String> closing = state.getStringArrayList("pendingClosePaths");
         if (closing != null && !closing.isEmpty())
@@ -171,6 +264,7 @@ final class WorkspaceSession extends ArrayList<String> {
         state.putString("selectedPath", getSelectedPath());
         state.putInt("selected", getSelectedIndex());
         state.putString("pendingProject", pendingProjectPath);
+        state.putString("activeProject", Project.snapshot().rootPath != null ? Project.snapshot().rootPath : restoredProjectPath);
         state.putString("pendingFileName", pendingFileName);
         state.putStringArrayList("pendingClosePaths", new ArrayList<>(pendingClosePaths()));
         state.putInt("pendingCloseKind", pendingClose == null ? 0 : pendingClose.kind);

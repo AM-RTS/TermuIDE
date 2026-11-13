@@ -1,5 +1,7 @@
 <resources>
     <string name="run_here">Run here</string>
+    <string name="project_restore_failed">The project could not be restored. Your recovered documents are still available. Reopen the project to retry.</string>
+    <string name="run_config_relocate_failed">The file was renamed, but its run settings could not be updated. Review Run configuration before running.</string>
     <string name="lsp_output_overloaded">Language server could not keep up with editor changes. Restart it from Language tools.</string>
     <string name="file_operation_close_project">Close the active project before renaming or deleting its folder.</string>
     <string name="run_in_termux">Run in Termux</string>

@@ -108,6 +108,8 @@ final class LanguageServers {
 
     void ensure(Context context, File file, int type) {
         if (!"s".equals(Application.completion)) return;
+        MainHandler host = Application.getInstance().hand;
+        if (host != null && !host.canStartLanguageServers()) return;
         Lsp session;
         try { session = session(file, type); }
         catch (IllegalArgumentException error) { return; } // Configuration errors remain visible in Language tools.

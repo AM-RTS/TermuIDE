@@ -25,6 +25,7 @@ public class MainHandler extends Handler {
     final Map<String, Set<String>> cacheData = new HashMap<>();
     MainHandler(MainActivity activity) { ma = activity; }
     void updateActivity(MainActivity activity) { ma = activity; }
+    boolean canStartLanguageServers() { return ma == null || ma.isRuntimeHostReady(); }
     void languageServerChanged() { if (ma != null) ma.notifyUiChanged(); }
     CompletableFuture<Boolean> saveForRun(String path) {
         EditFragment target = fragment(path);

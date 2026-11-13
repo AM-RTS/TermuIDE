@@ -12,9 +12,9 @@ import cn.rbc.codeeditor.util.HelperUtils;
 import java.util.*;
 import static android.view.WindowManager.LayoutParams.*;
 
-/** Activity-owned overlay presentation; DebugSession owns transport and protocol state. */
+/** Retained debugger owner; its Activity and overlay are attached only while a host exists. */
 public class DebugPanel implements Runnable {
-    private final Activity mCtx;
+    private Activity mCtx;
     private final Handler main;
     private WindowManager wm;
     private WindowManager.LayoutParams params;
@@ -30,7 +30,22 @@ public class DebugPanel implements Runnable {
     private Runnable uiRefresh;
 
     public DebugPanel(Activity context) {
-        mCtx = context; main = new Handler(context.getMainLooper()); init();
+        main = new Handler(context.getMainLooper()); attach(context);
+    }
+
+    void attach(Activity context) {
+        mCtx = context;
+        WindowManager.LayoutParams previous = params;
+        init();
+        if (previous != null) { params.x = previous.x; params.y = previous.y; }
+        setDetailsWindow(detailsOpen);
+        if (state.connected && Settings.canDrawOverlays(context)) wm.addView(ctrlr, params);
+    }
+
+    void detach() {
+        if (ctrlr != null && ctrlr.isAttachedToWindow()) wm.removeViewImmediate(ctrlr);
+        uiRefresh = null;
+        ctrlr = null; wm = null; mCtx = null;
     }
 
     private void init() {
@@ -49,6 +64,7 @@ public class DebugPanel implements Runnable {
     }
 
     @Override public void run() {
+        if (mCtx == null) return;
         if (Settings.canDrawOverlays(mCtx)) show();
         else mCtx.startActivityForResult(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
             Uri.parse("package:" + mCtx.getPackageName())), MainActivity.SHOW_FLOATING);
@@ -57,7 +73,7 @@ public class DebugPanel implements Runnable {
     public void connect() {
         if (session != null) return;
         // A detached overlay's window recomposer belongs to its previous window.
-        ctrlr = TermuIDECompose.debugView((androidx.activity.ComponentActivity)mCtx, this);
+        if (mCtx != null) ctrlr = TermuIDECompose.debugView((androidx.activity.ComponentActivity)mCtx, this);
         final long expected = ++generation;
         java.util.concurrent.atomic.AtomicReference<DebugSession.Output> pendingOutput = new java.util.concurrent.atomic.AtomicReference<>();
         Runnable showOutput = () -> {
@@ -83,7 +99,7 @@ public class DebugPanel implements Runnable {
         if (!update.connected && session != null) {
             session.close(); session = null; generation++;
         }
-        if (update.hitBreakpoint > 0 && update.hitBreakpoint <= breakpoints.size())
+        if (mCtx != null && update.hitBreakpoint > 0 && update.hitBreakpoint <= breakpoints.size())
             HelperUtils.show(Toast.makeText(mCtx, mCtx.getString(R.string.bkpt_at,
                 breakpoints.get(update.hitBreakpoint - 1)), Toast.LENGTH_SHORT));
         if (newlyStopped && detailsOpen && session != null) {
@@ -100,7 +116,7 @@ public class DebugPanel implements Runnable {
     public void hide() {
         generation++;
         if (session != null) { session.close(); session = null; }
-        if (ctrlr.isAttachedToWindow()) wm.removeView(ctrlr);
+        if (ctrlr != null && ctrlr.isAttachedToWindow()) wm.removeView(ctrlr);
         detailsOpen = false;
         setDetailsWindow(false);
         breakpoints.clear(); breakpointEnabled.clear();
@@ -112,6 +128,7 @@ public class DebugPanel implements Runnable {
     public void clean() { hide(); state = DebugSession.Snapshot.empty(); output = DebugSession.Output.empty(); notifyUiChanged(); }
 
     void show() {
+        if (mCtx == null) return;
         Intent it = new Intent(Intent.ACTION_MAIN);
         it.setPackage(Utils.TERMUX);
         mCtx.startActivity(it);
@@ -119,7 +136,7 @@ public class DebugPanel implements Runnable {
     }
 
     public void onAction(String action) {
-        if (!"close".equals(action)) {
+        if (mCtx != null && !"close".equals(action)) {
             Intent it = new Intent(Intent.ACTION_MAIN);
             it.setPackage(Utils.TERMUX);
             mCtx.startActivity(it);
@@ -164,7 +181,7 @@ public class DebugPanel implements Runnable {
         params.height = expanded ? MATCH_PARENT : WRAP_CONTENT;
         params.gravity = expanded ? Gravity.CENTER : Gravity.END | Gravity.CENTER_VERTICAL;
         params.flags = expanded ? FLAG_LAYOUT_IN_SCREEN : FLAG_NOT_FOCUSABLE | FLAG_LAYOUT_IN_SCREEN;
-        if (ctrlr.isAttachedToWindow()) wm.updateViewLayout(ctrlr, params);
+        if (ctrlr != null && ctrlr.isAttachedToWindow()) wm.updateViewLayout(ctrlr, params);
     }
 
     public void addBkpt(String file, int lineno) {
@@ -185,7 +202,7 @@ public class DebugPanel implements Runnable {
     public boolean isBreakpointEnabled(int index) { return index >= 0 && index < breakpointEnabled.size() && breakpointEnabled.get(index); }
 
     public void moveOverlay(float dx, float dy) {
-        if (detailsOpen) return;
+        if (detailsOpen || ctrlr == null) return;
         android.util.DisplayMetrics metrics = new android.util.DisplayMetrics();
         wm.getDefaultDisplay().getMetrics(metrics);
         int horizontal = Math.max(0, metrics.widthPixels - ctrlr.getWidth());

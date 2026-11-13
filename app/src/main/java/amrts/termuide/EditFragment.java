@@ -99,6 +99,10 @@ ActionMode.Callback, TextEditor.OnEditedListener {
         Lsp retainedServer = Application.getInstance().languageServers.find(fl);
         if (retainedServer != null) mVer = Math.max(mVer, retainedServer.documentVersion(fl));
         DocumentSessions sessions = Application.getInstance().getDocuments();
+        Long baseline = sessions.sourceModified(fl.getAbsolutePath());
+        if (baseline != null) lastModified = baseline;
+        else if (sessions.isDirty(fl.getAbsolutePath()) &&
+            (savedInstanceState == null || !savedInstanceState.containsKey("sourceModified"))) lastModified = -1;
         String recovery = sessions.recoveryText(fl.getAbsolutePath());
         boolean recoveredSourceLoaded = sessions.isSourceLoaded(fl.getAbsolutePath())
             && (savedInstanceState == null || savedInstanceState.getBoolean("sourceLoaded", true));
@@ -304,12 +308,10 @@ ActionMode.Callback, TextEditor.OnEditedListener {
         long previous = lastModified;
         Application.getInstance().fileTask(() -> FileHelper.lastModified(file)).thenAccept(modified -> {
             if (getView() != editor || editor.getSoraEditor().isReleased() || loading != null || lastModified != previous) return;
-            if (previous != 0 && modified != previous) {
-                lastModified = modified;
+            if (sourceLoaded && (previous < 0 || modified != previous)) {
                 MainActivity host = (MainActivity)getActivity();
                 if (host != null) host.requestReload(this);
             } else {
-                lastModified = modified;
                 if ("s".equals(Application.completion)) {
                     Set<String> types = Application.getInstance().hand.cacheData.get(file.toString());
                     if (types == null) types = DEFTYPES;
@@ -426,6 +428,11 @@ ActionMode.Callback, TextEditor.OnEditedListener {
         }
         if (automatic && (!Application.auto_save || !app.getDocuments().isDirty(path)))
             return CompletableFuture.completedFuture(false);
+        if (automatic && lastModified < 0) {
+            CompletableFuture<Boolean> failed = new CompletableFuture<>();
+            failed.completeExceptionally(new IOException("Recovered source must be reviewed before auto-save"));
+            return failed;
+        }
         Document doc = editor.getText();
         String text = doc.toString();
         TextBuffer.SavePoint point = doc.captureSavePoint();
@@ -528,6 +535,7 @@ ActionMode.Callback, TextEditor.OnEditedListener {
                 document.setOnTextChangeListener(this);
                 sourceLoaded = true; lastModified = source.modified;
                 app.getDocuments().setSourceLoaded(file.getAbsolutePath(), true);
+                app.getDocuments().setSourceModified(file.getAbsolutePath(), source.modified);
                 app.getDocuments().saved(file.getAbsolutePath());
                 editor.setEdited(false); editor.refreshDocument(); restoreViewState(editor);
                 try {

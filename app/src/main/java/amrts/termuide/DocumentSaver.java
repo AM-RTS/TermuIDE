@@ -65,6 +65,7 @@ final class DocumentSaver {
                 try {
                     if (error == null) {
                         boolean clean = point == null || sessions.completeSave(point);
+                        if (point != null && sessions.owns(point)) sessions.setSourceModified(path, timestamp);
                         applyResult.accept(timestamp);
                         result.complete(clean);
                     } else result.completeExceptionally(error);

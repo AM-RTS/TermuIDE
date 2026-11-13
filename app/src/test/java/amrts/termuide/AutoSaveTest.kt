@@ -166,4 +166,56 @@ class AutoSaveTest {
         assertEquals("draft original", restored.editor.text.toString())
         assertTrue(app.documents.isDirty(file.path))
     }
+
+    @Test fun coldRecoveryKeepsTheOriginalSourceBaselineAfterAnExternalEdit() {
+        configureAutoSave(true)
+        val file = directory.resolve("cold.txt").apply { writeText("original") }
+        val activity = launch()
+        open(activity, file).paste("draft ")
+        val baseline = file.lastModified()
+        controller!!.pause().stop().destroy()
+        controller = null
+        app.documents.flush()
+        app.documents.close()
+        val restored = DocumentSessions(File(app.noBackupFilesDir, "documents"), { throw AssertionError(it) }, 500)
+        Application::class.java.getDeclaredField("documents").apply { isAccessible = true }.set(app, restored)
+        app.saver.shutdown()
+        app.saver = DocumentSaver(restored)
+        assertEquals(baseline, restored.sourceModified(file.path))
+        file.writeText("external edit")
+        assertTrue(file.setLastModified(baseline + 10_000))
+        val host = launch()
+        drainFileTasks()
+        host.dismissReload()
+        host.editor.paste("more ")
+        idle()
+        assertEquals("external edit", file.readText())
+        assertTrue(restored.isDirty(file.path))
+        restored.flush()
+        assertTrue(restored.recoveryText(file.path)!!.contains("draft"))
+        assertEquals(baseline, restored.sourceModified(file.path))
+        host.performAction(R.id.save)
+        drainSourceSaves()
+        assertFalse(restored.isDirty(file.path))
+        assertEquals(file.lastModified(), restored.sourceModified(file.path))
+    }
+
+    @Test fun aLegacyDraftWithoutABaselineRequiresAnExplicitSave() {
+        configureAutoSave(true)
+        val file = directory.resolve("legacy.txt").apply { writeText("external source") }
+        app.documents.open(file.path) { "legacy draft" }
+        app.documents.changed(file.path)
+        app.documents.flush()
+        val host = launch()
+        drainFileTasks()
+        host.dismissReload()
+        host.editor.paste("more ")
+        idle()
+        assertEquals("external source", file.readText())
+        assertTrue(app.documents.isDirty(file.path))
+        host.performAction(R.id.save)
+        drainSourceSaves()
+        assertEquals(host.editor.text.toString(), file.readText())
+        assertNotNull(app.documents.sourceModified(file.path))
+    }
 }

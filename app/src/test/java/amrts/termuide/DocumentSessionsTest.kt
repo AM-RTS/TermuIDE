@@ -15,6 +15,20 @@ class DocumentSessionsTest {
     private val directory get() = File(temporary.root, "sessions")
     private fun sessions(delay: Long = 60_000) = DocumentSessions(directory, { }, delay)
 
+    @Test fun sourceBaselineSurvivesRestartAlongsideTheDirtyRevision() {
+        val path = temporary.newFile("baseline.c").path
+        sessions().use {
+            it.open(path) { "draft" }
+            it.setSourceModified(path, 12345)
+            it.changed(path)
+        }
+        sessions().use {
+            assertEquals(12345L, it.sourceModified(path))
+            assertEquals("draft", it.recoveryText(path))
+            assertTrue(it.isDirty(path))
+        }
+    }
+
     @Test fun asynchronousCheckpointReturnsWhileSnapshotIsBlockedAndPersistsBeforeCompleting() {
         val path = temporary.newFile("background.txt").path
         val entered = CountDownLatch(1)
@@ -359,27 +373,31 @@ class DocumentSessionsTest {
         assertEquals("original", source.readText())
     }
 
-    @Test fun versionOneDraftsRemainReadableWithoutLosingUtf16Text() {
+    @Test fun olderDraftFormatsRemainReadableWithoutInventingASourceBaseline() {
         val path = temporary.newFile("legacy.cpp").path
         val text = "legacy\r\n🧪\uD800"
         val store = DraftStore(directory)
         store.write(DraftStore.Record(DocumentSession(path, 7, true), 0, text))
         val file = directory.listFiles()!!.single { it.name.endsWith(".draft") }
+        for (version in 1..2) {
         java.io.DataOutputStream(file.outputStream()).use { output ->
             output.writeInt(0x54434452)
-            output.writeInt(1)
+            output.writeInt(version)
             output.writeUTF(path)
             output.writeLong(7)
             output.writeBoolean(true)
             output.writeLong(0)
             output.writeInt(text.length)
             text.forEach { output.writeChar(it.code) }
+            if (version == 2) output.writeBoolean(true)
         }
         sessions().use { restored ->
             assertEquals(text, restored.recoveryText(path))
             assertTrue(restored.isSourceLoaded(path))
             assertEquals(7L, restored.state.value.single().revision)
+            assertNull(restored.sourceModified(path))
             assertNotNull(restored.prepareSave(path))
+        }
         }
     }
 }

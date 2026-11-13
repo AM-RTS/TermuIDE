@@ -10,6 +10,38 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28])
 class DebugPanelStateTest {
+    @Test fun hostRecreationRetainsTheSessionAndReleasesTheOldActivity() {
+        Application.completion = "n"
+        val controller = Robolectric.buildActivity(MainActivity::class.java)
+        controller.get().getPreferences(0).edit().putBoolean(MainActivity.INITAPP, false)
+            .putBoolean(MainActivity.TESTAPP, false).commit()
+        controller.create().start().postCreate(null).resume().visible()
+        drainFileTasks()
+        val field = MainActivity::class.java.getDeclaredField("panel").apply { isAccessible = true }
+        val panel = field.get(controller.get()) as DebugPanel
+        val sender = DebugSession.Sender(java.net.Socket())
+        val session = DebugSession { panel.applyState(it) }
+        DebugSession::class.java.getDeclaredField("sender").apply { isAccessible = true }.set(session, sender)
+        val sessionField = DebugPanel::class.java.getDeclaredField("session").apply { isAccessible = true }
+        sessionField.set(panel, session)
+        val view = DebugPanel::class.java.getDeclaredField("ctrlr").apply { isAccessible = true }.get(panel)
+        panel.addBkpt("main.c", 2)
+        try {
+            controller.recreate()
+            drainFileTasks()
+            assertSame(panel, field.get(controller.get()))
+            assertSame(session, sessionField.get(panel))
+            assertNull(sender.poll())
+            assertEquals(listOf("main.c:2"), panel.breakpoints)
+            assertNotSame(view, DebugPanel::class.java.getDeclaredField("ctrlr").apply { isAccessible = true }.get(panel))
+            assertSame(controller.get(), DebugPanel::class.java.getDeclaredField("mCtx").apply { isAccessible = true }.get(panel))
+            panel.onAction("next")
+            assertTrue(sender.poll()?.endsWith("-exec-next") == true)
+            panel.onAction("close")
+            assertNull(sessionField.get(panel))
+        } finally { panel.clean(); controller.pause().stop().destroy() }
+    }
+
     @Test fun visibleInspectionRefreshesWhenTheProgramStopsAgain() {
         val controller = Robolectric.buildActivity(SettingsActivity::class.java).setup()
         val panel = DebugPanel(controller.get())

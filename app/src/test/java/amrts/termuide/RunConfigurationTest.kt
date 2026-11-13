@@ -11,6 +11,33 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28])
 class RunConfigurationTest {
+    @Test fun renamedPathsUpdateReferencesWithoutChangingArgumentsOrOtherScopes() {
+        val app = Application.getInstance()
+        val scope = "/rename/project"
+        val arguments = listOf("src/old.py", "two words")
+        val original = RunConfiguration("src/old.py", arguments, "/rename/project/src", "src/.venv")
+        val unrelated = RunConfiguration("main.c", listOf("keep"))
+        RunConfiguration.save(app, scope, original)
+        RunConfiguration.save(app, "/unrelated", unrelated)
+        assertTrue(RunConfiguration.relocate(app, File("$scope/src"), File("$scope/code")))
+        assertEquals(RunConfiguration("code/old.py", arguments, "$scope/code", "code/.venv"), RunConfiguration.load(app, scope))
+        assertTrue(RunConfiguration.relocate(app, File("$scope/code/old.py"), File("$scope/code/new.py")))
+        assertEquals("code/new.py", RunConfiguration.load(app, scope).entryFile)
+        assertEquals(arguments, RunConfiguration.load(app, scope).arguments)
+        assertEquals(unrelated, RunConfiguration.load(app, "/unrelated"))
+    }
+
+    @Test fun renamedScopeKeepsRelativePathsAndRelocatesAbsoluteReferences() {
+        val app = Application.getInstance()
+        val old = "/rename/old"
+        val new = "/rename/new"
+        val original = RunConfiguration("main.java", listOf("literal"), "$old/data", "../shared-env")
+        RunConfiguration.save(app, old, original)
+        assertTrue(RunConfiguration.relocate(app, File(old), File(new)))
+        assertEquals(RunConfiguration(), RunConfiguration.load(app, old))
+        assertEquals(RunConfiguration("main.java", listOf("literal"), "$new/data", "../shared-env"), RunConfiguration.load(app, new))
+    }
+
     @Test fun configurationsPersistPerScopeAndResetToDefaults() {
         val app = Application.getInstance()
         val scope = "/run-config-test/project"
@@ -77,6 +104,9 @@ class RunConfigurationTest {
             RunConfiguration.save(app, scope, previous)
             assertFalse(RunConfiguration.save(context, scope, RunConfiguration("rejected.py")))
             assertEquals(previous, RunConfiguration.load(app, scope))
+            assertFalse(RunConfiguration.relocate(context, File(scope), File("$scope-renamed")))
+            assertEquals(previous, RunConfiguration.load(app, scope))
+            assertEquals(RunConfiguration(), RunConfiguration.load(app, "$scope-renamed"))
             assertFalse(RunConfiguration.save(context, scope, RunConfiguration()))
             assertEquals(previous, RunConfiguration.load(app, scope))
             prefs.edit().remove(scope).commit()

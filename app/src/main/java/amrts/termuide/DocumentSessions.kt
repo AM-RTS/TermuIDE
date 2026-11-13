@@ -14,7 +14,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-data class DocumentSession(val path: String, val revision: Long, val dirty: Boolean, val sourceLoaded: Boolean = true)
+data class DocumentSession(val path: String, val revision: Long, val dirty: Boolean, val sourceLoaded: Boolean = true,
+                           val sourceModified: Long? = null)
 
 class DocumentSessions(
     directory: File,
@@ -79,6 +80,19 @@ class DocumentSessions(
 
     @Synchronized
     fun isDirty(path: String): Boolean = entries[path]?.session?.dirty == true
+
+    @Synchronized
+    fun sourceModified(path: String): Long? = entries[path]?.session?.sourceModified
+
+    @Synchronized
+    fun setSourceModified(path: String, modified: Long) {
+        require(modified >= 0)
+        val entry = entries[path] ?: return
+        if (entry.session.sourceModified == modified) return
+        entry.session = entry.session.copy(sourceModified = modified)
+        publish()
+        queue(entry, 0)
+    }
 
     @Synchronized
     fun isSourceLoaded(path: String): Boolean = entries[path]?.session?.sourceLoaded ?: true

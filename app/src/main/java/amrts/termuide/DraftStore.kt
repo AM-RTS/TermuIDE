@@ -43,8 +43,10 @@ internal class DraftStore(private val directory: File) {
                     // UTF-16 code units also preserve temporarily unpaired surrogates during editing.
                     val text = if (length < 0) null else String(CharArray(length) { input.readChar() })
                     val sourceLoaded = if (version >= 2) input.readBoolean() else true
+                    val modified = if (version >= 3 && input.readBoolean()) input.readLong() else null
+                    if (modified != null && modified < 0) throw IOException("Invalid source timestamp")
                     if (input.read() != -1) throw IOException("Trailing draft data")
-                    Record(DocumentSession(path, revision, dirty, sourceLoaded), order, text)
+                    Record(DocumentSession(path, revision, dirty, sourceLoaded, modified), order, text)
                 }
             } catch (error: IOException) {
                 onError.accept(error)
@@ -69,6 +71,8 @@ internal class DraftStore(private val directory: File) {
                 output.writeInt(record.text?.length ?: -1)
                 record.text?.forEach { output.writeChar(it.code) }
                 output.writeBoolean(record.session.sourceLoaded)
+                output.writeBoolean(record.session.sourceModified != null)
+                record.session.sourceModified?.let { output.writeLong(it) }
                 output.flush()
                 file.fd.sync()
             }
@@ -97,6 +101,6 @@ internal class DraftStore(private val directory: File) {
 
     companion object {
         private const val MAGIC = 0x54434452
-        private const val VERSION = 2
+        private const val VERSION = 3
     }
 }

@@ -18,6 +18,75 @@ class WorkspaceSessionTest {
     private val recovery get() = File(temporary.root, "recovery")
     private fun documents() = DocumentSessions(recovery, { throw AssertionError(it) }, 60_000)
 
+    @Test fun activeProjectRestoresFromDiskAndClosingClearsItsPersistentIdentity() {
+        val config = temporary.newFile(Project.PROJ).apply { writeText("""{"buildCmd":"custom build","runCmd":"custom run"}""") }
+        val workspace = WorkspaceSession()
+        workspace.activateProject(Project.read(config))
+        val state = Bundle().also { workspace.save(it) }
+        Project.close()
+        val cold = WorkspaceSession()
+        val pending = cold.restoreProject()
+        drainFileTasks()
+        assertEquals("custom build", pending.join().buildCmd)
+        cold.activateProject(pending.join())
+        assertEquals(config.parent, Project.snapshot().rootPath)
+        cold.clearProject()
+        assertNull(WorkspaceSession().restoreProject().join())
+        // Saved Android state can independently restore the project after statics were lost.
+        val restored = WorkspaceSession().apply { restore(state) }
+        val saved = restored.restoreProject()
+        drainFileTasks()
+        assertEquals("custom run", saved.join().runCmd)
+        restored.clearProject()
+    }
+
+    @Test fun missingProjectDoesNotDiscardRecoveredDocuments() {
+        val config = temporary.newFile(Project.PROJ).apply { writeText("{}") }
+        val workspace = WorkspaceSession()
+        workspace.activateProject(Project.read(config))
+        Project.close()
+        assertTrue(config.delete())
+        documents().use { owner ->
+            val path = temporary.newFile("draft.c").path
+            owner.open(path) { "unsaved" }; owner.changed(path)
+            val pending = WorkspaceSession().restoreProject()
+            drainFileTasks()
+            assertTrue(pending.isCompletedExceptionally)
+            assertEquals("unsaved", owner.recoveryText(path))
+        }
+        workspace.clearProject()
+    }
+
+    @Test fun coldActivityRestoresProjectBeforeEnablingExecutionAndKeepsItsDraft() {
+        Application.completion = "n"
+        val app = Application.getInstance()
+        val source = temporary.newFile("main.c").apply { writeText("disk") }
+        val config = temporary.newFile(Project.PROJ).apply { writeText("""{"buildCmd":"custom compiler"}""") }
+        val workspace = WorkspaceSession()
+        workspace.activateProject(Project.read(config))
+        Project.close()
+        app.documents.open(source.path) { "unsaved draft" }
+        app.documents.changed(source.path)
+        val controller = org.robolectric.Robolectric.buildActivity(MainActivity::class.java)
+        controller.get().getPreferences(0).edit().putString(MainActivity.PWD, temporary.root.path)
+            .putBoolean(MainActivity.INITAPP, false).putBoolean(MainActivity.TESTAPP, false).commit()
+        try {
+            controller.create().start().postCreate(null).resume().visible()
+            assertFalse(controller.get().isRuntimeHostReady)
+            assertFalse(controller.get().canDebug())
+            drainFileTasks()
+            assertTrue(controller.get().isRuntimeHostReady)
+            assertEquals(config.parent, Project.snapshot().rootPath)
+            assertEquals("custom compiler", Project.snapshot().buildCmd)
+            assertEquals("unsaved draft", controller.get().editor.text.toString())
+            assertTrue(app.documents.isDirty(source.path))
+        } finally {
+            controller.pause().stop().destroy()
+            app.documents.discard(source.path)
+            workspace.clearProject()
+        }
+    }
+
     @Test fun removingTabsKeepsSelectionOnTheSameDocumentOrItsNeighbour() {
         val first = temporary.newFile("first.c").path
         val second = temporary.newFile("second.py").path

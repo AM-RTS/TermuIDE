@@ -161,3 +161,9 @@ JDT's failed check retained a stale sibling method during the five-second retry 
 Browser rename/delete uses the existing Save / Discard / Cancel flow before closing affected tabs. Renamed tabs reopen at their new paths; failed operations reopen surviving original paths. The active project must be closed before changing its root folder. Local deletion does not follow symbolic links, and rename rejects existing destinations.
 
 Lifecycle recovery requests an asynchronous checkpoint on stop. Explicit source saves still wait for recovery persistence before publishing a source file. The LSP sender permits at most 64 queued messages and 8 MiB of queued payloads; overload closes the session rather than dropping edits.
+
+Durable drafts retain the source modification timestamp used by auto-save. An external modification blocks auto-save until the user reloads or explicitly saves. Older drafts without that timestamp require an explicit save or reload before auto-save resumes.
+
+`WorkspaceSession` retains project/file transitions and the debugger owner across Activity recreation. The last active project is read from disk before execution and language-server startup are enabled after process recovery; a failed restore leaves documents available. Closing the project clears its saved identity. Debugger views detach from the old Activity while the GDB session survives recreation; explicit close still ends it.
+
+Successful browser renames relocate saved run-configuration scopes and entry, working-directory and Python-environment paths. Literal program arguments are preserved. A settings-write failure reports that the renamed file's run configuration needs review.
