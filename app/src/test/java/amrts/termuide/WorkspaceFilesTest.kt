@@ -65,6 +65,72 @@ class WorkspaceFilesTest {
         return controller.get().fragmentManager.findFragmentByTag(file.path) as EditFragment
     }
 
+    @Test fun renamingADirtyTabSupportsCancelAndSaveAcrossRecreation() {
+        val source = directory.resolve("old.c").apply { writeText("int main() {}") }
+        val fragment = open(source)
+        fragment.view!!.paste("// saved before rename\n")
+        val expected = fragment.view!!.text.toString()
+        controller.get().renameFile(source.path, "new.c")
+        assertEquals(listOf(source.path), controller.get().pendingClosePaths)
+        controller.get().cancelCloseDocuments()
+        assertTrue(source.exists())
+        assertEquals(expected, app.documents.recoveryText(source.path))
+        controller.get().renameFile(source.path, "new.c")
+        controller.recreate()
+        controller.get().resolveCloseDocuments(true)
+        drainSourceSaves()
+        drainFileTasks()
+        val destination = directory.resolve("new.c")
+        assertFalse(source.exists())
+        assertEquals(expected, destination.readText())
+        assertEquals(listOf(destination.path), controller.get().openFilePaths)
+        assertFalse(app.documents.state.value.any { it.path == source.path })
+    }
+
+    @Test fun deletingAnOpenFileClosesOnlyItsTabAfterDiscardApproval() {
+        val folder = directory.resolve("remove-folder").apply { mkdir() }
+        val source = folder.resolve("main.c").apply { writeText("original") }
+        val retained = directory.resolve("keep.py").apply { writeText("print(1)") }
+        open(source).view!!.paste("// discard\n")
+        val kept = open(retained)
+        kept.view!!.paste("# durable\n")
+        val expected = kept.view!!.text.toString()
+        controller.get().deleteBrowserEntry(source.path)
+        assertEquals(listOf(source.path), controller.get().pendingClosePaths)
+        // This test class shadows deletion to hold the worker across Activity recreation.
+        release.countDown()
+        controller.get().resolveCloseDocuments(false)
+        drainFileTasks()
+        assertEquals(listOf(retained.path), controller.get().openFilePaths)
+        app.documents.flush()
+        assertNull(app.documents.recoveryText(source.path))
+        assertEquals(expected, app.documents.recoveryText(retained.path))
+        assertFalse(source.exists())
+    }
+
+    @Test fun renamingAFolderReopensItsDescendantTabsAtTheNewPaths() {
+        val folder = directory.resolve("folder").apply { mkdir() }
+        val source = folder.resolve("main.c").apply { writeText("source") }
+        open(source)
+        controller.get().renameFile(folder.path, "renamed-folder")
+        drainFileTasks()
+        val destination = directory.resolve("renamed-folder/main.c")
+        assertEquals(listOf(destination.path), controller.get().openFilePaths)
+        assertEquals("source", destination.readText())
+        assertFalse(source.exists())
+    }
+
+    @Test fun failedRenameReopensItsTabAndPreservesTheExistingDestination() {
+        val source = directory.resolve("old.c").apply { writeText("source") }
+        val destination = directory.resolve("existing.c").apply { writeText("destination") }
+        open(source)
+        controller.get().renameFile(source.path, destination.name)
+        drainFileTasks()
+        assertEquals(listOf(source.path), controller.get().openFilePaths)
+        assertEquals("source", source.readText())
+        assertEquals("destination", destination.readText())
+    }
+
     @Test fun deletionFinishesOnTheReplacementHostAndKeepsDirtyRecovery() {
         val source = directory.resolve("draft.txt").apply { writeText("original") }
         val deleting = directory.resolve("remove.txt").apply { writeText("remove") }

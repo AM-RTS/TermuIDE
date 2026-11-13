@@ -9,7 +9,6 @@ import java.net.*;
 import java.nio.charset.*;
 import java.util.*;
 import java.util.concurrent.*;
-import java.util.stream.*;
 import org.json.*;
 
 import cn.rbc.codeeditor.util.Range;
@@ -715,14 +714,31 @@ public final class Lsp implements Runnable {
 	}
 
 	class Sender extends LinkedBlockingQueue<byte[]> implements Runnable {
+        Sender() { super(64); }
+        private static final int MAX_PENDING_BYTES = 8 * 1024 * 1024;
         volatile boolean stopped;
         Socket socket;
 		public final void send(String cmd, Object hm, int id) {
+            if (stopped || this != mSndr) { requests.remove(id); return; }
             if (!"initialize".equals(cmd) && !"initialized".equals(cmd) && (!ready || isEnded())) {
                 requests.remove(id);
                 return;
             }
-			offer(wrap(cmd, hm, id).getBytes(StandardCharsets.UTF_8));
+            byte[] message = wrap(cmd, hm, id).getBytes(StandardCharsets.UTF_8);
+            long bytes = message.length;
+            for (byte[] queued : this) bytes += queued.length;
+            if (bytes > MAX_PENDING_BYTES || !offer(message)) {
+                String detail = Application.getInstance().getString(R.string.lsp_output_overloaded);
+                // Dropping a document update would desynchronize the server; fail the session instead.
+                try { if (socket != null) socket.close(); } catch (IOException ignored) { }
+                initializationFailed(detail);
+                processError = detail;
+                if (mRead != null) {
+                    Message failure = Message.obtain();
+                    failure.what = ERROR; failure.obj = incoming(null);
+                    mRead.sendMessage(failure);
+                }
+            }
 		}
 
 		public synchronized void run() {
@@ -747,12 +763,5 @@ public final class Lsp implements Runnable {
             }
 		}
 
-        public Stream<byte[]> stream() {
-            return null;
-        }
-
-        public Stream<byte[]> parallelStream() {
-            return null;
-        }
 	}
 }

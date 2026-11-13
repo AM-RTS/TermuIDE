@@ -1,5 +1,7 @@
 <resources>
     <string name="run_here">Run here</string>
+    <string name="lsp_output_overloaded">Language server could not keep up with editor changes. Restart it from Language tools.</string>
+    <string name="file_operation_close_project">Close the active project before renaming or deleting its folder.</string>
     <string name="run_in_termux">Run in Termux</string>
     <string name="run_console">Run console</string>
     <string name="console_close">Close console and stop program</string>

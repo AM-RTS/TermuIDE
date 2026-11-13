@@ -174,7 +174,7 @@ public class TextEditor extends FrameLayout implements Document.TextFieldMetrics
     public CodeEditor getSoraEditor() { return sora; }
     public Language getLanguage() { return language; }
     Set<String> getCompletionWords() { return completionWords; }
-    public void setLanguage(Language value) { if (language != value) completionWords = Collections.emptySet(); language = value; Tokenizer.setLanguage(value); scheduleSyntax(); }
+    public void setLanguage(Language value) { if (language != value) completionWords = Collections.emptySet(); language = value; scheduleSyntax(); }
     public void setDocument(Document value) {
         document = value;
         document.setMetrics(this);

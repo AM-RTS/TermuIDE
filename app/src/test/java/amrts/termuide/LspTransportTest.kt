@@ -14,6 +14,21 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28])
 class LspTransportTest {
+    @Test fun stalledServerFailsOnMessageOrByteBudgetInsteadOfDroppingEdits() {
+        for (large in listOf(false, true)) {
+            val lsp = Lsp()
+            val sender = lsp.connectedSender()
+            val socket = Socket()
+            sender.socket = socket
+            if (large) sender.send("textDocument/didChange", "x".repeat(8 * 1024 * 1024), -1)
+            else repeat(65) { sender.send("textDocument/didChange", "{}", -1) }
+            assertTrue(lsp.hasFailed())
+            assertEquals(LanguageServers.State.FAILED, lsp.state())
+            assertTrue(socket.isClosed)
+            assertTrue(sender.size <= 3)
+            assertTrue(lsp.detail().contains("Restart"))
+        }
+    }
     @Test fun framingUsesUtf8ByteLengthsAndKeepsConsecutiveMessagesSeparate() {
         val payload = "{\"text\":\"🧪é\"}"
         val bytes = payload.toByteArray(Charsets.UTF_8)

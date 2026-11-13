@@ -5,6 +5,8 @@ import android.content.*;
 import android.database.*;
 import android.provider.*;
 import java.util.*;
+import java.nio.file.*;
+import java.nio.file.attribute.BasicFileAttributes;
 
 import static android.provider.DocumentsContract.Document.*;
 
@@ -263,11 +265,20 @@ public class FileHelper {
 	}
 
 	private static boolean removeCommonFiles(File dir) {
-		File[] fl = dir.listFiles();
-		if (fl != null)
-			for (File f:fl)
-				removeCommonFiles(f);
-		return dir.delete();
+        try {
+            Files.walkFileTree(dir.toPath(), new SimpleFileVisitor<Path>() {
+                @Override public FileVisitResult visitFile(Path file, BasicFileAttributes attributes) throws IOException {
+                    Files.delete(file);
+                    return FileVisitResult.CONTINUE;
+                }
+                @Override public FileVisitResult postVisitDirectory(Path directory, IOException error) throws IOException {
+                    if (error != null) throw error;
+                    Files.delete(directory);
+                    return FileVisitResult.CONTINUE;
+                }
+            });
+            return true;
+        } catch (IOException | SecurityException error) { return false; }
 	}
 
 	private static boolean removeTermuxFiles(ContentResolver crv, Uri tree, String dir) throws FileNotFoundException {
@@ -301,13 +312,17 @@ public class FileHelper {
 	}
 
 	public static boolean rename(File f, String n) {
+        if (!validFileName(n)) return false;
+        File destination = new File(f.getParentFile(), n);
 		if (!isTermuxFile(f)) {
-			return f.renameTo(new File(f.getParentFile(), n));
+            try { Files.move(f.toPath(), destination.toPath()); return true; }
+            catch (IOException | SecurityException error) { return false; }
 		}
 		Application app = Application.getInstance();
 		ContentResolver crv = app.getContentResolver();
 		Uri file = DocumentsContract.buildDocumentUriUsingTree(app.treeUri, f.getAbsolutePath());
 		try {
+            if (!f.equals(destination) && (isFile(destination) || isDirectory(destination))) return false;
 			return null != DocumentsContract.renameDocument(crv, file, n);
 		} catch (FileNotFoundException fne) {
 			return false;
@@ -315,4 +330,9 @@ public class FileHelper {
 			return false;
 		}
 	}
+
+    static boolean validFileName(String name) {
+        return name != null && !name.isEmpty() && !name.equals(".") && !name.equals("..")
+            && name.indexOf('/') < 0 && name.indexOf('\u0000') < 0;
+    }
 }

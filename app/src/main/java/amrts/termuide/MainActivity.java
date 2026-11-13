@@ -22,7 +22,7 @@ import java.util.concurrent.CompletionException;
 
 import static android.Manifest.permission.*;
 
-public class MainActivity extends androidx.activity.ComponentActivity implements HeaderAdapter.OnChangedListener, Utils.ComposeDialogHost {
+public class MainActivity extends androidx.activity.ComponentActivity implements Utils.ComposeDialogHost {
 
 	public final static int SETTING = 0, ACCESS_FILE = 1, SHOW_FLOATING = 2, REQ_FOLDER = 3;
 	public final static String PWD = "p", FILES = "o", TESTAPP = "t", INITAPP = "i";
@@ -79,7 +79,6 @@ public class MainActivity extends androidx.activity.ComponentActivity implements
                 | View.SYSTEM_UI_FLAG_FULLSCREEN);
         }
         super.onCreate(savedInstanceState);
-		workspace.setOnChangedListener(this);
         workspace.setFileListener(this::finishFileOperation);
 		adp = new FileAdapter(pwd);
         adp.setOnChanged(this::notifyUiChanged);
@@ -685,6 +684,8 @@ public class MainActivity extends androidx.activity.ComponentActivity implements
             if (close.kind == WorkspaceSession.CLOSE_FILE) closeFile(workspace.indexOf(close.target));
             else if (close.kind == WorkspaceSession.CLOSE_PROJECT) closeProject();
             else if (close.kind == WorkspaceSession.OPEN_PROJECT) { workspace.pendingProjectPath = close.target; confirmOpenProject(); }
+            else if (close.kind == WorkspaceSession.RENAME_FILE) renameFile(close.target, workspace.pendingFileName);
+            else if (close.kind == WorkspaceSession.DELETE_FILE) deleteBrowserEntry(close.target);
         } finally { workspace.approvedDiscards = Collections.emptySet(); }
     }
 
@@ -773,6 +774,11 @@ public class MainActivity extends androidx.activity.ComponentActivity implements
         workspace.fileOperation = null;
         try {
             WorkspaceSession.FileResult result = pending.join();
+            if (result.reopenPaths != null) {
+                for (String path : result.reopenPaths) openFile(new File(path));
+                getFragmentManager().executePendingTransactions();
+                if (result.reopenSelected != null) selectItem(workspace.indexOf(result.reopenSelected));
+            }
             // Partial deletion can still change Java's index.
             if (result.changed.length > 0) Application.getInstance().languageServers.javaWorkspaceChanged(this, result.changed);
             if (result.created != null) {
@@ -802,24 +808,49 @@ public class MainActivity extends androidx.activity.ComponentActivity implements
     }
 
     public void renameFile(String from, String to) {
-        if (fileOperationBlocked()) return;
-        File source = new File(from).isAbsolute() ? new File(from) : new File(pwd, from);
-        workspace.startFileOperation(() -> {
-            boolean renamed = !to.isEmpty() && FileHelper.rename(source, to);
-            return new WorkspaceSession.FileResult(renamed ? 0 : R.string.rename_failed, null, null,
-                renamed ? new File[]{source, new File(source.getParentFile(), to)} : new File[0]);
-        });
-        notifyUiChanged();
+        if (!FileHelper.validFileName(to)) { toast(getString(R.string.rename_failed)); return; }
+        changeBrowserEntry(from, to);
     }
 
     public void deleteBrowserEntry(String name) {
+        changeBrowserEntry(name, null);
+    }
+
+    private void changeBrowserEntry(String name, String destinationName) {
         if (fileOperationBlocked()) return;
         File target = new File(name).isAbsolute() ? new File(name) : new File(pwd, name);
+        java.nio.file.Path targetPath = target.toPath().normalize();
+        String projectRoot = Project.snapshot().rootPath;
+        if (projectRoot != null && new File(projectRoot).toPath().normalize().startsWith(targetPath)) {
+            toast(getString(R.string.file_operation_close_project)); return;
+        }
+        List<String> affected = new ArrayList<>();
+        for (String path : workspace)
+            if (new File(path).toPath().normalize().startsWith(targetPath)) affected.add(path);
+        workspace.pendingFileName = destinationName;
+        if (requestCloseIfDirty(affected, destinationName == null ? WorkspaceSession.DELETE_FILE : WorkspaceSession.RENAME_FILE, target.getAbsolutePath())) return;
+        String selected = getSelectedFilePath();
+        for (String path : affected) closeFile(workspace.indexOf(path));
+        getFragmentManager().executePendingTransactions();
+        workspace.pendingFileName = null;
         workspace.startFileOperation(() -> {
             boolean removed;
-            try { removed = FileHelper.removeFiles(target); }
-            catch (RuntimeException error) { Log.e("Files", "Deletion failed", error); removed = false; }
-            return new WorkspaceSession.FileResult(removed ? R.string.deleted : R.string.open_failed, null, null, target);
+            File destination = destinationName == null ? null : new File(target.getParentFile(), destinationName);
+            try { removed = destination == null ? FileHelper.removeFiles(target) : FileHelper.rename(target, destinationName); }
+            catch (RuntimeException error) { Log.e("Files", "File operation failed", error); removed = false; }
+            WorkspaceSession.FileResult result = new WorkspaceSession.FileResult(
+                destination == null ? (removed ? R.string.deleted : R.string.open_failed) : (removed ? 0 : R.string.rename_failed),
+                null, null, removed && destination != null ? new File[]{target, destination} : new File[]{target});
+            result.reopenPaths = new ArrayList<>();
+            for (String path : affected) {
+                String reopening = removed && destination != null
+                    ? destination.toPath().resolve(targetPath.relativize(new File(path).toPath().normalize())).toString() : path;
+                if ((destination != null || !removed) && FileHelper.isFile(new File(reopening))) {
+                    result.reopenPaths.add(reopening);
+                    if (path.equals(selected)) result.reopenSelected = reopening;
+                }
+            }
+            return result;
         });
         notifyUiChanged();
     }
@@ -962,12 +993,10 @@ public class MainActivity extends androidx.activity.ComponentActivity implements
 
     @Override
     protected void onStop() {
-        try {
-            Application.getInstance().getDocuments().flush();
-        } catch (IOException error) {
-            Log.e("Recovery", "Unable to flush unsaved documents", error);
-        }
-        getPreferences(MODE_PRIVATE).edit().putString(PWD, pwd.getPath()).commit();
+        Application.getInstance().getDocuments().checkpointAsync().whenComplete((ignored, error) -> {
+            if (error != null) Log.e("Recovery", "Unable to flush unsaved documents", error);
+        });
+        getPreferences(MODE_PRIVATE).edit().putString(PWD, pwd.getPath()).apply();
         super.onStop();
     }
 
@@ -975,7 +1004,6 @@ public class MainActivity extends androidx.activity.ComponentActivity implements
     protected void onDestroy() {
         runtimeHostReady = false;
         if (isFinishing()) Application.getInstance().getRuns().cancelPreparation();
-        workspace.clearOnChangedListener(this);
         workspace.setFileListener(null);
         panel.clean();
         panel = null;
@@ -1003,23 +1031,6 @@ public class MainActivity extends androidx.activity.ComponentActivity implements
 
     public TextEditor newEditor() {
         return new TextEditor(this);
-    }
-
-    @Override
-    public void onAdd(String item) {
-		notifyUiChanged();
-    }
-
-    @Override
-    public void onRemove(String item) {
-		notifyUiChanged();
-    }
-
-    @Override
-    public void onClear() {
-		lastFrag = null;
-		codeEditor = null;
-		notifyUiChanged();
     }
 
     @Override

@@ -4,6 +4,7 @@ import java.io.Closeable
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.ExecutionException
+import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.ScheduledThreadPoolExecutor
 import java.util.concurrent.TimeUnit
@@ -168,8 +169,8 @@ class DocumentSessions(
         return source?.get()
     }
 
-    @Throws(IOException::class)
-    fun flush() {
+    fun checkpointAsync(): CompletableFuture<Void> {
+        val result = CompletableFuture<Void>()
         synchronized(this) {
             entries.values.filter {
                 it.source != null || it.pending?.isDone == false || failures.containsKey(it.session.path)
@@ -177,16 +178,24 @@ class DocumentSessions(
             failures.keys.filter { it !in entries }.forEach { path ->
                 writer.execute { attempt(path) { store.remove(path) } }
             }
+            writer.execute {
+                val failure = synchronized(this) { failures.values.firstOrNull() }
+                if (failure == null) result.complete(null) else result.completeExceptionally(failure)
+            }
         }
+        return result
+    }
+
+    @Throws(IOException::class)
+    fun flush() {
         try {
-            writer.submit {}.get()
+            checkpointAsync().get()
         } catch (error: InterruptedException) {
             Thread.currentThread().interrupt()
             throw IOException("Interrupted while saving recovery data", error)
         } catch (error: ExecutionException) {
             throw IOException("Cannot save recovery data", error.cause)
         }
-        synchronized(this) { failures.values.firstOrNull()?.let { throw it } }
     }
 
     @Throws(IOException::class)

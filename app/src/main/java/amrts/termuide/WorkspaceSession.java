@@ -6,10 +6,11 @@ import java.util.*;
 import java.util.concurrent.CompletableFuture;
 
 /** Retained workspace coordination; DocumentSessions still owns document revisions and recovery. */
-final class WorkspaceSession extends HeaderAdapter {
-    static final int CLOSE_FILE = 1, CLOSE_PROJECT = 2, OPEN_PROJECT = 3;
+final class WorkspaceSession extends ArrayList<String> {
+    static final int CLOSE_FILE = 1, CLOSE_PROJECT = 2, OPEN_PROJECT = 3, RENAME_FILE = 4, DELETE_FILE = 5;
     private String selectedPath;
     String pendingProjectPath;
+    String pendingFileName;
     CloseRequest pendingClose;
     Set<String> approvedDiscards = Collections.emptySet();
     boolean savingClose;
@@ -29,6 +30,8 @@ final class WorkspaceSession extends HeaderAdapter {
         Set<String> openingDiscards;
         String retainedPath;
         File originDirectory;
+        List<String> reopenPaths;
+        String reopenSelected;
         FileResult(int message, Project.Config previous, Project.Config created, File... changed) {
             this.message = message; this.previous = previous; this.created = created; this.changed = changed;
         }
@@ -70,6 +73,9 @@ final class WorkspaceSession extends HeaderAdapter {
         }
     }
 
+    int getCount() { return size(); }
+    String getItem(int index) { return get(index); }
+
     String getSelectedPath() { return contains(selectedPath) ? selectedPath : null; }
     int getSelectedIndex() { return indexOf(selectedPath); }
     boolean select(int index) {
@@ -109,7 +115,7 @@ final class WorkspaceSession extends HeaderAdapter {
     }
 
     void cancelClose() {
-        if (!savingClose) pendingClose = null;
+        if (!savingClose) { pendingClose = null; pendingFileName = null; }
     }
 
     CloseRequest takeClose(boolean save) {
@@ -154,6 +160,7 @@ final class WorkspaceSession extends HeaderAdapter {
         if (selected != null && contains(selected)) selectedPath = selected;
         else if (!select(state.getInt("selected", 0))) select(0);
         pendingProjectPath = state.getString("pendingProject");
+        pendingFileName = state.getString("pendingFileName");
         List<String> closing = state.getStringArrayList("pendingClosePaths");
         if (closing != null && !closing.isEmpty())
             pendingClose = new CloseRequest(closing, state.getInt("pendingCloseKind"), state.getString("pendingCloseTarget"));
@@ -164,6 +171,7 @@ final class WorkspaceSession extends HeaderAdapter {
         state.putString("selectedPath", getSelectedPath());
         state.putInt("selected", getSelectedIndex());
         state.putString("pendingProject", pendingProjectPath);
+        state.putString("pendingFileName", pendingFileName);
         state.putStringArrayList("pendingClosePaths", new ArrayList<>(pendingClosePaths()));
         state.putInt("pendingCloseKind", pendingClose == null ? 0 : pendingClose.kind);
         state.putString("pendingCloseTarget", pendingClose == null ? null : pendingClose.target);

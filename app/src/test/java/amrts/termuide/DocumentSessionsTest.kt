@@ -15,6 +15,28 @@ class DocumentSessionsTest {
     private val directory get() = File(temporary.root, "sessions")
     private fun sessions(delay: Long = 60_000) = DocumentSessions(directory, { }, delay)
 
+    @Test fun asynchronousCheckpointReturnsWhileSnapshotIsBlockedAndPersistsBeforeCompleting() {
+        val path = temporary.newFile("background.txt").path
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        sessions().use { owner ->
+            owner.open(path) {
+                entered.countDown()
+                check(release.await(5, TimeUnit.SECONDS))
+                "durable background draft"
+            }
+            owner.changed(path)
+            val completion = owner.checkpointAsync()
+            try {
+                assertTrue(entered.await(5, TimeUnit.SECONDS))
+                assertFalse(completion.isDone)
+            } finally { release.countDown() }
+            completion.get(5, TimeUnit.SECONDS)
+            assertEquals("durable background draft", DraftStore(directory).readAll { throw AssertionError(it) }.single().text)
+            assertEquals("", File(path).readText())
+        }
+    }
+
     @Test fun restartRestoresMultipleDraftsWithoutChangingOriginals() {
         val first = temporary.newFile("first.txt").apply { writeText("disk one") }
         val second = temporary.newFile("second.cpp").apply { writeText("disk two") }
