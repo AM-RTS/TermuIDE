@@ -70,10 +70,18 @@ class WorkspaceSessionTest {
         val controller = org.robolectric.Robolectric.buildActivity(MainActivity::class.java)
         controller.get().getPreferences(0).edit().putString(MainActivity.PWD, temporary.root.path)
             .putBoolean(MainActivity.INITAPP, false).putBoolean(MainActivity.TESTAPP, false).commit()
+        val entered = java.util.concurrent.CountDownLatch(1)
+        val release = java.util.concurrent.CountDownLatch(1)
+        app.fileTask {
+            entered.countDown()
+            check(release.await(10, java.util.concurrent.TimeUnit.SECONDS))
+        }
         try {
+            assertTrue(entered.await(10, java.util.concurrent.TimeUnit.SECONDS))
             controller.create().start().postCreate(null).resume().visible()
             assertFalse(controller.get().isRuntimeHostReady)
             assertFalse(controller.get().canDebug())
+            release.countDown()
             drainFileTasks()
             assertTrue(controller.get().isRuntimeHostReady)
             assertEquals(config.parent, Project.snapshot().rootPath)
@@ -81,6 +89,8 @@ class WorkspaceSessionTest {
             assertEquals("unsaved draft", controller.get().editor.text.toString())
             assertTrue(app.documents.isDirty(source.path))
         } finally {
+            release.countDown()
+            drainFileTasks()
             controller.pause().stop().destroy()
             app.documents.discard(source.path)
             workspace.clearProject()
